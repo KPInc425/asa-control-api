@@ -2,24 +2,42 @@ services:
   ark-api:
     build: .
     ports:
-      - "4000:3000"
+      - "${PORT:-4000}:${PORT:-4000}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./logs:/app/logs
-      - ./asa-configs:/opt/asa/configs
+      - ./asa-server:${ASA_SERVER_ROOT_PATH:-/opt/asa/asa-server}
     environment:
-      - NODE_ENV=production
-      - DOCKER_SOCKET_PATH=/var/run/docker.sock
-      - ASA_CONFIG_PATH=/opt/asa/configs
-      - ASA_UPDATE_LOCK_PATH=/opt/asa/.update.lock
+      - NODE_ENV=${NODE_ENV:-production}
+      - DOCKER_SOCKET_PATH=${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
+      - ASA_SERVER_ROOT_PATH=${ASA_SERVER_ROOT_PATH:-/opt/asa/asa-server}
+      - ASA_CONFIG_SUB_PATH=${ASA_CONFIG_SUB_PATH:-Config/WindowsServer}
+      - ASA_UPDATE_LOCK_PATH=${ASA_UPDATE_LOCK_PATH:-/opt/asa/.update.lock}
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://ark.ilgaming.xyz}
+      - PORT=${PORT:-4000}
+      - JWT_SECRET=${JWT_SECRET:-fallback-secret-change-in-production}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      - RCON_DEFAULT_PORT=${RCON_DEFAULT_PORT:-32330}
+      - RCON_PASSWORD=${RCON_PASSWORD:-admin}
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-100}
+      - RATE_LIMIT_TIME_WINDOW=${RATE_LIMIT_TIME_WINDOW:-900000}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FILE_PATH=${LOG_FILE_PATH:-./logs/app.log}
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
     restart: unless-stopped
     networks:
       - monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-4000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -37,15 +55,13 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3001:3000"
+      - "${GRAFANA_PORT:-3001}:3000"
     volumes:
       - grafana_storage:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=${GRAFANA_ALLOW_SIGNUP:-false}
+      - GF_INSTALL_PLUGINS=${GRAFANA_PLUGINS:-grafana-piechart-panel,grafana-worldmap-panel}
     restart: unless-stopped
     networks:
       - monitoring
@@ -55,7 +71,7 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     ports:
-      - "8080:8080"
+      - "${CADVISOR_PORT:-8080}:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro

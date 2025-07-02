@@ -27,6 +27,66 @@ class ConfigService {
   }
 
   /**
+   * Create default config files if they don't exist
+   */
+  async ensureDefaultConfigs(serverName) {
+    const configDirPath = this.getConfigDirPath(serverName);
+    
+    // Create directory if it doesn't exist
+    if (!existsSync(configDirPath)) {
+      await this.createDirectory(configDirPath);
+    }
+
+    // Default Game.ini content
+    const defaultGameIni = `[/script/shootergame.shootergamemode]
+MaxPlayers=70
+ServerPassword=
+ServerAdminPassword=admin123
+AllowThirdPersonPlayer=True
+AlwaysNotifyPlayerLeft=True
+AlwaysNotifyPlayerJoined=True
+ServerCrosshair=True
+ServerForceNoHUD=False
+ShowMapPlayerLocation=True
+EnablePvPGamma=False
+AllowFlyerCarryPvE=True
+`;
+
+    // Default GameUserSettings.ini content
+    const defaultGameUserSettings = `[ServerSettings]
+ServerPassword=
+ServerAdminPassword=admin123
+MaxPlayers=70
+ReservedPlayerSlots=0
+AllowThirdPersonPlayer=True
+AlwaysNotifyPlayerLeft=True
+AlwaysNotifyPlayerJoined=True
+ServerCrosshair=True
+ServerForceNoHUD=False
+ShowMapPlayerLocation=True
+EnablePvPGamma=False
+AllowFlyerCarryPvE=True
+`;
+
+    const configsToCreate = [
+      { fileName: 'Game.ini', content: defaultGameIni },
+      { fileName: 'GameUserSettings.ini', content: defaultGameUserSettings }
+    ];
+
+    for (const config of configsToCreate) {
+      const filePath = join(configDirPath, config.fileName);
+      if (!existsSync(filePath)) {
+        try {
+          await writeFile(filePath, config.content, 'utf8');
+          logger.info(`Created default ${config.fileName} for server ${serverName}: ${filePath}`);
+        } catch (error) {
+          logger.error(`Failed to create default ${config.fileName} for server ${serverName}:`, error);
+        }
+      }
+    }
+  }
+
+  /**
    * List all available ASA servers
    */
   async listServers() {
@@ -68,8 +128,25 @@ class ConfigService {
     try {
       const filePath = this.getConfigFilePath(serverName, fileName);
       
-      // Check if file exists
-      await access(filePath);
+      // Check if file exists, create default if it doesn't
+      try {
+        await access(filePath);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          logger.info(`Config file not found, creating default: ${filePath}`);
+          await this.ensureDefaultConfigs(serverName);
+          
+          // Try to access the file again after creation
+          try {
+            await access(filePath);
+          } catch (secondError) {
+            logger.error(`Failed to create or access config file: ${filePath}`, secondError);
+            throw new Error(`Config file not found and could not be created: ${fileName} for server ${serverName}`);
+          }
+        } else {
+          throw error;
+        }
+      }
       
       const content = await readFile(filePath, 'utf8');
       logger.info(`Config file read: ${filePath}`);
@@ -217,20 +294,16 @@ class ConfigService {
       
       const configDirPath = this.getConfigDirPath(serverName);
       
-      // Check if config directory exists
+      // Check if config directory exists, create default configs if not
       try {
         await access(configDirPath);
       } catch (error) {
         if (error.code === 'ENOENT') {
-          return {
-            success: true,
-            files: [],
-            serverName,
-            path: configDirPath,
-            message: 'Config directory not found for this server'
-          };
+          logger.info(`Config directory not found, creating default configs for server ${serverName}`);
+          await this.ensureDefaultConfigs(serverName);
+        } else {
+          throw error;
         }
-        throw error;
       }
       
       const files = await readdir(configDirPath);
@@ -273,7 +346,7 @@ class ConfigService {
       // Check if server directory exists
       await access(serverPath);
       
-      // Check if config directory exists
+      // Check if config directory exists, create default configs if not
       let configExists = false;
       let configFiles = [];
       
@@ -285,7 +358,12 @@ class ConfigService {
           file.endsWith('.ini') || file.endsWith('.cfg') || file.endsWith('.json')
         );
       } catch (error) {
-        if (error.code !== 'ENOENT') {
+        if (error.code === 'ENOENT') {
+          logger.info(`Config directory not found, creating default configs for server ${serverName}`);
+          await this.ensureDefaultConfigs(serverName);
+          configExists = true;
+          configFiles = ['Game.ini', 'GameUserSettings.ini'];
+        } else {
           throw error;
         }
       }
