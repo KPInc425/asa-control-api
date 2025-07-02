@@ -99,8 +99,7 @@ class AuthService {
       username: user.username,
       role: user.role,
       permissions: user.permissions,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
+      iat: Math.floor(Date.now() / 1000)
     };
 
     return jwt.sign(payload, config.jwt.secret, {
