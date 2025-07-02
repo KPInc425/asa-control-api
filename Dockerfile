@@ -9,10 +9,10 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # Copy package files
-COPY package.json yarn.lock ./
+COPY package.json package-lock.json* ./
 
 # Install dependencies
-RUN yarn install --frozen-lockfile --production
+RUN npm ci --only=production
 
 # Copy application code
 COPY . .
