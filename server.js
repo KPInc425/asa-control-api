@@ -30,7 +30,7 @@ const fastify = Fastify({
 
 // Register plugins
 await fastify.register(cors, {
-  origin: config.cors.origin,
+  origin: true, // Allow all origins for debugging
   credentials: true
 });
 

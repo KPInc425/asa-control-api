@@ -396,3 +396,4 @@ export default async function configRoutes(fastify, options) {
     }
   });
 } 
+ 
