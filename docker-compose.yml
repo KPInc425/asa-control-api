@@ -1,5 +1,6 @@
 services:
   ark-api:
+    container_name: asa-control-api
     build: .
     ports:
       - "${PORT:-4000}:${PORT:-4000}"
@@ -35,6 +36,7 @@ services:
       start_period: 40s
 
   prometheus:
+    container_name: asa-control-prometheus
     image: prom/prometheus:latest
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
@@ -51,8 +53,15 @@ services:
     restart: unless-stopped
     networks:
       - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   grafana:
+    container_name: asa-control-grafana
     image: grafana/grafana:latest
     ports:
       - "${GRAFANA_PORT:-3001}:3000"
@@ -62,13 +71,22 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=${GRAFANA_ALLOW_SIGNUP:-false}
       - GF_INSTALL_PLUGINS=${GRAFANA_PLUGINS:-grafana-piechart-panel,grafana-worldmap-panel}
+      - GF_SERVER_ROOT_URL=http://localhost:${GRAFANA_PORT:-3001}
     restart: unless-stopped
     networks:
       - monitoring
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   cadvisor:
+    container_name: asa-control-cadvisor
     image: gcr.io/cadvisor/cadvisor:latest
     ports:
       - "${CADVISOR_PORT:-8080}:8080"
@@ -82,6 +100,12 @@ services:
     restart: unless-stopped
     networks:
       - monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   prometheus_data:
@@ -90,3 +114,4 @@ volumes:
 networks:
   monitoring:
     driver: bridge 
+ 
