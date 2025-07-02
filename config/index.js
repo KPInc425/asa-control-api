@@ -25,8 +25,14 @@ const config = {
   },
   
   asa: {
-    configPath: process.env.ASA_CONFIG_PATH || '/opt/asa/configs',
-    updateLockPath: process.env.ASA_UPDATE_LOCK_PATH || '/opt/asa/.update.lock'
+    // Root directory containing all ASA server folders
+    serverRootPath: process.env.ASA_SERVER_ROOT_PATH || '/opt/asa/asa-server',
+    // Default config subfolder structure (Config/WindowsServer/)
+    configSubPath: process.env.ASA_CONFIG_SUB_PATH || 'Config/WindowsServer',
+    // Update lock file path
+    updateLockPath: process.env.ASA_UPDATE_LOCK_PATH || '/opt/asa/.update.lock',
+    // Default config files to look for
+    defaultConfigFiles: ['Game.ini', 'GameUserSettings.ini']
   },
   
   rcon: {

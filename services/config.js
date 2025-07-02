@@ -1,4 +1,4 @@
-import { readFile, writeFile, access } from 'fs/promises';
+import { readFile, writeFile, access, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import config from '../config/index.js';
@@ -6,16 +6,67 @@ import logger from '../utils/logger.js';
 
 class ConfigService {
   constructor() {
-    this.configPath = config.asa.configPath;
+    this.serverRootPath = config.asa.serverRootPath;
+    this.configSubPath = config.asa.configSubPath;
     this.updateLockPath = config.asa.updateLockPath;
+    this.defaultConfigFiles = config.asa.defaultConfigFiles;
   }
 
   /**
-   * Get config file contents
+   * Get the full config path for a specific server and file
    */
-  async getConfigFile(mapName, fileName = 'GameUserSettings.ini') {
+  getConfigFilePath(serverName, fileName = 'GameUserSettings.ini') {
+    return join(this.serverRootPath, serverName, this.configSubPath, fileName);
+  }
+
+  /**
+   * Get the config directory path for a specific server
+   */
+  getConfigDirPath(serverName) {
+    return join(this.serverRootPath, serverName, this.configSubPath);
+  }
+
+  /**
+   * List all available ASA servers
+   */
+  async listServers() {
     try {
-      const filePath = join(this.configPath, mapName, fileName);
+      const entries = await readdir(this.serverRootPath, { withFileTypes: true });
+      const servers = entries
+        .filter(entry => entry.isDirectory())
+        .map(entry => entry.name);
+      
+      logger.info(`Found ${servers.length} ASA servers: ${servers.join(', ')}`);
+      
+      return {
+        success: true,
+        servers,
+        count: servers.length,
+        rootPath: this.serverRootPath
+      };
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        logger.warn(`ASA server root directory not found: ${this.serverRootPath}`);
+        return {
+          success: true,
+          servers: [],
+          count: 0,
+          rootPath: this.serverRootPath,
+          message: 'No ASA servers found'
+        };
+      }
+      
+      logger.error('Error listing ASA servers:', error);
+      throw new Error(`Failed to list ASA servers: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get config file contents for a specific server
+   */
+  async getConfigFile(serverName, fileName = 'GameUserSettings.ini') {
+    try {
+      const filePath = this.getConfigFilePath(serverName, fileName);
       
       // Check if file exists
       await access(filePath);
@@ -28,28 +79,29 @@ class ConfigService {
         content,
         filePath,
         fileName,
-        mapName
+        serverName,
+        configPath: this.getConfigDirPath(serverName)
       };
     } catch (error) {
       if (error.code === 'ENOENT') {
-        logger.warn(`Config file not found: ${join(this.configPath, mapName, fileName)}`);
-        throw new Error(`Config file not found: ${fileName}`);
+        logger.warn(`Config file not found: ${this.getConfigFilePath(serverName, fileName)}`);
+        throw new Error(`Config file not found: ${fileName} for server ${serverName}`);
       }
       
-      logger.error(`Error reading config file ${fileName} for map ${mapName}:`, error);
+      logger.error(`Error reading config file ${fileName} for server ${serverName}:`, error);
       throw new Error(`Failed to read config file: ${error.message}`);
     }
   }
 
   /**
-   * Update config file contents
+   * Update config file contents for a specific server
    */
-  async updateConfigFile(mapName, content, fileName = 'GameUserSettings.ini') {
+  async updateConfigFile(serverName, content, fileName = 'GameUserSettings.ini') {
     try {
-      const filePath = join(this.configPath, mapName, fileName);
+      const filePath = this.getConfigFilePath(serverName, fileName);
       
       // Create directory if it doesn't exist
-      const dirPath = join(this.configPath, mapName);
+      const dirPath = this.getConfigDirPath(serverName);
       if (!existsSync(dirPath)) {
         await this.createDirectory(dirPath);
       }
@@ -61,13 +113,14 @@ class ConfigService {
       
       return {
         success: true,
-        message: `Config file ${fileName} updated successfully`,
+        message: `Config file ${fileName} updated successfully for server ${serverName}`,
         filePath,
         fileName,
-        mapName
+        serverName,
+        configPath: dirPath
       };
     } catch (error) {
-      logger.error(`Error updating config file ${fileName} for map ${mapName}:`, error);
+      logger.error(`Error updating config file ${fileName} for server ${serverName}:`, error);
       throw new Error(`Failed to update config file: ${error.message}`);
     }
   }
@@ -153,17 +206,34 @@ class ConfigService {
   }
 
   /**
-   * List available config files for a map
+   * List available config files for a server
    */
-  async listConfigFiles(mapName) {
+  async listConfigFiles(serverName) {
     try {
-      const mapPath = join(this.configPath, mapName);
+      const serverPath = join(this.serverRootPath, serverName);
       
-      // Check if map directory exists
-      await access(mapPath);
+      // Check if server directory exists
+      await access(serverPath);
       
-      const { readdir } = await import('fs/promises');
-      const files = await readdir(mapPath);
+      const configDirPath = this.getConfigDirPath(serverName);
+      
+      // Check if config directory exists
+      try {
+        await access(configDirPath);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          return {
+            success: true,
+            files: [],
+            serverName,
+            path: configDirPath,
+            message: 'Config directory not found for this server'
+          };
+        }
+        throw error;
+      }
+      
+      const files = await readdir(configDirPath);
       
       const configFiles = files.filter(file => 
         file.endsWith('.ini') || file.endsWith('.cfg') || file.endsWith('.json')
@@ -172,22 +242,72 @@ class ConfigService {
       return {
         success: true,
         files: configFiles,
-        mapName,
-        path: mapPath
+        serverName,
+        path: configDirPath,
+        defaultFiles: this.defaultConfigFiles
       };
     } catch (error) {
       if (error.code === 'ENOENT') {
         return {
           success: true,
           files: [],
-          mapName,
-          path: join(this.configPath, mapName),
-          message: 'Map directory not found'
+          serverName,
+          path: join(this.serverRootPath, serverName),
+          message: 'Server directory not found'
         };
       }
       
-      logger.error(`Error listing config files for map ${mapName}:`, error);
+      logger.error(`Error listing config files for server ${serverName}:`, error);
       throw new Error(`Failed to list config files: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get server information including config status
+   */
+  async getServerInfo(serverName) {
+    try {
+      const serverPath = join(this.serverRootPath, serverName);
+      const configDirPath = this.getConfigDirPath(serverName);
+      
+      // Check if server directory exists
+      await access(serverPath);
+      
+      // Check if config directory exists
+      let configExists = false;
+      let configFiles = [];
+      
+      try {
+        await access(configDirPath);
+        configExists = true;
+        const files = await readdir(configDirPath);
+        configFiles = files.filter(file => 
+          file.endsWith('.ini') || file.endsWith('.cfg') || file.endsWith('.json')
+        );
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+      
+      return {
+        success: true,
+        serverName,
+        serverPath,
+        configPath: configDirPath,
+        configExists,
+        configFiles,
+        defaultFiles: this.defaultConfigFiles,
+        hasGameIni: configFiles.includes('Game.ini'),
+        hasGameUserSettings: configFiles.includes('GameUserSettings.ini')
+      };
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        throw new Error(`Server ${serverName} not found`);
+      }
+      
+      logger.error(`Error getting server info for ${serverName}:`, error);
+      throw new Error(`Failed to get server info: ${error.message}`);
     }
   }
 

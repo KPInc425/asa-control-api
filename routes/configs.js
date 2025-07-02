@@ -5,15 +5,95 @@ import { requireRead, requireWrite } from '../middleware/auth.js';
  * Config routes for ASA configuration file management
  */
 export default async function configRoutes(fastify, options) {
-  // Get config file contents
-  fastify.get('/api/configs/:map', {
+  // List all available ASA servers
+  fastify.get('/api/servers', {
+    preHandler: [requireRead],
+    schema: {
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            servers: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            count: { type: 'number' },
+            rootPath: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const result = await configService.listServers();
+      return result;
+    } catch (error) {
+      fastify.log.error('Error listing ASA servers:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Get server information
+  fastify.get('/api/servers/:server', {
     preHandler: [requireRead],
     schema: {
       params: {
         type: 'object',
-        required: ['map'],
+        required: ['server'],
         properties: {
-          map: { type: 'string' }
+          server: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            serverName: { type: 'string' },
+            serverPath: { type: 'string' },
+            configPath: { type: 'string' },
+            configExists: { type: 'boolean' },
+            configFiles: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            defaultFiles: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            hasGameIni: { type: 'boolean' },
+            hasGameUserSettings: { type: 'boolean' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { server } = request.params;
+      const result = await configService.getServerInfo(server);
+      return result;
+    } catch (error) {
+      fastify.log.error(`Error getting server info for ${request.params.server}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Get config file contents for a specific server
+  fastify.get('/api/servers/:server/config', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['server'],
+        properties: {
+          server: { type: 'string' }
         }
       },
       querystring: {
@@ -30,20 +110,21 @@ export default async function configRoutes(fastify, options) {
             content: { type: 'string' },
             filePath: { type: 'string' },
             fileName: { type: 'string' },
-            mapName: { type: 'string' }
+            serverName: { type: 'string' },
+            configPath: { type: 'string' }
           }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { map } = request.params;
+      const { server } = request.params;
       const { file } = request.query;
       
-      const result = await configService.getConfigFile(map, file);
+      const result = await configService.getConfigFile(server, file);
       return result;
     } catch (error) {
-      fastify.log.error(`Error reading config file for map ${request.params.map}:`, error);
+      fastify.log.error(`Error reading config file for server ${request.params.server}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message
@@ -51,15 +132,15 @@ export default async function configRoutes(fastify, options) {
     }
   });
 
-  // Update config file contents
-  fastify.put('/api/configs/:map', {
+  // Update config file contents for a specific server
+  fastify.put('/api/servers/:server/config', {
     preHandler: [requireWrite],
     schema: {
       params: {
         type: 'object',
-        required: ['map'],
+        required: ['server'],
         properties: {
-          map: { type: 'string' }
+          server: { type: 'string' }
         }
       },
       body: {
@@ -78,20 +159,65 @@ export default async function configRoutes(fastify, options) {
             message: { type: 'string' },
             filePath: { type: 'string' },
             fileName: { type: 'string' },
-            mapName: { type: 'string' }
+            serverName: { type: 'string' },
+            configPath: { type: 'string' }
           }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { map } = request.params;
+      const { server } = request.params;
       const { content, file } = request.body;
       
-      const result = await configService.updateConfigFile(map, content, file);
+      const result = await configService.updateConfigFile(server, content, file);
       return result;
     } catch (error) {
-      fastify.log.error(`Error updating config file for map ${request.params.map}:`, error);
+      fastify.log.error(`Error updating config file for server ${request.params.server}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // List config files for a specific server
+  fastify.get('/api/servers/:server/config/files', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['server'],
+        properties: {
+          server: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            files: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            serverName: { type: 'string' },
+            path: { type: 'string' },
+            defaultFiles: {
+              type: 'array',
+              items: { type: 'string' }
+            }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { server } = request.params;
+      const result = await configService.listConfigFiles(server);
+      return result;
+    } catch (error) {
+      fastify.log.error(`Error listing config files for server ${request.params.server}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message
@@ -192,48 +318,8 @@ export default async function configRoutes(fastify, options) {
     }
   });
 
-  // List config files for a map
-  fastify.get('/api/configs/:map/files', {
-    preHandler: [requireRead],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['map'],
-        properties: {
-          map: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            files: {
-              type: 'array',
-              items: { type: 'string' }
-            },
-            mapName: { type: 'string' },
-            path: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { map } = request.params;
-      const result = await configService.listConfigFiles(map);
-      return result;
-    } catch (error) {
-      fastify.log.error(`Error listing config files for map ${request.params.map}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
   // Parse INI content
-  fastify.post('/api/configs/parse-ini', {
+  fastify.post('/api/parse-ini', {
     preHandler: [requireRead],
     schema: {
       body: {
@@ -257,7 +343,11 @@ export default async function configRoutes(fastify, options) {
     try {
       const { content } = request.body;
       const parsed = configService.parseIniContent(content);
-      return { success: true, parsed };
+      
+      return {
+        success: true,
+        parsed
+      };
     } catch (error) {
       fastify.log.error('Error parsing INI content:', error);
       return reply.status(500).send({
@@ -268,7 +358,7 @@ export default async function configRoutes(fastify, options) {
   });
 
   // Stringify INI content
-  fastify.post('/api/configs/stringify-ini', {
+  fastify.post('/api/stringify-ini', {
     preHandler: [requireRead],
     schema: {
       body: {
@@ -292,7 +382,11 @@ export default async function configRoutes(fastify, options) {
     try {
       const { parsed } = request.body;
       const content = configService.stringifyIniContent(parsed);
-      return { success: true, content };
+      
+      return {
+        success: true,
+        content
+      };
     } catch (error) {
       fastify.log.error('Error stringifying INI content:', error);
       return reply.status(500).send({
