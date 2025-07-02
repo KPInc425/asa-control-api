@@ -15,7 +15,7 @@ import authRoutes from './routes/auth.js';
 
 // Create Fastify instance
 const fastify = Fastify({
-  logger: {
+  logger: config.server.nodeEnv === 'development' ? {
     level: config.logging.level,
     transport: {
       target: 'pino-pretty',
@@ -23,6 +23,8 @@ const fastify = Fastify({
         colorize: true
       }
     }
+  } : {
+    level: config.logging.level
   }
 });
 
