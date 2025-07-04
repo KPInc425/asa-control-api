@@ -12,6 +12,7 @@ class DockerService {
     this.docker = new Docker({
       socketPath: config.docker.socketPath
     });
+    this.activeLogStreams = new Map(); // Track active log streams
   }
 
   /**
@@ -193,6 +194,86 @@ class DockerService {
       return ((cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100).toFixed(2);
     }
     return 0;
+  }
+
+  /**
+   * Start Socket.IO log streaming for a container
+   */
+  async startLogStreaming(containerName, tail = 100, io) {
+    try {
+      // Stop existing stream if any
+      await this.stopLogStreaming(containerName);
+      
+      const container = this.docker.getContainer(containerName);
+      const logStream = await container.logs({
+        stdout: true,
+        stderr: true,
+        tail: tail,
+        follow: true
+      });
+
+      // Store the stream reference
+      this.activeLogStreams.set(containerName, logStream);
+
+      logStream.on('data', (chunk) => {
+        const logMessage = {
+          timestamp: new Date().toISOString(),
+          level: 'info',
+          message: chunk.toString('utf8').trim(),
+          container: containerName
+        };
+
+        // Emit to all clients in the logs room for this container
+        io.to(`logs-${containerName}`).emit('log', logMessage);
+      });
+
+      logStream.on('end', () => {
+        logger.info(`Log stream ended for container ${containerName}`);
+        this.activeLogStreams.delete(containerName);
+      });
+
+      logStream.on('error', (error) => {
+        logger.error(`Log stream error for container ${containerName}:`, error);
+        this.activeLogStreams.delete(containerName);
+      });
+
+      logger.info(`Started Socket.IO log streaming for container ${containerName}`);
+    } catch (error) {
+      logger.error(`Error starting log streaming for container ${containerName}:`, error);
+      throw new Error(`Failed to start log streaming for container ${containerName}`);
+    }
+  }
+
+  /**
+   * Stop Socket.IO log streaming for a container
+   */
+  async stopLogStreaming(containerName) {
+    try {
+      const logStream = this.activeLogStreams.get(containerName);
+      if (logStream) {
+        logStream.destroy();
+        this.activeLogStreams.delete(containerName);
+        logger.info(`Stopped Socket.IO log streaming for container ${containerName}`);
+      }
+    } catch (error) {
+      logger.error(`Error stopping log streaming for container ${containerName}:`, error);
+      throw new Error(`Failed to stop log streaming for container ${containerName}`);
+    }
+  }
+
+  /**
+   * Stop all active log streams
+   */
+  async stopAllLogStreams() {
+    try {
+      for (const [containerName, logStream] of this.activeLogStreams) {
+        logStream.destroy();
+        logger.info(`Stopped log streaming for container ${containerName}`);
+      }
+      this.activeLogStreams.clear();
+    } catch (error) {
+      logger.error('Error stopping all log streams:', error);
+    }
   }
 }
 
