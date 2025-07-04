@@ -31,9 +31,6 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Change ownership of the app directory
 RUN chown -R nodejs:nodejs /app
 
-# Switch to non-root user
-USER nodejs
-
 # Expose port
 EXPOSE 3000
 

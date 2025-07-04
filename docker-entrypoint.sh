@@ -7,4 +7,4 @@ if ! getent group docker >/dev/null; then
 fi
 addgroup nodejs docker
 
-exec node server.js 
+exec su nodejs -c "node server.js" 
