@@ -15,23 +15,29 @@ import authRoutes from './routes/auth.js';
 
 // Create Fastify instance
 const fastify = Fastify({
-  logger: config.server.nodeEnv === 'development' ? {
-    level: config.logging.level,
-    transport: {
-      target: 'pino-pretty',
-      options: {
-        colorize: true
-      }
-    }
-  } : {
+  logger: {
     level: config.logging.level
   }
 });
 
 // Register plugins
+// Register plugins
 await fastify.register(cors, {
-  origin: true, // Allow all origins for debugging
-  credentials: true
+  origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'], // Allow frontend origins
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+});
+
+// Configure body parser
+fastify.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
+  try {
+    const json = JSON.parse(body);
+    done(null, json);
+  } catch (err) {
+    err.statusCode = 400;
+    done(err, undefined);
+  }
 });
 
 await fastify.register(rateLimit, {
