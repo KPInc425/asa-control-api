@@ -137,8 +137,23 @@ AllowFlyerCarryPvE=True
         await access(filePath);
       } catch (error) {
         if (error.code === 'ENOENT') {
-          logger.info(`Config file not found, creating default: ${filePath}`);
-          await this.ensureDefaultConfigs(serverName);
+          logger.info(`Config file not found: ${filePath}`);
+          
+          // Only create the specific file that was requested
+          if (fileName === 'GameUserSettings.ini') {
+            await this.createDefaultConfigFile(serverName, fileName);
+          } else if (fileName === 'Game.ini') {
+            // Only create Game.ini if GameUserSettings.ini already exists
+            const gameUserSettingsPath = this.getConfigFilePath(serverName, 'GameUserSettings.ini');
+            try {
+              await access(gameUserSettingsPath);
+              await this.createDefaultConfigFile(serverName, fileName);
+            } catch (gameUserSettingsError) {
+              throw new Error(`Cannot create Game.ini without GameUserSettings.ini for server ${serverName}`);
+            }
+          } else {
+            throw new Error(`Config file not found: ${fileName} for server ${serverName}`);
+          }
           
           // Try to access the file again after creation
           try {
@@ -171,6 +186,61 @@ AllowFlyerCarryPvE=True
       
       logger.error(`Error reading config file ${fileName} for server ${serverName}:`, error);
       throw new Error(`Failed to read config file: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create a single default config file
+   */
+  async createDefaultConfigFile(serverName, fileName) {
+    const configDirPath = this.getConfigDirPath(serverName);
+    
+    // Create directory if it doesn't exist
+    if (!existsSync(configDirPath)) {
+      await this.createDirectory(configDirPath);
+    }
+
+    let content = '';
+    if (fileName === 'Game.ini') {
+      content = `[/script/shootergame.shootergamemode]
+MaxPlayers=70
+ServerPassword=
+ServerAdminPassword=admin123
+AllowThirdPersonPlayer=True
+AlwaysNotifyPlayerLeft=True
+AlwaysNotifyPlayerJoined=True
+ServerCrosshair=True
+ServerForceNoHUD=False
+ShowMapPlayerLocation=True
+EnablePvPGamma=False
+AllowFlyerCarryPvE=True
+`;
+    } else if (fileName === 'GameUserSettings.ini') {
+      content = `[ServerSettings]
+ServerPassword=
+ServerAdminPassword=admin123
+MaxPlayers=70
+ReservedPlayerSlots=0
+AllowThirdPersonPlayer=True
+AlwaysNotifyPlayerLeft=True
+AlwaysNotifyPlayerJoined=True
+ServerCrosshair=True
+ServerForceNoHUD=False
+ShowMapPlayerLocation=True
+EnablePvPGamma=False
+AllowFlyerCarryPvE=True
+`;
+    } else {
+      throw new Error(`Unknown config file type: ${fileName}`);
+    }
+
+    const filePath = join(configDirPath, fileName);
+    try {
+      await writeFile(filePath, content, 'utf8');
+      logger.info(`Created default ${fileName} for server ${serverName}: ${filePath}`);
+    } catch (error) {
+      logger.error(`Failed to create default ${fileName} for server ${serverName}:`, error);
+      throw error;
     }
   }
 
@@ -301,8 +371,15 @@ AllowFlyerCarryPvE=True
         await access(configDirPath);
       } catch (error) {
         if (error.code === 'ENOENT') {
-          logger.info(`[listConfigFiles] Config directory not found, creating default configs for server ${serverName}`);
-          await this.ensureDefaultConfigs(serverName);
+          logger.info(`[listConfigFiles] Config directory not found for server ${serverName}`);
+          return {
+            success: true,
+            files: [],
+            serverName,
+            path: configDirPath,
+            defaultFiles: this.defaultConfigFiles,
+            message: 'No config directory found'
+          };
         } else {
           throw error;
         }
@@ -359,10 +436,9 @@ AllowFlyerCarryPvE=True
         logger.info(`[getServerInfo] Filtered config files: ${configFiles.join(', ')}`);
       } catch (error) {
         if (error.code === 'ENOENT') {
-          logger.info(`[getServerInfo] Config directory not found, creating default configs for server ${serverName}`);
-          await this.ensureDefaultConfigs(serverName);
-          configExists = true;
-          configFiles = ['Game.ini', 'GameUserSettings.ini'];
+          logger.info(`[getServerInfo] Config directory not found for server ${serverName}`);
+          configExists = false;
+          configFiles = [];
         } else {
           throw error;
         }
