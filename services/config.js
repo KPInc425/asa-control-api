@@ -90,11 +90,14 @@ AllowFlyerCarryPvE=True
    * List all available ASA servers
    */
   async listServers() {
+    logger.info(`[listServers] Using serverRootPath: ${this.serverRootPath}`);
     try {
       const entries = await readdir(this.serverRootPath, { withFileTypes: true });
+      logger.info(`[listServers] Entries in root: ${entries.map(e => e.name + (e.isDirectory() ? '/' : '')).join(', ')}`);
       const servers = entries
         .filter(entry => entry.isDirectory())
         .map(entry => entry.name);
+      logger.info(`[listServers] Found server directories: ${servers.join(', ')}`);
       
       logger.info(`Found ${servers.length} ASA servers: ${servers.join(', ')}`);
       
@@ -105,8 +108,9 @@ AllowFlyerCarryPvE=True
         rootPath: this.serverRootPath
       };
     } catch (error) {
+      logger.error(`[listServers] Error: ${error.message}`);
       if (error.code === 'ENOENT') {
-        logger.warn(`ASA server root directory not found: ${this.serverRootPath}`);
+        logger.warn(`[listServers] ASA server root directory not found: ${this.serverRootPath}`);
         return {
           success: true,
           servers: [],
@@ -286,32 +290,29 @@ AllowFlyerCarryPvE=True
    * List available config files for a server
    */
   async listConfigFiles(serverName) {
+    logger.info(`[listConfigFiles] serverName: ${serverName}`);
     try {
       const serverPath = join(this.serverRootPath, serverName);
-      
-      // Check if server directory exists
+      logger.info(`[listConfigFiles] serverPath: ${serverPath}`);
       await access(serverPath);
-      
       const configDirPath = this.getConfigDirPath(serverName);
-      
-      // Check if config directory exists, create default configs if not
+      logger.info(`[listConfigFiles] configDirPath: ${configDirPath}`);
       try {
         await access(configDirPath);
       } catch (error) {
         if (error.code === 'ENOENT') {
-          logger.info(`Config directory not found, creating default configs for server ${serverName}`);
+          logger.info(`[listConfigFiles] Config directory not found, creating default configs for server ${serverName}`);
           await this.ensureDefaultConfigs(serverName);
         } else {
           throw error;
         }
       }
-      
       const files = await readdir(configDirPath);
-      
+      logger.info(`[listConfigFiles] Files in configDirPath: ${files.join(', ')}`);
       const configFiles = files.filter(file => 
         file.endsWith('.ini') || file.endsWith('.cfg') || file.endsWith('.json')
       );
-      
+      logger.info(`[listConfigFiles] Filtered config files: ${configFiles.join(', ')}`);
       return {
         success: true,
         files: configFiles,
@@ -320,6 +321,7 @@ AllowFlyerCarryPvE=True
         defaultFiles: this.defaultConfigFiles
       };
     } catch (error) {
+      logger.error(`[listConfigFiles] Error: ${error.message}`);
       if (error.code === 'ENOENT') {
         return {
           success: true,
@@ -329,8 +331,6 @@ AllowFlyerCarryPvE=True
           message: 'Server directory not found'
         };
       }
-      
-      logger.error(`Error listing config files for server ${serverName}:`, error);
       throw new Error(`Failed to list config files: ${error.message}`);
     }
   }
@@ -339,27 +339,27 @@ AllowFlyerCarryPvE=True
    * Get server information including config status
    */
   async getServerInfo(serverName) {
+    logger.info(`[getServerInfo] serverName: ${serverName}`);
     try {
       const serverPath = join(this.serverRootPath, serverName);
+      logger.info(`[getServerInfo] serverPath: ${serverPath}`);
       const configDirPath = this.getConfigDirPath(serverName);
-      
-      // Check if server directory exists
+      logger.info(`[getServerInfo] configDirPath: ${configDirPath}`);
       await access(serverPath);
-      
-      // Check if config directory exists, create default configs if not
       let configExists = false;
       let configFiles = [];
-      
       try {
         await access(configDirPath);
         configExists = true;
         const files = await readdir(configDirPath);
+        logger.info(`[getServerInfo] Files in configDirPath: ${files.join(', ')}`);
         configFiles = files.filter(file => 
           file.endsWith('.ini') || file.endsWith('.cfg') || file.endsWith('.json')
         );
+        logger.info(`[getServerInfo] Filtered config files: ${configFiles.join(', ')}`);
       } catch (error) {
         if (error.code === 'ENOENT') {
-          logger.info(`Config directory not found, creating default configs for server ${serverName}`);
+          logger.info(`[getServerInfo] Config directory not found, creating default configs for server ${serverName}`);
           await this.ensureDefaultConfigs(serverName);
           configExists = true;
           configFiles = ['Game.ini', 'GameUserSettings.ini'];
@@ -367,7 +367,6 @@ AllowFlyerCarryPvE=True
           throw error;
         }
       }
-      
       return {
         success: true,
         serverName,
@@ -380,11 +379,10 @@ AllowFlyerCarryPvE=True
         hasGameUserSettings: configFiles.includes('GameUserSettings.ini')
       };
     } catch (error) {
+      logger.error(`[getServerInfo] Error: ${error.message}`);
       if (error.code === 'ENOENT') {
         throw new Error(`Server ${serverName} not found`);
       }
-      
-      logger.error(`Error getting server info for ${serverName}:`, error);
       throw new Error(`Failed to get server info: ${error.message}`);
     }
   }
