@@ -6,9 +6,17 @@ import logger from '../utils/logger.js';
  */
 export async function authenticate(request, reply) {
   try {
+    logger.info('=== AUTHENTICATION DEBUG START ===');
+    logger.info(`Request URL: ${request.url}`);
+    logger.info(`Request method: ${request.method}`);
+    logger.info(`Request headers:`, JSON.stringify(request.headers, null, 2));
+    
     const authHeader = request.headers.authorization;
+    logger.info(`Authorization header: ${authHeader ? authHeader.substring(0, 20) + '...' : 'NOT PRESENT'}`);
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      logger.warn('Authentication failed: Missing or invalid Authorization header format');
+      logger.info('=== AUTHENTICATION DEBUG END ===');
       return reply.status(401).send({
         success: false,
         message: 'Authorization header required'
@@ -16,9 +24,15 @@ export async function authenticate(request, reply) {
     }
 
     const token = authHeader.substring(7);
+    logger.info(`Token length: ${token.length} characters`);
+    logger.info(`Token preview: ${token.substring(0, 20)}...`);
+    
     const result = await authService.getCurrentUser(token);
+    logger.info(`Auth service result:`, JSON.stringify(result, null, 2));
     
     if (!result.success) {
+      logger.warn(`Authentication failed: ${result.message}`);
+      logger.info('=== AUTHENTICATION DEBUG END ===');
       return reply.status(401).send({
         success: false,
         message: result.message
@@ -27,9 +41,12 @@ export async function authenticate(request, reply) {
 
     // Attach user to request
     request.user = result.user;
+    logger.info(`Authentication successful for user: ${result.user.username} (role: ${result.user.role})`);
+    logger.info('=== AUTHENTICATION DEBUG END ===');
     
   } catch (error) {
     logger.error('Authentication middleware error:', error);
+    logger.info('=== AUTHENTICATION DEBUG END ===');
     return reply.status(500).send({
       success: false,
       message: 'Authentication failed'

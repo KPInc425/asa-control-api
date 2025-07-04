@@ -112,10 +112,20 @@ class AuthService {
    */
   verifyToken(token) {
     try {
+      logger.info('=== VERIFY TOKEN DEBUG START ===');
+      logger.info(`Token to verify: ${token ? token.substring(0, 20) + '...' : 'NULL'}`);
+      logger.info(`JWT secret length: ${config.jwt.secret ? config.jwt.secret.length : 'NULL'}`);
+      
       const decoded = jwt.verify(token, config.jwt.secret);
-      return { success: true, user: decoded };
+      logger.info(`Token decoded successfully:`, JSON.stringify(decoded, null, 2));
+      
+      const result = { success: true, user: decoded };
+      logger.info('=== VERIFY TOKEN DEBUG END ===');
+      return result;
     } catch (error) {
       logger.warn('Token verification failed:', error.message);
+      logger.error('Full verification error:', error);
+      logger.info('=== VERIFY TOKEN DEBUG END ===');
       return { success: false, message: 'Invalid token' };
     }
   }
@@ -124,19 +134,28 @@ class AuthService {
    * Get current user from token
    */
   async getCurrentUser(token) {
+    logger.info('=== GET CURRENT USER DEBUG START ===');
+    logger.info(`Token received: ${token ? token.substring(0, 20) + '...' : 'NULL'}`);
+    
     const verification = this.verifyToken(token);
+    logger.info(`Token verification result:`, JSON.stringify(verification, null, 2));
     
     if (!verification.success) {
+      logger.warn(`Token verification failed: ${verification.message}`);
+      logger.info('=== GET CURRENT USER DEBUG END ===');
       return { success: false, message: verification.message };
     }
 
     const user = this.users.get(verification.user.username);
+    logger.info(`User lookup result:`, user ? `Found user: ${user.username}` : 'User not found in users map');
     
     if (!user) {
+      logger.warn(`User not found in users map: ${verification.user.username}`);
+      logger.info('=== GET CURRENT USER DEBUG END ===');
       return { success: false, message: 'User not found' };
     }
 
-    return {
+    const result = {
       success: true,
       user: {
         id: user.id,
@@ -145,6 +164,10 @@ class AuthService {
         permissions: user.permissions
       }
     };
+    
+    logger.info(`Returning user data:`, JSON.stringify(result, null, 2));
+    logger.info('=== GET CURRENT USER DEBUG END ===');
+    return result;
   }
 
   /**
