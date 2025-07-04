@@ -153,7 +153,7 @@ export default async function containerRoutes(fastify, options) {
     }
   });
 
-  // Get container logs (non-streaming)
+  // Get container logs
   fastify.get('/api/containers/:name/logs', {
     preHandler: [requireRead],
     schema: {
@@ -167,7 +167,8 @@ export default async function containerRoutes(fastify, options) {
       querystring: {
         type: 'object',
         properties: {
-          tail: { type: 'number', default: 100 }
+          tail: { type: 'number', default: 100 },
+          follow: { type: 'boolean', default: false }
         }
       },
       response: {
@@ -183,101 +184,42 @@ export default async function containerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
-      const { tail } = request.query;
+      const { tail, follow } = request.query;
       
-      const logs = await dockerService.getContainerLogs(name, { tail });
-      return { success: true, logs };
+      if (follow) {
+        // WebSocket streaming for real-time logs
+        reply.raw.writeHead(200, {
+          'Content-Type': 'text/plain',
+          'Transfer-Encoding': 'chunked'
+        });
+        
+        const container = dockerService.docker.getContainer(name);
+        const logStream = await container.logs({
+          stdout: true,
+          stderr: true,
+          tail: tail || 100,
+          follow: true
+        });
+        
+        logStream.on('data', (chunk) => {
+          reply.raw.write(chunk);
+        });
+        
+        logStream.on('end', () => {
+          reply.raw.end();
+        });
+        
+        request.raw.on('close', () => {
+          logStream.destroy();
+        });
+        
+        return reply;
+      } else {
+        const logs = await dockerService.getContainerLogs(name, { tail });
+        return { success: true, logs };
+      }
     } catch (error) {
       fastify.log.error(`Error getting logs for container ${request.params.name}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Start log streaming via Socket.IO
-  fastify.post('/api/containers/:name/logs/stream', {
-    preHandler: [requireRead],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-          name: { type: 'string' }
-        }
-      },
-      body: {
-        type: 'object',
-        properties: {
-          tail: { type: 'number', default: 100 }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            message: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { name } = request.params;
-      const { tail = 100 } = request.body;
-      
-      // Start log streaming for this container
-      await dockerService.startLogStreaming(name, tail, fastify.io);
-      
-      return { 
-        success: true, 
-        message: `Log streaming started for container ${name}` 
-      };
-    } catch (error) {
-      fastify.log.error(`Error starting log streaming for container ${request.params.name}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Stop log streaming via Socket.IO
-  fastify.post('/api/containers/:name/logs/stop-stream', {
-    preHandler: [requireRead],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-          name: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            message: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { name } = request.params;
-      
-      // Stop log streaming for this container
-      await dockerService.stopLogStreaming(name);
-      
-      return { 
-        success: true, 
-        message: `Log streaming stopped for container ${name}` 
-      };
-    } catch (error) {
-      fastify.log.error(`Error stopping log streaming for container ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message
