@@ -26,7 +26,7 @@ const config = {
   
   asa: {
     // Root directory containing all ASA server folders
-    serverRootPath: process.env.ASA_SERVER_ROOT_PATH || '/opt/asa/asa-server',
+    serverRootPath: '/opt/asa/asa-server',
     // Default config subfolder structure (Config/WindowsServer/)
     configSubPath: process.env.ASA_CONFIG_SUB_PATH || 'Config/WindowsServer',
     // Update lock file path
