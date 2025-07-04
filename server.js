@@ -1,7 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
-import websocket from '@fastify/websocket';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import config from './config/index.js';
 import logger from './utils/logger.js';
 import { metricsHandler } from './metrics/index.js';
@@ -19,6 +20,46 @@ const fastify = Fastify({
     level: config.logging.level
   }
 });
+
+// Create HTTP server for Socket.IO
+const server = createServer(fastify.server);
+
+// Create Socket.IO server
+const io = new Server(server, {
+  cors: {
+    origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
+    credentials: true,
+    methods: ['GET', 'POST']
+  },
+  transports: ['websocket', 'polling']
+});
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  logger.info(`Socket.IO client connected: ${socket.id}`);
+
+  // Handle container log streaming
+  socket.on('join-logs', (containerName) => {
+    logger.info(`Client ${socket.id} joining logs for container: ${containerName}`);
+    socket.join(`logs-${containerName}`);
+  });
+
+  socket.on('leave-logs', (containerName) => {
+    logger.info(`Client ${socket.id} leaving logs for container: ${containerName}`);
+    socket.leave(`logs-${containerName}`);
+  });
+
+  socket.on('disconnect', (reason) => {
+    logger.info(`Socket.IO client disconnected: ${socket.id}, reason: ${reason}`);
+  });
+
+  socket.on('error', (error) => {
+    logger.error(`Socket.IO error from client ${socket.id}:`, error);
+  });
+});
+
+// Make io available to routes
+fastify.decorate('io', io);
 
 // Register plugins
 // Register plugins
@@ -51,8 +92,6 @@ await fastify.register(rateLimit, {
     };
   }
 });
-
-await fastify.register(websocket);
 
 // Global error handler
 fastify.setErrorHandler(function (error, request, reply) {
@@ -94,111 +133,6 @@ await fastify.register(rconRoutes);
 await fastify.register(configRoutes);
 await fastify.register(authRoutes);
 
-// WebSocket endpoint for real-time logs
-fastify.get('/api/logs/:container', { websocket: true }, (connection, req) => {
-  const { container } = req.params;
-  
-  logger.info(`WebSocket connection established for container: ${container}`);
-  
-  // Import docker service here to avoid circular dependencies
-  import('./services/docker.js').then(({ default: dockerService }) => {
-    const containerObj = dockerService.docker.getContainer(container);
-    
-    containerObj.logs({
-      stdout: true,
-      stderr: true,
-      tail: 100,
-      follow: true
-    }).then(logStream => {
-      logStream.on('data', (chunk) => {
-        connection.socket.send(JSON.stringify({
-          type: 'log',
-          data: chunk.toString('utf8'),
-          timestamp: new Date().toISOString()
-        }));
-      });
-      
-      logStream.on('end', () => {
-        connection.socket.send(JSON.stringify({
-          type: 'end',
-          timestamp: new Date().toISOString()
-        }));
-      });
-      
-      logStream.on('error', (error) => {
-        logger.error(`Log stream error for container ${container}:`, error);
-        connection.socket.send(JSON.stringify({
-          type: 'error',
-          error: error.message,
-          timestamp: new Date().toISOString()
-        }));
-      });
-      
-      // Handle WebSocket close
-      connection.socket.on('close', () => {
-        logger.info(`WebSocket connection closed for container: ${container}`);
-        logStream.destroy();
-      });
-    }).catch(error => {
-      logger.error(`Failed to get logs for container ${container}:`, error);
-      connection.socket.send(JSON.stringify({
-        type: 'error',
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }));
-    });
-  });
-});
-
-// WebSocket endpoint for real-time container events
-fastify.get('/api/events', { websocket: true }, (connection, req) => {
-  logger.info('WebSocket connection established for container events');
-  
-  // Import docker service here to avoid circular dependencies
-  import('./services/docker.js').then(({ default: dockerService }) => {
-    const eventStream = dockerService.docker.getEvents({
-      filters: {
-        type: ['container']
-      }
-    });
-    
-    eventStream.on('data', (chunk) => {
-      try {
-        const event = JSON.parse(chunk.toString());
-        connection.socket.send(JSON.stringify({
-          type: 'event',
-          data: event,
-          timestamp: new Date().toISOString()
-        }));
-      } catch (error) {
-        logger.warn('Failed to parse Docker event:', error);
-      }
-    });
-    
-    eventStream.on('end', () => {
-      connection.socket.send(JSON.stringify({
-        type: 'end',
-        timestamp: new Date().toISOString()
-      }));
-    });
-    
-    eventStream.on('error', (error) => {
-      logger.error('Docker event stream error:', error);
-      connection.socket.send(JSON.stringify({
-        type: 'error',
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }));
-    });
-    
-    // Handle WebSocket close
-    connection.socket.on('close', () => {
-      logger.info('WebSocket connection closed for container events');
-      eventStream.destroy();
-    });
-  });
-});
-
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
@@ -207,6 +141,16 @@ const gracefulShutdown = async (signal) => {
     // Close RCON connections
     const rconService = await import('./services/rcon.js');
     await rconService.default.closeAllConnections();
+    
+    // Stop all Docker log streams
+    const dockerService = await import('./services/docker.js');
+    await dockerService.default.stopAllLogStreams();
+    
+    // Close Socket.IO server
+    io.close();
+    
+    // Close HTTP server
+    server.close();
     
     // Close Fastify server
     await fastify.close();
@@ -225,22 +169,21 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Start server
 const start = async () => {
   try {
-    await fastify.listen({
-      port: config.server.port,
-      host: config.server.host
+    // Start HTTP server with Socket.IO
+    server.listen(config.server.port, config.server.host, () => {
+      logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
+      logger.info(`Socket.IO server ready`);
+      logger.info(`Environment: ${config.server.nodeEnv}`);
+      logger.info(`Metrics enabled: ${config.metrics.enabled}`);
+      
+      // Log default credentials in development
+      if (config.server.nodeEnv === 'development') {
+        logger.info('Default users:');
+        logger.info('  admin/admin123 (admin role)');
+        logger.info('  operator/operator123 (operator role)');
+        logger.info('  viewer/viewer123 (viewer role)');
+      }
     });
-    
-    logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
-    logger.info(`Environment: ${config.server.nodeEnv}`);
-    logger.info(`Metrics enabled: ${config.metrics.enabled}`);
-    
-    // Log default credentials in development
-    if (config.server.nodeEnv === 'development') {
-      logger.info('Default users:');
-      logger.info('  admin/admin123 (admin role)');
-      logger.info('  operator/operator123 (operator role)');
-      logger.info('  viewer/viewer123 (viewer role)');
-    }
     
   } catch (err) {
     logger.error('Error starting server:', err);
