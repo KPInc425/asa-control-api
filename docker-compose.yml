@@ -7,11 +7,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./logs:/app/logs
-      - ./asa-server:${ASA_SERVER_ROOT_PATH:-/opt/asa/asa-server}
+      - ${ASA_SERVER_ROOT_PATH:-/opt/asa/asa-server}:/opt/asa/asa-server
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - DOCKER_SOCKET_PATH=${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
-      - ASA_SERVER_ROOT_PATH=${ASA_SERVER_ROOT_PATH:-/opt/asa/asa-server}
+      # - ASA_SERVER_ROOT_PATH=${ASA_SERVER_ROOT_PATH:-/opt/asa/asa-server}
+      - ASA_SERVER_ROOT_PATH=/home/steam/asa-server
       - ASA_CONFIG_SUB_PATH=${ASA_CONFIG_SUB_PATH:-Config/WindowsServer}
       - ASA_UPDATE_LOCK_PATH=${ASA_UPDATE_LOCK_PATH:-/opt/asa/.update.lock}
       - CORS_ORIGIN=${CORS_ORIGIN:-https://ark.ilgaming.xyz}
