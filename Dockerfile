@@ -20,9 +20,9 @@ COPY . .
 # Create logs directory
 RUN mkdir -p logs
 
-# Create non-root user
+# Create non-root user with valid shell and home
 RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
+RUN adduser -S -u 1001 -G nodejs -h /home/nodejs -s /bin/sh nodejs
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
