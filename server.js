@@ -2,7 +2,6 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
-import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import config from './config/index.js';
 import logger from './utils/logger.js';
@@ -96,15 +95,9 @@ await fastify.register(rconRoutes);
 await fastify.register(configRoutes);
 await fastify.register(authRoutes);
 
-// Create the raw HTTP server and attach Fastify
-const httpServer = createServer(fastify.server);
-// Attach Socket.IO to the HTTP server
-const io = new SocketIOServer(httpServer, {
-  cors: {
-    origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
-    credentials: true
-  }
-});
+// Socket.IO instance (will be initialized after Fastify is listening)
+let io;
+
 // Register your Socket.IO handlers
 const setupSocketIO = () => {
   io.use((socket, next) => {
@@ -240,7 +233,6 @@ const setupSocketIO = () => {
     });
   });
 };
-setupSocketIO();
 
 // WebSocket endpoint for real-time logs
 fastify.get('/api/logs/:container', { websocket: true }, (connection, req) => {
@@ -373,19 +365,29 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Start server
 const start = async () => {
   try {
-    await fastify.ready(); // Wait for Fastify to be ready
-    httpServer.listen(config.server.port, config.server.host, () => {
-      logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
-      logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
-      logger.info(`Environment: ${config.server.nodeEnv}`);
-      logger.info(`Metrics enabled: ${config.metrics.enabled}`);
-      if (config.server.nodeEnv === 'development') {
-        logger.info('Default users:');
-        logger.info('  admin/admin123 (admin role)');
-        logger.info('  operator/operator123 (operator role)');
-        logger.info('  viewer/viewer123 (viewer role)');
+    // Start Fastify server (this creates the HTTP server and exposes it as fastify.server)
+    await fastify.listen({
+      port: config.server.port,
+      host: config.server.host
+    });
+    // Attach Socket.IO to the Fastify HTTP server
+    io = new SocketIOServer(fastify.server, {
+      cors: {
+        origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
+        credentials: true
       }
     });
+    setupSocketIO();
+    logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
+    logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
+    logger.info(`Environment: ${config.server.nodeEnv}`);
+    logger.info(`Metrics enabled: ${config.metrics.enabled}`);
+    if (config.server.nodeEnv === 'development') {
+      logger.info('Default users:');
+      logger.info('  admin/admin123 (admin role)');
+      logger.info('  operator/operator123 (operator role)');
+      logger.info('  viewer/viewer123 (viewer role)');
+    }
   } catch (err) {
     logger.error('Error starting server:', err);
     process.exit(1);
