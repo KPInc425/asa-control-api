@@ -60,22 +60,35 @@ export async function authenticate(request, reply) {
 export function requirePermission(permission) {
   return async function(request, reply) {
     try {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          message: 'Authentication required'
-        });
+      logger.info('=== REQUIRE PERMISSION DEBUG START ===');
+      logger.info(`Checking permission: ${permission}`);
+      logger.info(`Request URL: ${request.url}`);
+      
+      // First authenticate the user
+      const authResult = await authenticate(request, reply);
+      if (authResult) {
+        // If authenticate returned a response, it means authentication failed
+        logger.info('=== REQUIRE PERMISSION DEBUG END (AUTH FAILED) ===');
+        return authResult;
       }
+      
+      logger.info(`User authenticated: ${request.user.username} (role: ${request.user.role})`);
+      logger.info(`User permissions: ${JSON.stringify(request.user.permissions)}`);
 
       if (!authService.hasPermission(request.user, permission)) {
         logger.warn(`Permission denied: User ${request.user.username} lacks permission ${permission}`);
+        logger.info('=== REQUIRE PERMISSION DEBUG END (PERMISSION DENIED) ===');
         return reply.status(403).send({
           success: false,
           message: `Insufficient permissions. Required: ${permission}`
         });
       }
+      
+      logger.info(`Permission granted: ${permission}`);
+      logger.info('=== REQUIRE PERMISSION DEBUG END ===');
     } catch (error) {
       logger.error('Permission middleware error:', error);
+      logger.info('=== REQUIRE PERMISSION DEBUG END (ERROR) ===');
       return reply.status(500).send({
         success: false,
         message: 'Permission check failed'
@@ -90,22 +103,34 @@ export function requirePermission(permission) {
 export function requireRole(role) {
   return async function(request, reply) {
     try {
-      if (!request.user) {
-        return reply.status(401).send({
-          success: false,
-          message: 'Authentication required'
-        });
+      logger.info('=== REQUIRE ROLE DEBUG START ===');
+      logger.info(`Checking role: ${role}`);
+      logger.info(`Request URL: ${request.url}`);
+      
+      // First authenticate the user
+      const authResult = await authenticate(request, reply);
+      if (authResult) {
+        // If authenticate returned a response, it means authentication failed
+        logger.info('=== REQUIRE ROLE DEBUG END (AUTH FAILED) ===');
+        return authResult;
       }
+      
+      logger.info(`User authenticated: ${request.user.username} (role: ${request.user.role})`);
 
       if (request.user.role !== role && request.user.role !== 'admin') {
         logger.warn(`Role denied: User ${request.user.username} has role ${request.user.role}, required: ${role}`);
+        logger.info('=== REQUIRE ROLE DEBUG END (ROLE DENIED) ===');
         return reply.status(403).send({
           success: false,
           message: `Insufficient role. Required: ${role}`
         });
       }
+      
+      logger.info(`Role granted: ${role}`);
+      logger.info('=== REQUIRE ROLE DEBUG END ===');
     } catch (error) {
       logger.error('Role middleware error:', error);
+      logger.info('=== REQUIRE ROLE DEBUG END (ERROR) ===');
       return reply.status(500).send({
         success: false,
         message: 'Role check failed'
