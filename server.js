@@ -383,8 +383,10 @@ const start = async () => {
     // Register Fastify as a handler for the HTTP server
     await fastify.ready();
     
-    // Start the HTTP server with Fastify as the request handler
-    httpServer.on('request', fastify.server);
+    // Use Fastify's built-in method to handle requests
+    httpServer.on('request', (req, res) => {
+      fastify.server.emit('request', req, res);
+    });
     httpServer.listen(config.server.port, config.server.host, () => {
       logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
       logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
