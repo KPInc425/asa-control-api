@@ -366,14 +366,11 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Start server
 const start = async () => {
   try {
-    // Start Fastify server
-    await fastify.listen({
-      port: config.server.port,
-      host: config.server.host
-    });
+    // Create a raw HTTP server
+    const httpServer = createServer();
     
-    // Attach Socket.IO to the Fastify server
-    io = new SocketIOServer(fastify.server, {
+    // Attach Socket.IO to the HTTP server
+    io = new SocketIOServer(httpServer, {
       cors: {
         origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
         credentials: true
@@ -383,16 +380,23 @@ const start = async () => {
     // Setup Socket.IO event handlers
     setupSocketIO();
     
-    logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
-    logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
-    logger.info(`Environment: ${config.server.nodeEnv}`);
-    logger.info(`Metrics enabled: ${config.metrics.enabled}`);
-    if (config.server.nodeEnv === 'development') {
-      logger.info('Default users:');
-      logger.info('  admin/admin123 (admin role)');
-      logger.info('  operator/operator123 (operator role)');
-      logger.info('  viewer/viewer123 (viewer role)');
-    }
+    // Register Fastify as a handler for the HTTP server
+    await fastify.ready();
+    
+    // Start the HTTP server with Fastify as the request handler
+    httpServer.on('request', fastify.server);
+    httpServer.listen(config.server.port, config.server.host, () => {
+      logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
+      logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
+      logger.info(`Environment: ${config.server.nodeEnv}`);
+      logger.info(`Metrics enabled: ${config.metrics.enabled}`);
+      if (config.server.nodeEnv === 'development') {
+        logger.info('Default users:');
+        logger.info('  admin/admin123 (admin role)');
+        logger.info('  operator/operator123 (operator role)');
+        logger.info('  viewer/viewer123 (viewer role)');
+      }
+    });
   } catch (err) {
     logger.error('Error starting server:', err);
     process.exit(1);
