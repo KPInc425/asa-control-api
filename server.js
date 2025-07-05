@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
+import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import config from './config/index.js';
 import logger from './utils/logger.js';
@@ -365,19 +366,23 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Start server
 const start = async () => {
   try {
-    // Start Fastify server (this creates the HTTP server and exposes it as fastify.server)
+    // Start Fastify server
     await fastify.listen({
       port: config.server.port,
       host: config.server.host
     });
-    // Attach Socket.IO to the Fastify HTTP server
+    
+    // Attach Socket.IO to the Fastify server
     io = new SocketIOServer(fastify.server, {
       cors: {
         origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
         credentials: true
       }
     });
+    
+    // Setup Socket.IO event handlers
     setupSocketIO();
+    
     logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
     logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
     logger.info(`Environment: ${config.server.nodeEnv}`);
