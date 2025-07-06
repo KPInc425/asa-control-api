@@ -297,8 +297,7 @@ export default async function environmentRoutes(fastify, options) {
             type: 'array',
             items: { type: 'string' }
           },
-          additionalArgs: { type: 'string' },
-          dataPath: { type: 'string' }
+          additionalArgs: { type: 'string' }
         }
       },
       response: {
@@ -418,21 +417,63 @@ export default async function environmentRoutes(fastify, options) {
     }
   }, async (request, reply) => {
     try {
-      // This is a placeholder - in a real implementation, you might fetch from Steam Workshop API
+      // Popular ARK mods - in a real implementation, you might fetch from Steam Workshop API
       const mods = [
         {
-          id: '123456789',
-          name: 'Structures Plus',
-          description: 'Enhanced building system for ARK',
+          id: '731604991',
+          name: 'Structures Plus (S+)',
+          description: 'Enhanced building system with advanced features',
           author: 'Orionsun',
           version: '1.0.0'
         },
         {
-          id: '987654321',
-          name: 'Stackable Foundations',
-          description: 'Allows stacking of foundation pieces',
-          author: 'ModAuthor',
-          version: '2.1.0'
+          id: '793605978',
+          name: 'Platforms Plus',
+          description: 'Enhanced platform building and functionality',
+          author: 'Orionsun',
+          version: '1.0.0'
+        },
+        {
+          id: '821530042',
+          name: 'Castles, Keeps, and Forts Remastered',
+          description: 'Medieval building pieces and structures',
+          author: 'Mezta',
+          version: '1.0.0'
+        },
+        {
+          id: '1404697612',
+          name: 'Dino Storage v2',
+          description: 'Advanced dino management and storage system',
+          author: 'Salty',
+          version: '2.0.0'
+        },
+        {
+          id: '1565015734',
+          name: 'Awesome SpyGlass!',
+          description: 'Enhanced spyglass with detailed creature information',
+          author: 'MisterRaa',
+          version: '1.0.0'
+        },
+        {
+          id: '1631852980',
+          name: 'Super Structures',
+          description: 'Advanced building system with automation features',
+          author: 'Orionsun',
+          version: '1.0.0'
+        },
+        {
+          id: '1766154726',
+          name: 'Automated Ark',
+          description: 'Automation and quality of life improvements',
+          author: 'MisterRaa',
+          version: '1.0.0'
+        },
+        {
+          id: '1814953878',
+          name: 'HG Stacking Mod 5000-90 V317',
+          description: 'Increased stack sizes for better inventory management',
+          author: 'HackGMs',
+          version: '3.17'
         }
       ];
 

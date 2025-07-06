@@ -314,8 +314,8 @@ class EnvironmentService {
       const line = lines[i];
       const trimmedLine = line.trim();
 
-      if (trimmedLine.startsWith('ark-') && trimmedLine.endsWith(':')) {
-        // Found an ARK server service
+      if (trimmedLine.startsWith('asa-server-') && trimmedLine.endsWith(':')) {
+        // Found an ASA server service
         currentService = {
           name: trimmedLine.slice(0, -1), // Remove trailing colon
           lines: [],
@@ -436,9 +436,19 @@ class EnvironmentService {
   generateServerConfig(serverConfig) {
     const lines = [];
     
-    lines.push(`  ${serverConfig.name}:`);
-    lines.push(`    container_name: ${serverConfig.containerName || serverConfig.name}`);
-    lines.push(`    image: ${serverConfig.image || 'ark:latest'}`);
+    // Ensure the service name follows the asa-server- prefix convention
+    const serviceName = serverConfig.name.startsWith('asa-server-') 
+      ? serverConfig.name 
+      : `asa-server-${serverConfig.name}`;
+    
+    // Ensure container name follows the same convention
+    const containerName = serverConfig.containerName && serverConfig.containerName.startsWith('asa-server-')
+      ? serverConfig.containerName
+      : `asa-server-${serverConfig.containerName || serverConfig.name}`;
+    
+    lines.push(`  ${serviceName}:`);
+    lines.push(`    container_name: ${containerName}`);
+    lines.push(`    image: ${serverConfig.image || 'mschnitzer/asa-linux-server:latest'}`);
     lines.push(`    ports:`);
     lines.push(`      - "${serverConfig.gamePort || '7777'}:7777"`);
     lines.push(`      - "${serverConfig.rconPort || '32330'}:32330"`);
@@ -458,7 +468,7 @@ class EnvironmentService {
     }
     
     lines.push(`    volumes:`);
-    lines.push(`      - ${serverConfig.dataPath || './ark-data'}/${serverConfig.name}:/ark`);
+    lines.push(`      - /opt/asa/asa-server/${serverConfig.name}:/opt/asa/asa-server`);
     lines.push(`    restart: unless-stopped`);
     lines.push(`    networks:`);
     lines.push(`      - ark-network`);
