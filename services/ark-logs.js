@@ -24,11 +24,18 @@ class ArkLogsService {
         file.includes('log')
       );
       
-      return logFiles.map(file => ({
-        name: file,
-        path: path.join(serverPath, file),
-        size: await this.getFileSize(path.join(serverPath, file))
-      }));
+      const logFilesWithSize = [];
+      for (const file of logFiles) {
+        const filePath = path.join(serverPath, file);
+        const size = await this.getFileSize(filePath);
+        logFilesWithSize.push({
+          name: file,
+          path: filePath,
+          size: size
+        });
+      }
+      
+      return logFilesWithSize;
     } catch (error) {
       logger.error(`Failed to get available logs for server ${serverName}:`, error);
       return [];

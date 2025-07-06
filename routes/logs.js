@@ -1,9 +1,8 @@
-import { FastifyInstance } from 'fastify';
 import { requirePermission } from '../middleware/auth.js';
 import arkLogsService from '../services/ark-logs.js';
 import logger from '../utils/logger.js';
 
-export default async function (fastify: FastifyInstance) {
+export default async function (fastify) {
   // Get available log files for a server
   fastify.get('/api/logs/:serverName/files', {
     preHandler: requirePermission('read')
