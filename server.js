@@ -14,6 +14,8 @@ import containerRoutes from './routes/containers.js';
 import rconRoutes from './routes/rcon.js';
 import configRoutes from './routes/configs.js';
 import authRoutes from './routes/auth.js';
+import logsRoutes from './routes/logs.js';
+import environmentRoutes from './routes/environment.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -95,6 +97,8 @@ await fastify.register(containerRoutes);
 await fastify.register(rconRoutes);
 await fastify.register(configRoutes);
 await fastify.register(authRoutes);
+await fastify.register(logsRoutes);
+await fastify.register(environmentRoutes);
 
 // Socket.IO instance (will be initialized after Fastify is listening)
 let io;
@@ -122,14 +126,15 @@ const setupSocketIO = () => {
   });
   io.on('connection', (socket) => {
     logger.info(`Socket.IO client connected: ${socket.id} (User: ${socket.user?.username || 'unknown'})`);
-    // Handle log streaming requests
-    socket.on('start-logs', async (data) => {
+    
+    // Handle container log streaming requests
+    socket.on('start-container-logs', async (data) => {
       const { container } = data;
       if (!container) {
         socket.emit('error', { message: 'Container name is required' });
         return;
       }
-      logger.info(`Starting log stream for container: ${container} (Socket: ${socket.id})`);
+      logger.info(`Starting container log stream for: ${container} (Socket: ${socket.id})`);
       try {
         const dockerService = await import('./services/docker.js');
         const containerObj = dockerService.default.docker.getContainer(container);
@@ -140,37 +145,102 @@ const setupSocketIO = () => {
           follow: true
         });
         logStream.on('data', (chunk) => {
-          socket.emit('log-data', {
+          socket.emit('container-log-data', {
             data: chunk.toString('utf8'),
             timestamp: new Date().toISOString()
           });
         });
         logStream.on('end', () => {
-          socket.emit('log-end', {
+          socket.emit('container-log-end', {
             timestamp: new Date().toISOString()
           });
         });
         logStream.on('error', (error) => {
-          logger.error(`Log stream error for container ${container}:`, error);
-          socket.emit('log-error', {
+          logger.error(`Container log stream error for ${container}:`, error);
+          socket.emit('container-log-error', {
             error: error.message,
             timestamp: new Date().toISOString()
           });
         });
-        socket.logStream = logStream;
+        socket.containerLogStream = logStream;
       } catch (error) {
-        logger.error(`Failed to get logs for container ${container}:`, error);
-        socket.emit('log-error', {
+        logger.error(`Failed to get container logs for ${container}:`, error);
+        socket.emit('container-log-error', {
           error: error.message,
           timestamp: new Date().toISOString()
         });
       }
     });
-    socket.on('stop-logs', () => {
-      if (socket.logStream) {
-        socket.logStream.destroy();
-        socket.logStream = null;
-        logger.info(`Log stream stopped for socket: ${socket.id}`);
+
+    // Handle ARK server log streaming requests
+    socket.on('start-ark-logs', async (data) => {
+      const { serverName, logFileName = 'shootergame.log' } = data;
+      if (!serverName) {
+        socket.emit('error', { message: 'Server name is required' });
+        return;
+      }
+      logger.info(`Starting ARK log stream for: ${serverName}/${logFileName} (Socket: ${socket.id})`);
+      try {
+        const arkLogsService = await import('./services/ark-logs.js');
+        
+        // Check if log file exists
+        const exists = await arkLogsService.default.logFileExists(serverName, logFileName);
+        if (!exists) {
+          socket.emit('ark-log-error', {
+            error: `Log file ${logFileName} not found for server ${serverName}`,
+            timestamp: new Date().toISOString()
+          });
+          return;
+        }
+        
+        const logStream = arkLogsService.default.createLogStream(serverName, logFileName, {
+          tail: 100,
+          follow: true
+        });
+        
+        logStream.on('data', (chunk) => {
+          socket.emit('ark-log-data', {
+            data: chunk.toString('utf8'),
+            timestamp: new Date().toISOString()
+          });
+        });
+        
+        logStream.on('end', () => {
+          socket.emit('ark-log-end', {
+            timestamp: new Date().toISOString()
+          });
+        });
+        
+        logStream.on('error', (error) => {
+          logger.error(`ARK log stream error for ${serverName}/${logFileName}:`, error);
+          socket.emit('ark-log-error', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        });
+        
+        socket.arkLogStream = logStream;
+      } catch (error) {
+        logger.error(`Failed to get ARK logs for ${serverName}/${logFileName}:`, error);
+        socket.emit('ark-log-error', {
+          error: error.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+    socket.on('stop-container-logs', () => {
+      if (socket.containerLogStream) {
+        socket.containerLogStream.destroy();
+        socket.containerLogStream = null;
+        logger.info(`Container log stream stopped for socket: ${socket.id}`);
+      }
+    });
+
+    socket.on('stop-ark-logs', () => {
+      if (socket.arkLogStream) {
+        socket.arkLogStream.destroy();
+        socket.arkLogStream = null;
+        logger.info(`ARK log stream stopped for socket: ${socket.id}`);
       }
     });
     socket.on('subscribe-events', async () => {
@@ -223,9 +293,13 @@ const setupSocketIO = () => {
     });
     socket.on('disconnect', () => {
       logger.info(`Socket.IO client disconnected: ${socket.id}`);
-      if (socket.logStream) {
-        socket.logStream.destroy();
-        socket.logStream = null;
+      if (socket.containerLogStream) {
+        socket.containerLogStream.destroy();
+        socket.containerLogStream = null;
+      }
+      if (socket.arkLogStream) {
+        socket.arkLogStream.destroy();
+        socket.arkLogStream = null;
       }
       if (socket.eventStream) {
         socket.eventStream.destroy();
@@ -366,11 +440,17 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Start server
 const start = async () => {
   try {
-    // Create a raw HTTP server
-    const httpServer = createServer();
+    // Start Fastify server normally
+    await fastify.listen({
+      port: config.server.port,
+      host: config.server.host
+    });
+    
+    // Get the underlying HTTP server from Fastify
+    const server = fastify.server;
     
     // Attach Socket.IO to the HTTP server
-    io = new SocketIOServer(httpServer, {
+    io = new SocketIOServer(server, {
       cors: {
         origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
         credentials: true
@@ -380,25 +460,16 @@ const start = async () => {
     // Setup Socket.IO event handlers
     setupSocketIO();
     
-    // Register Fastify as a handler for the HTTP server
-    await fastify.ready();
-    
-    // Use Fastify's built-in method to handle requests
-    httpServer.on('request', (req, res) => {
-      fastify.server.emit('request', req, res);
-    });
-    httpServer.listen(config.server.port, config.server.host, () => {
-      logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
-      logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
-      logger.info(`Environment: ${config.server.nodeEnv}`);
-      logger.info(`Metrics enabled: ${config.metrics.enabled}`);
-      if (config.server.nodeEnv === 'development') {
-        logger.info('Default users:');
-        logger.info('  admin/admin123 (admin role)');
-        logger.info('  operator/operator123 (operator role)');
-        logger.info('  viewer/viewer123 (viewer role)');
-      }
-    });
+    logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
+    logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
+    logger.info(`Environment: ${config.server.nodeEnv}`);
+    logger.info(`Metrics enabled: ${config.metrics.enabled}`);
+    if (config.server.nodeEnv === 'development') {
+      logger.info('Default users:');
+      logger.info('  admin/admin123 (admin role)');
+      logger.info('  operator/operator123 (operator role)');
+      logger.info('  viewer/viewer123 (viewer role)');
+    }
   } catch (err) {
     logger.error('Error starting server:', err);
     process.exit(1);

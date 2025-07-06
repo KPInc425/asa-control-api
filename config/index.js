@@ -56,6 +56,10 @@ const config = {
   
   metrics: {
     enabled: process.env.METRICS_ENABLED === 'true' || true
+  },
+  
+  arkLogs: {
+    basePath: process.env.ARK_LOGS_BASE_PATH || '/home/gameserver/server-files'
   }
 };
 

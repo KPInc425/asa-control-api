@@ -9,6 +9,8 @@ A secure, high-performance Node.js backend API for managing ARK: Survival Ascend
 - **Container Management**: Start, stop, restart ASA containers
 - **RCON Integration**: Send commands to ASA servers via RCON
 - **Config Management**: Read and write ASA configuration files
+- **Environment Management**: Edit .env variables and Docker Compose configuration from the frontend
+- **ARK Server Management**: Add, edit, and remove ARK servers with mod support
 - **Real-time Monitoring**: WebSocket streams for logs and events
 - **Authentication**: JWT-based user authentication with role-based access
 - **Metrics**: Prometheus-compatible metrics for monitoring
@@ -184,6 +186,75 @@ Create update lock.
 #### DELETE `/api/lock-status`
 Remove update lock.
 
+### Environment Management
+
+#### GET `/api/environment`
+Get .env file content and parsed variables.
+
+#### PUT `/api/environment`
+Update .env file content.
+
+```json
+{
+  "content": "PORT=4000\nHOST=0.0.0.0\nNODE_ENV=production"
+}
+```
+
+#### PUT `/api/environment/:key`
+Update specific environment variable.
+
+```json
+{
+  "value": "new-value"
+}
+```
+
+#### GET `/api/docker-compose`
+Get Docker Compose file content.
+
+#### PUT `/api/docker-compose`
+Update Docker Compose file content.
+
+#### POST `/api/docker-compose/reload`
+Reload Docker Compose configuration (restarts containers).
+
+### ARK Server Management
+
+#### GET `/api/ark-servers`
+Get ARK server configurations from Docker Compose.
+
+#### POST `/api/ark-servers`
+Add new ARK server to Docker Compose.
+
+```json
+{
+  "name": "ark-server-theisland",
+  "containerName": "asa-server-theisland",
+  "image": "ark:latest",
+  "gamePort": "7777",
+  "rconPort": "32330",
+  "serverName": "The Island Server",
+  "mapName": "TheIsland",
+  "serverPassword": "",
+  "adminPassword": "admin123",
+  "maxPlayers": "70",
+  "mods": ["123456789", "987654321"],
+  "additionalArgs": "-servergamelog",
+  "dataPath": "./ark-data"
+}
+```
+
+#### PUT `/api/ark-servers/:name`
+Update ARK server configuration.
+
+#### DELETE `/api/ark-servers/:name`
+Remove ARK server from Docker Compose.
+
+### Mods Management
+
+#### GET `/api/mods`
+Get available mods (placeholder for Steam Workshop integration).
+
 ### Real-time Features
 
 #### WebSocket `/api/logs/:container`
@@ -210,7 +281,7 @@ Authorization: Bearer <your-jwt-token>
 
 ### Role-based Access Control
 
-- **Admin**: Full access to all features
+- **Admin**: Full access to all features including environment management
 - **Operator**: Can manage containers and send RCON commands
 - **Viewer**: Read-only access to containers and configs
 
@@ -273,76 +344,100 @@ asa-docker-control-api/
 ├── middleware/      # Authentication and metrics middleware
 ├── metrics/         # Prometheus metrics
 ├── routes/          # API route handlers
-├── services/        # Business logic services
+│   ├── auth.js      # Authentication routes
+│   ├── containers.js # Container management
+│   ├── configs.js   # Configuration management
+│   ├── environment.js # Environment management
+│   ├── logs.js      # Log streaming
+│   └── rcon.js      # RCON commands
+├── services/        # Business logic
+│   ├── auth.js      # Authentication service
+│   ├── config.js    # Configuration service
+│   ├── docker.js    # Docker operations
+│   ├── environment.js # Environment management
+│   ├── rcon.js      # RCON service
+│   └── ark-logs.js  # ARK log management
 ├── utils/           # Utility functions
-├── logs/            # Application logs
 ├── server.js        # Main application entry point
-└── docker-compose.yml
+└── docker-compose.yml # Docker Compose configuration
 ```
 
-### Running Tests
+### Environment Management Features
 
-```bash
-# Install dev dependencies
-yarn install
+The API now includes comprehensive environment management capabilities:
 
-# Run tests (when implemented)
-yarn test
-```
+#### .env File Management
+- Read and edit .env file content
+- Update individual environment variables
+- Automatic backup creation before changes
+- Validation of environment variable format
 
-### Code Style
+#### Docker Compose Management
+- Read and edit docker-compose.yml
+- Add, edit, and remove ARK server configurations
+- Reload Docker Compose configuration
+- YAML validation and syntax checking
 
-The project follows ESLint and Prettier configurations. Run:
+#### ARK Server Configuration
+- Add new ARK servers with full configuration
+- Edit existing server settings
+- Configure mods for each server
+- Set command line arguments
+- Manage server ports and passwords
 
-```bash
-yarn lint
-yarn format
-```
+#### Mod Management
+- Browse available mods (placeholder for Steam Workshop integration)
+- Select mods for individual servers
+- Configure mod load order
 
-## 🚨 Security Considerations
+### Security Features
 
-1. **Change default passwords** immediately after installation
-2. **Use strong JWT secrets** in production
-3. **Configure proper CORS** origins
-4. **Enable HTTPS** in production
-5. **Restrict Docker socket access** to necessary users
-6. **Monitor API usage** for suspicious activity
+- Automatic backup creation before file changes
+- Role-based access control for environment management
+- Input validation and sanitization
+- Secure file operations with proper error handling
 
-## 📝 Logging
+### Backup System
 
-Logs are written to:
-- Console (development)
-- `logs/combined.log` (all levels)
-- `logs/error.log` (errors only)
+The environment management system automatically creates backups before making changes:
 
-Log levels: `error`, `warn`, `info`, `debug`
+- Backups are stored in the `backups/` directory
+- Timestamped backup files for easy recovery
+- Separate backups for .env and docker-compose.yml files
 
-## 🤝 Contributing
+## 🚀 Quick Start
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+1. **Clone and setup:**
+   ```bash
+   git clone <repository-url>
+   cd asa-docker-control-api
+   cp env.example .env
+   # Edit .env with your settings
+   ```
 
-## 📄 License
+2. **Start with Docker Compose:**
+   ```bash
+   docker-compose up -d
+   ```
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+3. **Access the API:**
+   - API: http://localhost:4000
+   - Health check: http://localhost:4000/health
+   - Metrics: http://localhost:4000/metrics
 
-## 🆘 Support
+4. **Connect frontend:**
+   - Update frontend API URL to point to your backend
+   - Login with admin/admin123
 
-For issues and questions:
-1. Check the documentation
-2. Search existing issues
-3. Create a new issue with detailed information
+## 🔒 Security Notes
 
-## 🔄 Changelog
+- Change default passwords in production
+- Set a strong JWT_SECRET
+- Configure proper CORS origins
+- Use HTTPS in production
+- Regularly update dependencies
+- Monitor logs for suspicious activity
 
-### v1.0.0
-- Initial release
-- Container management
-- RCON integration
-- Configuration management
-- Authentication system
-- Monitoring integration
-- WebSocket support
+## 📝 License
+
+MIT License - see LICENSE file for details.
