@@ -219,10 +219,10 @@ class EnvironmentService {
       logger.info('Reloading Docker Compose configuration...');
       
       // Stop existing containers
-      await execAsync('docker-compose down');
+      await execAsync('docker compose down');
       
       // Start with new configuration
-      await execAsync('docker-compose up -d');
+      await execAsync('docker compose up -d');
       
       logger.info('Docker Compose configuration reloaded successfully');
 
@@ -505,6 +505,62 @@ class EnvironmentService {
   async createDirectory(dirPath) {
     const { mkdir } = await import('fs/promises');
     await mkdir(dirPath, { recursive: true });
+  }
+
+  /**
+   * Reload environment configuration
+   * This will reload the .env file and restart the application if needed
+   */
+  async reloadEnvironment() {
+    try {
+      logger.info('Reloading environment configuration...');
+      
+      // Reload dotenv configuration
+      const dotenv = await import('dotenv');
+      dotenv.config({ path: this.envPath, override: true });
+      
+      // Check if Docker restart is needed
+      const needsRestart = await this.checkIfRestartNeeded();
+      
+      return {
+        success: true,
+        message: 'Environment configuration reloaded',
+        needsRestart,
+        restartCommand: needsRestart ? 'docker compose down && docker compose up -d' : null
+      };
+    } catch (error) {
+      logger.error('Error reloading environment:', error);
+      throw new Error(`Failed to reload environment: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check if Docker restart is needed after environment changes
+   */
+  async checkIfRestartNeeded() {
+    try {
+      const { content } = await this.readEnvironmentFile();
+      const variables = this.parseEnvContent(content);
+      
+      // Check for variables that require Docker restart
+      const restartRequiredVars = [
+        'NATIVE_BASE_PATH',
+        'SERVER_MODE',
+        'PORT',
+        'DOCKER_SOCKET_PATH'
+      ];
+      
+      for (const varName of restartRequiredVars) {
+        if (variables[varName] && process.env[varName] !== variables[varName]) {
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      logger.error('Error checking restart requirements:', error);
+      return true; // Default to requiring restart if we can't determine
+    }
   }
 }
 

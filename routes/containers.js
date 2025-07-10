@@ -1,11 +1,15 @@
 import dockerService from '../services/docker.js';
+import { createServerManager } from '../services/server-manager.js';
 import { requireRead, requireWrite } from '../middleware/auth.js';
+
+// Create hybrid server manager instance that handles both Docker and native servers
+const serverManager = createServerManager(dockerService);
 
 /**
  * Container routes for ASA container management
  */
 export default async function containerRoutes(fastify, options) {
-  // Get all containers
+  // Get all containers/servers
   fastify.get('/api/containers', {
     preHandler: [requireRead],
     schema: {
@@ -24,10 +28,18 @@ export default async function containerRoutes(fastify, options) {
                   image: { type: 'string' },
                   status: { type: 'string' },
                   created: { type: 'string' },
-                  ports: { type: 'array' },
+                  ports: { 
+                    oneOf: [
+                      { type: 'array' },
+                      { type: 'string' }
+                    ]
+                  },
                   labels: { type: 'object' },
                   memoryUsage: { type: 'number' },
-                  cpuUsage: { type: 'number' }
+                  cpuUsage: { type: 'number' },
+                  type: { type: 'string' },
+                  serverCount: { type: 'number' },
+                  maps: { type: 'string' }
                 }
               }
             }
@@ -37,8 +49,25 @@ export default async function containerRoutes(fastify, options) {
     }
   }, async (request, reply) => {
     try {
-      const containers = await dockerService.listContainers();
-      return { success: true, containers };
+      const containers = await serverManager.listServers();
+      
+      // Transform the data to match the expected schema
+      const transformedContainers = containers.map(container => ({
+        id: container.name, // Use name as ID for native servers
+        name: container.name,
+        image: container.image || 'native',
+        status: container.status,
+        created: container.created,
+        ports: container.ports || [],
+        labels: container.labels || {},
+        memoryUsage: container.memoryUsage || 0,
+        cpuUsage: container.cpuUsage || 0,
+        type: container.type || 'native',
+        serverCount: container.serverCount || 1,
+        maps: container.maps || 'Unknown'
+      }));
+      
+      return { success: true, containers: transformedContainers };
     } catch (error) {
       fastify.log.error('Error listing containers:', error);
       return reply.status(500).send({
@@ -72,7 +101,7 @@ export default async function containerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
-      const result = await dockerService.startContainer(name);
+      const result = await serverManager.start(name);
       return result;
     } catch (error) {
       fastify.log.error(`Error starting container ${request.params.name}:`, error);
@@ -107,7 +136,7 @@ export default async function containerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
-      const result = await dockerService.stopContainer(name);
+      const result = await serverManager.stop(name);
       return result;
     } catch (error) {
       fastify.log.error(`Error stopping container ${request.params.name}:`, error);
@@ -142,7 +171,7 @@ export default async function containerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
-      const result = await dockerService.restartContainer(name);
+      const result = await serverManager.restart(name);
       return result;
     } catch (error) {
       fastify.log.error(`Error restarting container ${request.params.name}:`, error);
@@ -176,7 +205,7 @@ export default async function containerRoutes(fastify, options) {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
-            logs: { type: 'string' }
+            logs: { type: 'array' }
           }
         }
       }
@@ -184,42 +213,12 @@ export default async function containerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
-      const { tail, follow } = request.query;
+      const { tail = 100, follow = false } = request.query;
       
-      if (follow) {
-        // WebSocket streaming for real-time logs
-        reply.raw.writeHead(200, {
-          'Content-Type': 'text/plain',
-          'Transfer-Encoding': 'chunked'
-        });
-        
-        const container = dockerService.docker.getContainer(name);
-        const logStream = await container.logs({
-          stdout: true,
-          stderr: true,
-          tail: tail || 100,
-          follow: true
-        });
-        
-        logStream.on('data', (chunk) => {
-          reply.raw.write(chunk);
-        });
-        
-        logStream.on('end', () => {
-          reply.raw.end();
-        });
-        
-        request.raw.on('close', () => {
-          logStream.destroy();
-        });
-        
-        return reply;
-      } else {
-        const logs = await dockerService.getContainerLogs(name, { tail });
-        return { success: true, logs };
-      }
+      const logs = await serverManager.getLogs(name, { tail, follow });
+      return { success: true, logs };
     } catch (error) {
-      fastify.log.error(`Error getting logs for container ${request.params.name}:`, error);
+      fastify.log.error(`Error getting logs for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message
@@ -246,24 +245,12 @@ export default async function containerRoutes(fastify, options) {
             stats: {
               type: 'object',
               properties: {
-                memory: {
-                  type: 'object',
-                  properties: {
-                    usage: { type: 'number' },
-                    limit: { type: 'number' },
-                    percentage: { type: 'string' }
-                  }
-                },
-                cpu: {
-                  type: 'object',
-                  properties: {
-                    usage: { type: 'number' },
-                    systemUsage: { type: 'number' },
-                    percentage: { type: 'string' }
-                  }
-                },
-                network: { type: 'object' },
-                timestamp: { type: 'string' }
+                name: { type: 'string' },
+                status: { type: 'string' },
+                cpu: { type: 'number' },
+                memory: { type: 'number' },
+                uptime: { type: 'number' },
+                pid: { type: 'number' }
               }
             }
           }
@@ -273,10 +260,45 @@ export default async function containerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
-      const stats = await dockerService.getContainerStats(name);
+      const stats = await serverManager.getStats(name);
       return { success: true, stats };
     } catch (error) {
-      fastify.log.error(`Error getting stats for container ${request.params.name}:`, error);
+      fastify.log.error(`Error getting stats for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Check if container is running
+  fastify.get('/api/containers/:name/running', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            running: { type: 'boolean' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      const running = await serverManager.isRunning(name);
+      return { success: true, running };
+    } catch (error) {
+      fastify.log.error(`Error checking running status for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message

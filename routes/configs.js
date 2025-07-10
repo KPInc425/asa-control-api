@@ -1,399 +1,299 @@
-import configService from '../services/config.js';
-import { requireRead, requireWrite } from '../middleware/auth.js';
+import fastify from 'fastify';
+import fs from 'fs/promises';
+import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import logger from '../utils/logger.js';
+import config from '../config/index.js';
+import { requirePermission } from '../middleware/auth.js';
 
-/**
- * Config routes for ASA configuration file management
- */
-export default async function configRoutes(fastify, options) {
-  // List all available ASA servers
-  fastify.get('/api/servers', {
-    preHandler: [requireRead],
-    schema: {
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            servers: {
-              type: 'array',
-              items: { type: 'string' }
-            },
-            count: { type: 'number' },
-            rootPath: { type: 'string' }
-          }
-        }
-      }
-    }
+const execAsync = promisify(exec);
+
+// Whitelist of safe environment variables that can be edited via dashboard
+const SAFE_ENV_VARS = [
+  'NATIVE_BASE_PATH',
+  'NATIVE_CLUSTERS_PATH', 
+  'NATIVE_CONFIG_FILE',
+  'STEAMCMD_PATH',
+  'AUTO_INSTALL_STEAMCMD',
+  'ASA_CONFIG_SUB_PATH',
+  'RCON_DEFAULT_PORT',
+  'RCON_PASSWORD',
+  'RATE_LIMIT_MAX',
+  'RATE_LIMIT_TIME_WINDOW',
+  'CORS_ORIGIN',
+  'LOG_LEVEL',
+  'LOG_FILE_PATH',
+  'METRICS_ENABLED',
+  'POWERSHELL_ENABLED',
+  'PORT',
+  'HOST',
+  'NODE_ENV'
+];
+
+// Sensitive variables that should never be exposed or edited via dashboard
+const SENSITIVE_ENV_VARS = [
+  'JWT_SECRET',
+  'JWT_EXPIRES_IN',
+  'DOCKER_SOCKET_PATH',
+  'AGENT_URL',
+  'AGENT_ENABLED'
+];
+
+export default async function configRoutes(fastify) {
+  // Get current configuration (whitelisted only)
+  fastify.get('/api/configs', {
+    preHandler: requirePermission('read')
   }, async (request, reply) => {
     try {
-      const result = await configService.listServers();
-      return result;
-    } catch (error) {
-      fastify.log.error('Error listing ASA servers:', error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Get server information
-  fastify.get('/api/servers/:server', {
-    preHandler: [requireRead],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['server'],
-        properties: {
-          server: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            serverName: { type: 'string' },
-            serverPath: { type: 'string' },
-            configPath: { type: 'string' },
-            configExists: { type: 'boolean' },
-            configFiles: {
-              type: 'array',
-              items: { type: 'string' }
-            },
-            defaultFiles: {
-              type: 'array',
-              items: { type: 'string' }
-            },
-            hasGameIni: { type: 'boolean' },
-            hasGameUserSettings: { type: 'boolean' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { server } = request.params;
-      const result = await configService.getServerInfo(server);
-      return result;
-    } catch (error) {
-      fastify.log.error(`Error getting server info for ${request.params.server}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Get config file contents for a specific server
-  fastify.get('/api/servers/:server/config', {
-    preHandler: [requireRead],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['server'],
-        properties: {
-          server: { type: 'string' }
-        }
-      },
-      querystring: {
-        type: 'object',
-        properties: {
-          file: { type: 'string', default: 'GameUserSettings.ini' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            content: { type: 'string' },
-            filePath: { type: 'string' },
-            fileName: { type: 'string' },
-            serverName: { type: 'string' },
-            configPath: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { server } = request.params;
-      const { file } = request.query;
+      const envPath = path.join(process.cwd(), '.env');
+      const envContent = await fs.readFile(envPath, 'utf8');
       
-      const result = await configService.getConfigFile(server, file);
-      return result;
-    } catch (error) {
-      fastify.log.error(`Error reading config file for server ${request.params.server}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Update config file contents for a specific server
-  fastify.put('/api/servers/:server/config', {
-    preHandler: [requireWrite],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['server'],
-        properties: {
-          server: { type: 'string' }
-        }
-      },
-      body: {
-        type: 'object',
-        required: ['content'],
-        properties: {
-          content: { type: 'string' },
-          file: { type: 'string', default: 'GameUserSettings.ini' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            message: { type: 'string' },
-            filePath: { type: 'string' },
-            fileName: { type: 'string' },
-            serverName: { type: 'string' },
-            configPath: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { server } = request.params;
-      const { content, file } = request.body;
+      const envVars = {};
+      const lines = envContent.split('\n');
       
-      const result = await configService.updateConfigFile(server, content, file);
-      return result;
-    } catch (error) {
-      fastify.log.error(`Error updating config file for server ${request.params.server}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // List config files for a specific server
-  fastify.get('/api/servers/:server/config/files', {
-    preHandler: [requireRead],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['server'],
-        properties: {
-          server: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            files: {
-              type: 'array',
-              items: { type: 'string' }
-            },
-            serverName: { type: 'string' },
-            path: { type: 'string' },
-            defaultFiles: {
-              type: 'array',
-              items: { type: 'string' }
+      for (const line of lines) {
+        if (line.trim() && !line.startsWith('#')) {
+          const [key, ...valueParts] = line.split('=');
+          if (key && valueParts.length > 0) {
+            const value = valueParts.join('=');
+            if (SAFE_ENV_VARS.includes(key)) {
+              envVars[key] = value;
             }
           }
         }
       }
-    }
-  }, async (request, reply) => {
-    try {
-      const { server } = request.params;
-      const result = await configService.listConfigFiles(server);
-      return result;
-    } catch (error) {
-      fastify.log.error(`Error listing config files for server ${request.params.server}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Get update lock status
-  fastify.get('/api/lock-status', {
-    preHandler: [requireRead],
-    schema: {
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            locked: { type: 'boolean' },
-            content: { type: 'string', nullable: true },
-            timestamp: { type: 'string' },
-            path: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const status = await configService.getUpdateLockStatus();
-      return status;
-    } catch (error) {
-      fastify.log.error('Error getting update lock status:', error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Create update lock
-  fastify.post('/api/lock-status', {
-    preHandler: [requireWrite],
-    schema: {
-      body: {
-        type: 'object',
-        properties: {
-          reason: { type: 'string', default: 'Manual lock' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            message: { type: 'string' },
-            path: { type: 'string' },
-            content: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { reason } = request.body;
-      const result = await configService.createUpdateLock(reason);
-      return result;
-    } catch (error) {
-      fastify.log.error('Error creating update lock:', error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Remove update lock
-  fastify.delete('/api/lock-status', {
-    preHandler: [requireWrite],
-    schema: {
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            message: { type: 'string' },
-            path: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const result = await configService.removeUpdateLock();
-      return result;
-    } catch (error) {
-      fastify.log.error('Error removing update lock:', error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Parse INI content
-  fastify.post('/api/parse-ini', {
-    preHandler: [requireRead],
-    schema: {
-      body: {
-        type: 'object',
-        required: ['content'],
-        properties: {
-          content: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            parsed: { type: 'object' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { content } = request.body;
-      const parsed = configService.parseIniContent(content);
       
       return {
         success: true,
-        parsed
+        config: envVars,
+        mode: config.server.mode,
+        safeVars: SAFE_ENV_VARS,
+        hasAdminRights: request.user?.role === 'admin'
       };
     } catch (error) {
-      fastify.log.error('Error parsing INI content:', error);
+      logger.error('Failed to read config:', error);
       return reply.status(500).send({
         success: false,
-        message: error.message
+        message: 'Failed to read configuration'
       });
     }
   });
 
-  // Stringify INI content
-  fastify.post('/api/stringify-ini', {
-    preHandler: [requireRead],
-    schema: {
-      body: {
-        type: 'object',
-        required: ['parsed'],
-        properties: {
-          parsed: { type: 'object' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            content: { type: 'string' }
+  // Get full configuration (admin only)
+  fastify.get('/api/configs/full', {
+    preHandler: requirePermission('admin')
+  }, async (request, reply) => {
+    try {
+      const envPath = path.join(process.cwd(), '.env');
+      const envContent = await fs.readFile(envPath, 'utf8');
+      
+      const envVars = {};
+      const lines = envContent.split('\n');
+      
+      for (const line of lines) {
+        if (line.trim() && !line.startsWith('#')) {
+          const [key, ...valueParts] = line.split('=');
+          if (key && valueParts.length > 0) {
+            const value = valueParts.join('=');
+            envVars[key] = {
+              value,
+              isSensitive: SENSITIVE_ENV_VARS.includes(key),
+              isSafe: SAFE_ENV_VARS.includes(key)
+            };
           }
         }
       }
-    }
-  }, async (request, reply) => {
-    try {
-      const { parsed } = request.body;
-      const content = configService.stringifyIniContent(parsed);
       
       return {
         success: true,
-        content
+        config: envVars,
+        mode: config.server.mode
       };
     } catch (error) {
-      fastify.log.error('Error stringifying INI content:', error);
+      logger.error('Failed to read full config:', error);
       return reply.status(500).send({
         success: false,
-        message: error.message
+        message: 'Failed to read full configuration'
       });
     }
   });
+
+  // Update configuration (whitelisted variables only)
+  fastify.put('/api/configs', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { config: updates, restart = false } = request.body;
+      
+      // Validate that only safe variables are being updated
+      const invalidVars = Object.keys(updates).filter(key => !SAFE_ENV_VARS.includes(key));
+      if (invalidVars.length > 0) {
+        return reply.status(400).send({
+          success: false,
+          message: `Cannot update sensitive variables: ${invalidVars.join(', ')}`
+        });
+      }
+      
+      const envPath = path.join(process.cwd(), '.env');
+      const envContent = await fs.readFile(envPath, 'utf8');
+      
+      const lines = envContent.split('\n');
+      const updatedLines = [];
+      
+      // Track which variables we've updated
+      const updatedVars = new Set();
+      
+      for (const line of lines) {
+        if (line.trim() && !line.startsWith('#')) {
+          const [key, ...valueParts] = line.split('=');
+          if (key && valueParts.length > 0) {
+            if (updates[key] !== undefined) {
+              updatedLines.push(`${key}=${updates[key]}`);
+              updatedVars.add(key);
+            } else {
+              updatedLines.push(line);
+            }
+          } else {
+            updatedLines.push(line);
+          }
+        } else {
+          updatedLines.push(line);
+        }
+      }
+      
+      // Add any new variables that weren't in the original file
+      for (const [key, value] of Object.entries(updates)) {
+        if (!updatedVars.has(key)) {
+          updatedLines.push(`${key}=${value}`);
+        }
+      }
+      
+      // Write the updated .env file
+      await fs.writeFile(envPath, updatedLines.join('\n'));
+      
+      logger.info(`Configuration updated by user ${request.user?.username}: ${Object.keys(updates).join(', ')}`);
+      
+      const response = {
+        success: true,
+        message: 'Configuration updated successfully',
+        updatedVars: Object.keys(updates)
+      };
+      
+      // Restart the API if requested
+      if (restart) {
+        try {
+          await restartAPI();
+          response.message += ' and API restarted';
+        } catch (restartError) {
+          logger.error('Failed to restart API:', restartError);
+          response.message += ' but failed to restart API';
+          response.restartError = restartError.message;
+        }
+      }
+      
+      return response;
+    } catch (error) {
+      logger.error('Failed to update config:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update configuration'
+      });
+    }
+  });
+
+  // Restart API endpoint (admin only)
+  fastify.post('/api/restart', {
+    preHandler: requirePermission('admin')
+  }, async (request, reply) => {
+    try {
+      await restartAPI();
+      
+      logger.info(`API restart requested by user ${request.user?.username}`);
+      
+      return {
+        success: true,
+        message: 'API restart initiated successfully'
+      };
+    } catch (error) {
+      logger.error('Failed to restart API:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to restart API',
+        error: error.message
+      });
+    }
+  });
+
+  // Get system information
+  fastify.get('/api/system/info', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const systemInfo = {
+        mode: config.server.mode,
+        platform: process.platform,
+        nodeVersion: process.version,
+        uptime: process.uptime(),
+        memoryUsage: process.memoryUsage(),
+        dockerEnabled: config.docker.enabled,
+        powershellEnabled: process.env.POWERSHELL_ENABLED === 'true',
+        nativeBasePath: config.server.native.basePath,
+        nativeClustersPath: config.server.native.clustersPath
+      };
+      
+      return {
+        success: true,
+        systemInfo
+      };
+    } catch (error) {
+      logger.error('Failed to get system info:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get system information'
+      });
+    }
+  });
+}
+
+// Helper function to restart the API
+async function restartAPI() {
+  const mode = config.server.mode;
+  
+  if (mode === 'docker') {
+    // Restart Docker container
+    try {
+      await execAsync('docker restart asa-api');
+      logger.info('Docker container restart initiated');
+    } catch (error) {
+      // Try docker-compose restart
+      try {
+        await execAsync('docker-compose restart asa-api');
+        logger.info('Docker Compose restart initiated');
+      } catch (composeError) {
+        throw new Error(`Failed to restart Docker container: ${error.message}`);
+      }
+    }
+  } else {
+    // Native mode - restart Windows service or process
+    try {
+      // Try to restart as Windows service first
+      await execAsync('sc stop "ASA-API"');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await execAsync('sc start "ASA-API"');
+      logger.info('Windows service restart initiated');
+    } catch (serviceError) {
+      // If service restart fails, try to restart the Node process
+      try {
+        const nodeProcesses = await execAsync('tasklist /FI "IMAGENAME eq node.exe" /FO CSV');
+        if (nodeProcesses.stdout.includes('node.exe')) {
+          await execAsync('taskkill /F /IM node.exe');
+          logger.info('Node process killed, restart required manually');
+        }
+      } catch (processError) {
+        throw new Error(`Failed to restart API: ${serviceError.message}`);
+      }
+    }
+  }
 } 
  

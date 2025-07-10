@@ -1,0 +1,664 @@
+import fastify from 'fastify';
+import fs from 'fs/promises';
+import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import logger from '../utils/logger.js';
+import config from '../config/index.js';
+import { requirePermission } from '../middleware/auth.js';
+import { ServerProvisioner } from '../services/server-provisioner.js';
+import { createJob, updateJob, addJobProgress, getJob } from '../services/job-manager.js';
+
+const execAsync = promisify(exec);
+
+export default async function provisioningRoutes(fastify) {
+  const provisioner = new ServerProvisioner();
+
+  // Get cluster wizard options
+  fastify.get('/api/provisioning/wizard-options', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const options = {
+        steamcmdPaths: await getSteamCmdPaths(),
+        availableDrives: await getAvailableDrives(),
+        defaultPaths: {
+          steamcmd: 'C:\\SteamCMD',
+          basePath: 'C:\\ASA-Servers',
+          clustersPath: 'C:\\ASA-Servers\\Clusters',
+          serversPath: 'C:\\ASA-Servers\\Servers'
+        },
+        mode: config.server.mode,
+        powershellEnabled: process.env.POWERSHELL_ENABLED === 'true'
+      };
+      
+      return {
+        success: true,
+        options
+      };
+    } catch (error) {
+      logger.error('Failed to get wizard options:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get wizard options'
+      });
+    }
+  });
+
+  // Initialize system
+  fastify.post('/api/provisioning/initialize', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const result = await provisioner.initialize();
+      
+      // Get updated system info after initialization
+      const systemInfo = await provisioner.getSystemInfo();
+      
+      return {
+        success: true,
+        message: 'System initialized successfully',
+        data: {
+          ...result,
+          systemInfo
+        }
+      };
+    } catch (error) {
+      logger.error('Failed to initialize system:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to initialize system'
+      });
+    }
+  });
+
+  // Install SteamCMD
+  fastify.post('/api/provisioning/install-steamcmd', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { steamcmdPath, foreground = false } = request.body;
+      
+      if (steamcmdPath) {
+        provisioner.steamCmdPath = steamcmdPath;
+        provisioner.steamCmdExe = path.join(steamcmdPath, 'steamcmd.exe');
+      }
+      
+      await provisioner.installSteamCmd(foreground);
+      
+      return {
+        success: true,
+        message: 'SteamCMD installed successfully'
+      };
+    } catch (error) {
+      logger.error('Failed to install SteamCMD:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to install SteamCMD'
+      });
+    }
+  });
+
+  // Create individual server
+  fastify.post('/api/provisioning/create-server', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const {
+        name,
+        map = 'TheIsland',
+        gamePort = 7777,
+        queryPort = 27015,
+        rconPort = 32330,
+        maxPlayers = 70,
+        adminPassword = 'admin123',
+        serverPassword = '',
+        rconPassword = 'rcon123',
+        harvestMultiplier = 3.0,
+        xpMultiplier = 3.0,
+        tamingMultiplier = 5.0
+      } = request.body;
+
+      if (!name) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server name is required'
+        });
+      }
+
+      const serverConfig = {
+        name,
+        map,
+        gamePort,
+        queryPort,
+        rconPort,
+        maxPlayers,
+        adminPassword,
+        serverPassword,
+        rconPassword,
+        harvestMultiplier,
+        xpMultiplier,
+        tamingMultiplier
+      };
+
+      const result = await provisioner.createServer(serverConfig);
+      
+      return {
+        success: true,
+        message: `Server ${name} created successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to create server:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to create server'
+      });
+    }
+  });
+
+  // Create cluster
+  fastify.post('/api/provisioning/create-cluster', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const {
+        name,
+        description = '',
+        serverCount = 1,
+        basePort = 7777,
+        maps = [],
+        maxPlayers = 70,
+        adminPassword = 'admin123',
+        serverPassword = '',
+        rconPassword = 'rcon123',
+        clusterPassword = '',
+        harvestMultiplier = 3.0,
+        xpMultiplier = 3.0,
+        tamingMultiplier = 5.0,
+        foreground = false
+      } = request.body;
+
+      if (!name) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Cluster name is required'
+        });
+      }
+
+      if (serverCount < 1 || serverCount > 10) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server count must be between 1 and 10'
+        });
+      }
+
+      const clusterConfig = {
+        name,
+        description,
+        serverCount,
+        basePort,
+        maps: maps.length > 0 ? maps : Array(serverCount).fill('TheIsland'),
+        maxPlayers,
+        adminPassword,
+        serverPassword,
+        rconPassword,
+        clusterPassword,
+        harvestMultiplier,
+        xpMultiplier,
+        tamingMultiplier
+      };
+
+      const result = await provisioner.createCluster(clusterConfig, foreground);
+      
+      return {
+        success: true,
+        message: `Cluster ${name} created successfully with ${serverCount} servers`,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to create cluster:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to create cluster'
+      });
+    }
+  });
+
+  // Update server binaries
+  fastify.post('/api/provisioning/update-server', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.body;
+      
+      if (!serverName) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server name is required'
+        });
+      }
+
+      const result = await provisioner.updateServerBinaries(serverName);
+      
+      return {
+        success: true,
+        message: `Server ${serverName} updated successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to update server:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update server'
+      });
+    }
+  });
+
+  // Install ASA binaries
+  fastify.post('/api/provisioning/install-asa-binaries', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { foreground = false } = request.body;
+      
+      const result = await provisioner.installASABinaries(foreground);
+      
+      return {
+        success: true,
+        message: 'ASA binaries installed successfully',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to install ASA binaries:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to install ASA binaries'
+      });
+    }
+  });
+
+  // Update all servers
+  fastify.post('/api/provisioning/update-all-servers', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const result = await provisioner.updateAllServerBinaries();
+      
+      return {
+        success: true,
+        message: 'All servers updated successfully',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to update all servers:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update all servers'
+      });
+    }
+  });
+
+  // List servers
+  fastify.get('/api/provisioning/servers', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const servers = await provisioner.listServers();
+      
+      return {
+        success: true,
+        servers
+      };
+    } catch (error) {
+      logger.error('Failed to list servers:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to list servers'
+      });
+    }
+  });
+
+  // List clusters
+  fastify.get('/api/provisioning/clusters', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const clusters = await provisioner.listClusters();
+      
+      return {
+        success: true,
+        clusters
+      };
+    } catch (error) {
+      logger.error('Failed to list clusters:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to list clusters'
+      });
+    }
+  });
+
+  // Cluster creation with job/progress system
+  fastify.post('/api/provisioning/clusters', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    const io = fastify.io;
+    const clusterConfig = request.body;
+    const job = createJob('create-cluster', { clusterName: clusterConfig.name });
+
+    // Respond immediately with job ID
+    reply.send({ success: true, jobId: job.id });
+
+    // Start cluster creation in background
+    (async () => {
+      try {
+        addJobProgress(job.id, 'Starting cluster creation...');
+        io.emit('cluster-progress', { jobId: job.id, message: 'Starting cluster creation...' });
+        // Wrap provisioner.createCluster to emit progress
+        const progressCb = (msg) => {
+          addJobProgress(job.id, msg);
+          io.emit('job-progress', { 
+            jobId: job.id, 
+            status: 'running',
+            progress: 0, // Will be calculated based on steps
+            message: msg 
+          });
+        };
+        // Patch provisioner to emit progress
+        provisioner.emitProgress = progressCb;
+        const result = await provisioner.createCluster(clusterConfig, clusterConfig.foreground || false);
+        updateJob(job.id, { status: 'completed', result });
+        io.emit('job-progress', { 
+          jobId: job.id, 
+          status: 'completed',
+          progress: 100,
+          message: 'Cluster created successfully!',
+          result 
+        });
+      } catch (err) {
+        updateJob(job.id, { status: 'failed', error: err.message });
+        io.emit('job-progress', { 
+          jobId: job.id, 
+          status: 'failed',
+          progress: 0,
+          message: `Cluster creation failed: ${err.message}`,
+          error: err.message 
+        });
+      }
+    })();
+  });
+
+  // Job status endpoint
+  fastify.get('/api/provisioning/jobs/:jobId', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    const job = getJob(request.params.jobId);
+    if (!job) return reply.status(404).send({ success: false, message: 'Job not found' });
+    reply.send({ success: true, job });
+  });
+
+  // Delete server
+  fastify.delete('/api/provisioning/servers/:serverName', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      
+      const result = await provisioner.deleteServer(serverName);
+      
+      return {
+        success: true,
+        message: `Server ${serverName} deleted successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to delete server:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to delete server'
+      });
+    }
+  });
+
+  // Delete cluster
+  fastify.delete('/api/provisioning/clusters/:clusterName', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const { force } = request.query;
+      
+      if (force === 'true') {
+        // Force delete - remove cluster directory without checking config
+        const clusterPath = path.join(provisioner.clustersPath, clusterName);
+        try {
+          const { execSync } = await import('child_process');
+          execSync(`rmdir /s /q "${clusterPath}"`, { stdio: 'inherit' });
+          logger.info(`Force deleted cluster: ${clusterName}`);
+          return {
+            success: true,
+            message: `Cluster ${clusterName} force deleted successfully`,
+            data: { force: true }
+          };
+        } catch (error) {
+          logger.error(`Failed to force delete cluster ${clusterName}:`, error);
+          return reply.status(500).send({
+            success: false,
+            message: `Failed to force delete cluster: ${error.message}`
+          });
+        }
+      } else {
+        // Normal delete
+        const result = await provisioner.deleteCluster(clusterName);
+        
+        return {
+          success: true,
+          message: `Cluster ${clusterName} deleted successfully`,
+          data: result
+        };
+      }
+    } catch (error) {
+      logger.error('Failed to delete cluster:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to delete cluster'
+      });
+    }
+  });
+
+  // Get system status
+  fastify.get('/api/provisioning/status', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const status = await getInstallationStatus();
+      
+      return {
+        success: true,
+        status
+      };
+    } catch (error) {
+      logger.error('Failed to get installation status:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get installation status'
+      });
+    }
+  });
+
+  // Get system info
+  fastify.get('/api/provisioning/system-info', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const systemInfo = await provisioner.getSystemInfo();
+      
+      return {
+        success: true,
+        status: systemInfo
+      };
+    } catch (error) {
+      logger.error('Failed to get system info:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get system info'
+      });
+    }
+  });
+
+  // Get system requirements
+  fastify.get('/api/provisioning/requirements', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const systemInfo = await provisioner.getSystemInfo();
+      const diskSpace = await provisioner.getDiskSpace();
+      const memoryInfo = await provisioner.getMemoryInfo();
+      
+      const requirements = {
+        system: systemInfo,
+        disk: diskSpace,
+        memory: memoryInfo,
+        recommendations: {
+          minRam: '8GB',
+          recommendedRam: '16GB',
+          minDisk: '50GB per server',
+          recommendedDisk: '100GB per server',
+          minCpu: '2 cores per server',
+          recommendedCpu: '4 cores per server'
+        }
+      };
+      
+      return {
+        success: true,
+        requirements
+      };
+    } catch (error) {
+      logger.error('Failed to get system requirements:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get system requirements'
+      });
+    }
+  });
+}
+
+// Helper functions
+async function getSteamCmdPaths() {
+  const commonPaths = [
+    'C:\\Steam\\steamcmd',
+    'C:\\Program Files\\Steam\\steamcmd',
+    'C:\\Program Files (x86)\\Steam\\steamcmd',
+    path.join(process.env.USERPROFILE || '', 'Steam', 'steamcmd'),
+    path.join(process.env.LOCALAPPDATA || '', 'Steam', 'steamcmd')
+  ];
+
+  const validPaths = [];
+  for (const steamCmdPath of commonPaths) {
+    try {
+      await fs.access(path.join(steamCmdPath, 'steamcmd.exe'));
+      validPaths.push(steamCmdPath);
+    } catch {
+      // Path not accessible
+    }
+  }
+
+  return validPaths;
+}
+
+async function getAvailableDrives() {
+  if (process.platform !== 'win32') {
+    return [];
+  }
+
+  try {
+    const { execSync } = await import('child_process');
+    const output = execSync('wmic logicaldisk get size,freespace,caption', { encoding: 'utf8' });
+    const lines = output.split('\n').slice(1); // Skip header
+    
+    const drives = [];
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 3) {
+        const caption = parts[0];
+        const freeSpace = parseInt(parts[1]);
+        const size = parseInt(parts[2]);
+        
+        if (caption && !isNaN(freeSpace) && !isNaN(size)) {
+          drives.push({
+            drive: caption,
+            freeSpace: Math.floor(freeSpace / (1024 * 1024 * 1024)), // GB
+            totalSpace: Math.floor(size / (1024 * 1024 * 1024)), // GB
+            freeSpacePercent: Math.floor((freeSpace / size) * 100)
+          });
+        }
+      }
+    }
+    
+    return drives;
+  } catch (error) {
+    logger.error('Failed to get available drives:', error);
+    return [];
+  }
+}
+
+async function getInstallationStatus() {
+  try {
+    const basePath = config.server.native.basePath || 'C:\\ASA-Servers';
+    
+    const status = {
+      steamcmd: false,
+      servers: [],
+      clusters: []
+    };
+    
+    // Check SteamCMD
+    const steamcmdPath = process.env.STEAMCMD_PATH || 'C:\\SteamCMD';
+    try {
+      await fs.access(path.join(steamcmdPath, 'steamcmd.exe'));
+      status.steamcmd = true;
+    } catch {
+      // SteamCMD not found
+    }
+    
+    // Check servers
+    try {
+      const serversPath = path.join(basePath, 'servers');
+      const servers = await fs.readdir(serversPath);
+      status.servers = servers.filter(server => {
+        try {
+          return fs.statSync(path.join(serversPath, server)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      // No servers found
+    }
+    
+    // Check clusters
+    try {
+      const clustersPath = path.join(basePath, 'clusters');
+      const clusters = await fs.readdir(clustersPath);
+      status.clusters = clusters.filter(cluster => {
+        try {
+          return fs.statSync(path.join(clustersPath, cluster)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      // No clusters found
+    }
+    
+    return status;
+  } catch (error) {
+    logger.error('Failed to get installation status:', error);
+    return {
+      steamcmd: false,
+      servers: [],
+      clusters: []
+    };
+  }
+} 

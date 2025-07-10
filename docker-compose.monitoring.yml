@@ -1,55 +1,4 @@
 services:
-  ark-api:
-    container_name: asa-control-api
-    build: .
-    ports:
-      - "${PORT:-4000}:${PORT:-4000}"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./logs:/app/logs
-      # Mount ASA server data: external path configurable, internal path fixed
-      - ${NATIVE_BASE_PATH:-G:/ARK}:/opt/asa/asa-server
-      # Mount PowerShell for Windows host access
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe:/usr/bin/powershell:ro"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0:/usr/share/powershell:ro"
-    environment:
-      - NODE_ENV=${NODE_ENV:-production}
-      - DOCKER_SOCKET_PATH=${DOCKER_SOCKET_PATH:-/var/run/docker.sock}
-      - SERVER_MODE=${SERVER_MODE:-hybrid}
-      - NATIVE_BASE_PATH=${NATIVE_BASE_PATH:-G:/ARK}
-      - NATIVE_SERVER_PATH=${NATIVE_BASE_PATH:-G:/ARK}/servers
-      - NATIVE_CONFIG_FILE=${NATIVE_CONFIG_FILE:-native-servers.json}
-      - STEAMCMD_PATH=${STEAMCMD_PATH:-}
-      - AUTO_INSTALL_STEAMCMD=${AUTO_INSTALL_STEAMCMD:-true}
-      - ASA_CONFIG_SUB_PATH=${ASA_CONFIG_SUB_PATH:-Config/WindowsServer}
-      - ASA_UPDATE_LOCK_PATH=${ASA_UPDATE_LOCK_PATH:-/opt/asa/.update.lock}
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:4010}
-      - PORT=${PORT:-4000}
-      - JWT_SECRET=${JWT_SECRET:-fallback-secret-change-in-production}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
-      - RCON_DEFAULT_PORT=${RCON_DEFAULT_PORT:-32330}
-      - RCON_PASSWORD=${RCON_PASSWORD:-admin}
-      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-100}
-      - RATE_LIMIT_TIME_WINDOW=${RATE_LIMIT_TIME_WINDOW:-900000}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - LOG_FILE_PATH=${LOG_FILE_PATH:-./logs/app.log}
-      - METRICS_ENABLED=${METRICS_ENABLED:-true}
-      # PowerShell configuration
-      - POWERSHELL_ENABLED=true
-      - POWERSHELL_PATH=/usr/bin/powershell
-      # Windows Agent configuration
-      - WINDOWS_AGENT_ENABLED=true
-      - WINDOWS_AGENT_URL=http://host.docker.internal:5000
-    restart: unless-stopped
-    networks:
-      - monitoring
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-4000}/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
   prometheus:
     container_name: asa-control-prometheus
     image: prom/prometheus:latest
@@ -129,4 +78,3 @@ volumes:
 networks:
   monitoring:
     driver: bridge 
- 

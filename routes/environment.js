@@ -1,5 +1,10 @@
 import environmentService from '../services/environment.js';
 import { requireRead, requireWrite, requireAdmin } from '../middleware/auth.js';
+import config from '../config/index.js';
+import path from 'path';
+import fs from 'fs/promises';
+import logger from '../utils/logger.js';
+import { requirePermission } from '../middleware/auth.js';
 
 /**
  * Environment management routes for .env and docker-compose.yml files
@@ -173,6 +178,35 @@ export default async function environmentRoutes(fastify, options) {
       return result;
     } catch (error) {
       fastify.log.error('Error updating Docker Compose file:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Reload environment configuration
+  fastify.post('/api/environment/reload', {
+    preHandler: [requireAdmin],
+    schema: {
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' },
+            needsRestart: { type: 'boolean' },
+            restartCommand: { type: 'string', nullable: true }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const result = await environmentService.reloadEnvironment();
+      return result;
+    } catch (error) {
+      fastify.log.error('Error reloading environment:', error);
       return reply.status(500).send({
         success: false,
         message: error.message
@@ -486,6 +520,42 @@ export default async function environmentRoutes(fastify, options) {
       return reply.status(500).send({
         success: false,
         message: error.message
+      });
+    }
+  });
+
+  // Get lock status
+  fastify.get('/api/lock-status', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const lockFilePath = config.environment.lockFilePath || path.join(process.cwd(), '.update.lock');
+      
+      try {
+        await fs.access(lockFilePath);
+        const lockContent = await fs.readFile(lockFilePath, 'utf8');
+        const lockData = JSON.parse(lockContent);
+        
+        return {
+          success: true,
+          locked: true,
+          lockData
+        };
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          return {
+            success: true,
+            locked: false,
+            lockData: null
+          };
+        }
+        throw error;
+      }
+    } catch (error) {
+      logger.error('Failed to get lock status:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get lock status'
       });
     }
   });

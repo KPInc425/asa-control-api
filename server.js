@@ -16,6 +16,9 @@ import configRoutes from './routes/configs.js';
 import authRoutes from './routes/auth.js';
 import logsRoutes from './routes/logs.js';
 import environmentRoutes from './routes/environment.js';
+import nativeServerRoutes from './routes/native-servers.js';
+import provisioningRoutes from './routes/provisioning.js';
+import StaticServer from './services/static-server.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -26,8 +29,14 @@ const fastify = Fastify({
 
 // Register plugins
 // Register plugins
+
+// CORS configuration
+const corsOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000'];
+
 await fastify.register(cors, {
-  origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'], // Allow frontend origins
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -36,6 +45,10 @@ await fastify.register(cors, {
 // Configure body parser
 fastify.addContentTypeParser('application/json', { parseAs: 'string' }, function (req, body, done) {
   try {
+    // Handle empty body
+    if (!body || body.trim() === '') {
+      return done(null, {});
+    }
     const json = JSON.parse(body);
     done(null, json);
   } catch (err) {
@@ -44,9 +57,19 @@ fastify.addContentTypeParser('application/json', { parseAs: 'string' }, function
   }
 });
 
+// Apply rate limiting with exclusions for auth endpoints
 await fastify.register(rateLimit, {
   max: config.rateLimit.max,
   timeWindow: config.rateLimit.timeWindow,
+  skipOnError: true,
+  keyGenerator: function (request) {
+    // Skip rate limiting for authentication endpoints
+    if (request.url.startsWith('/api/auth/')) {
+      return 'auth-exempt';
+    }
+    // Use IP address for rate limiting
+    return request.ip;
+  },
   errorResponseBuilder: function (request, context) {
     return {
       success: false,
@@ -99,6 +122,24 @@ await fastify.register(configRoutes);
 await fastify.register(authRoutes);
 await fastify.register(logsRoutes);
 await fastify.register(environmentRoutes);
+await fastify.register(nativeServerRoutes);
+await fastify.register(provisioningRoutes);
+
+// Initialize static server
+const staticServer = new StaticServer();
+
+// Serve static files (frontend)
+fastify.get('/*', async (request, reply) => {
+  // Skip API routes
+  if (request.url.startsWith('/api/') || 
+      request.url.startsWith('/health') || 
+      request.url.startsWith('/metrics') ||
+      request.url.startsWith('/socket.io/')) {
+    return reply.callNotFound();
+  }
+  
+  return await staticServer.serveStatic(request, reply);
+});
 
 // Socket.IO instance (will be initialized after Fastify is listening)
 let io;
@@ -440,25 +481,26 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Start server
 const start = async () => {
   try {
-    // Start Fastify server normally
-    await fastify.listen({
-      port: config.server.port,
-      host: config.server.host
-    });
+    // Create HTTP server first
+    const server = createServer();
     
-    // Get the underlying HTTP server from Fastify
-    const server = fastify.server;
-    
-    // Attach Socket.IO to the HTTP server
+    // Attach Socket.IO to the HTTP server before Fastify starts
     io = new SocketIOServer(server, {
       cors: {
         origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
         credentials: true
       }
     });
-    
+
     // Setup Socket.IO event handlers
     setupSocketIO();
+    
+    // Start Fastify server with the existing HTTP server
+    await fastify.listen({
+      port: config.server.port,
+      host: config.server.host,
+      server: server
+    });
     
     logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
     logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);

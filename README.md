@@ -24,56 +24,132 @@ A secure, high-performance Node.js backend API for managing ARK: Survival Ascend
 - Access to Docker socket
 - ASA containers running on the same host
 
-## 🛠️ Installation
+## 🛠️ Installation & Setup
 
-### 1. Clone the repository
-```bash
-git clone <repository-url>
-cd asa-docker-control-api
+### **One-Command Setup (Recommended)**
+
+For new users, run the complete setup wizard:
+
+**PowerShell (Recommended):**
+```powershell
+.\setup-asa.ps1
 ```
 
-### 2. Install dependencies
-```bash
-yarn install
+**Command Prompt (Alternative):**
+```cmd
+setup-asa.bat
 ```
 
-### 3. Configure environment
+This single script will:
+1. **Configure Environment** - Set up your `.env` file with paths and preferences
+2. **Install Dependencies** - Install all required npm packages
+3. **Initialize System** - Create necessary directories and check system
+4. **Setup SteamCMD** - Install or configure SteamCMD for ASA downloads
+5. **Install ASA Binaries** - Download ASA server files
+6. **Start Backend** - Launch the API server (native or Docker mode)
+7. **Launch Console** - Open interactive console for cluster creation
+
+### **Manual Setup (Advanced Users)**
+
+If you prefer manual setup:
+
+#### 1. Configure Environment
 ```bash
 cp env.example .env
-# Edit .env with your configuration
+# Edit .env with your preferences
 ```
 
-### 4. Start the application
-
-#### Development mode:
+#### 2. Install Dependencies
 ```bash
-yarn dev
+npm install
 ```
 
-#### Production mode:
+#### 3. Start the Application
+
+**Native Mode (Recommended for Windows):**
 ```bash
-yarn start
+npm start
 ```
 
-#### Using Docker Compose (recommended):
+**Docker Mode:**
 ```bash
 docker-compose up -d
 ```
 
+**Development Mode:**
+```bash
+npm run dev
+```
+
+#### 4. Interactive Console
+```bash
+node scripts/interactive-console.js
+```
+
+### **Quick Commands**
+
+| Action | Command |
+|--------|---------|
+| Complete Setup (PowerShell) | `.\setup-asa.ps1` |
+| Complete Setup (CMD) | `setup-asa.bat` |
+| Start Backend | `npm start` |
+| Interactive Console | `node scripts/interactive-console.js` |
+| Docker Mode | `docker-compose up -d` |
+| Help (PowerShell) | `.\setup-asa.ps1 -Help` |
+
+The interactive console provides a user-friendly interface for:
+- Creating and managing ASA server clusters
+- Installing SteamCMD and ASA binaries
+- Configuring environment settings
+- Viewing system information
+- Managing server operations
+
 ## ⚙️ Configuration
+
+### First-Time Setup
+
+The setup wizard will guide you through configuring the following essential settings:
+
+1. **Base Path**: Where all ASA server files will be stored (e.g., `G:\ARK`, `D:\ASA`)
+2. **Server Mode**: Choose between `native` (recommended) or `docker` mode
+3. **SteamCMD**: Configure SteamCMD installation or use existing installation
+4. **API Settings**: Port, log level, and other backend configuration
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Server port | `3000` |
-| `HOST` | Server host | `0.0.0.0` |
-| `NODE_ENV` | Environment | `development` |
-| `JWT_SECRET` | JWT signing secret | `fallback-secret` |
-| `DOCKER_SOCKET_PATH` | Docker socket path | `/var/run/docker.sock` |
-| `ASA_CONFIG_PATH` | ASA configs directory | `/opt/asa/configs` |
-| `RCON_DEFAULT_PORT` | Default RCON port | `32330` |
-| `RCON_PASSWORD` | Default RCON password | `admin` |
+| Variable | Description | Default | Requires Restart |
+|----------|-------------|---------|------------------|
+| `PORT` | Server port | `3000` | ✅ |
+| `HOST` | Server host | `0.0.0.0` | ✅ |
+| `NODE_ENV` | Environment | `development` | ❌ |
+| `JWT_SECRET` | JWT signing secret | `fallback-secret` | ❌ |
+| `SERVER_MODE` | Server mode (native/docker) | `native` | ✅ |
+| `NATIVE_BASE_PATH` | Base path for ASA files | `G:\ARK` | ✅ |
+| `STEAMCMD_PATH` | SteamCMD installation path | Auto-detected | ❌ |
+| `AUTO_INSTALL_STEAMCMD` | Auto-install SteamCMD if not found | `true` | ❌ |
+| `DOCKER_SOCKET_PATH` | Docker socket path | `/var/run/docker.sock` | ✅ |
+| `ASA_CONFIG_SUB_PATH` | ASA configs directory | `/opt/asa/configs` | ❌ |
+| `RCON_DEFAULT_PORT` | Default RCON port | `32330` | ❌ |
+| `RCON_PASSWORD` | Default RCON password | `admin` | ❌ |
+
+### Environment Management
+
+The system provides an API endpoint to reload environment configuration:
+
+#### POST `/api/environment/reload`
+Reload environment variables and check if Docker restart is needed.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Environment configuration reloaded",
+  "needsRestart": false,
+  "restartCommand": null
+}
+```
+
+**Note:** Variables marked with ✅ require Docker restart to take effect. The API will indicate if a restart is needed.
 
 ### Default Users
 
@@ -441,3 +517,13 @@ The environment management system automatically creates backups before making ch
 ## 📝 License
 
 MIT License - see LICENSE file for details.
+
+## Unified Startup (Optional)
+
+If you have both the backend and frontend repos in the same parent folder, you can use the `start-asa-suite.ps1` script and `docker-compose.unified.yml` to start both at once. These files are copies for convenience; the latest version is maintained at the root of the suite if you have one.
+
+- To start both: `powershell -ExecutionPolicy Bypass -File start-asa-suite.ps1 unified`
+- To start only backend: `powershell -ExecutionPolicy Bypass -File start-asa-suite.ps1 backend`
+- To start only frontend: `powershell -ExecutionPolicy Bypass -File start-asa-suite.ps1 frontend`
+
+Otherwise, use the individual scripts as usual.

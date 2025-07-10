@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "setup-local": "node setup-local.js",
+    "build-frontend": "cd ../asa-servers-dashboard && npm run build && cd ../asa-docker-control-api && node setup-local.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

@@ -8,15 +8,15 @@ echo "1. Checking server environment..."
 echo "   Hostname: $(hostname)"
 echo "   IP Address: $(hostname -I | awk '{print $1}')"
 echo "   Docker version: $(docker --version)"
-echo "   Docker Compose version: $(docker-compose --version)"
+echo "   Docker Compose version: $(docker compose version)"
 
 # Check if containers are running
 echo ""
 echo "2. Checking Docker containers..."
-if command -v docker-compose &> /dev/null; then
-    docker-compose ps
+if command -v docker &> /dev/null; then
+    docker compose ps
 else
-    echo "   docker-compose not found, checking with docker ps..."
+    echo "   docker not found, checking with docker ps..."
     docker ps --filter "name=asa-docker-control-api"
 fi
 
@@ -75,7 +75,7 @@ echo ""
 echo "✅ Troubleshooting complete!"
 echo ""
 echo "📋 Next Steps:"
-echo "   1. If containers aren't running: docker-compose up -d"
+echo "   1. If containers aren't running: docker compose up -d"
 echo "   2. If DNS fails: Check domain configuration"
 echo "   3. If ports blocked: Configure firewall"
 echo "   4. If web server error: Check nginx/apache configuration" 

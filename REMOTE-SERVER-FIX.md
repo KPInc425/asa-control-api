@@ -54,13 +54,13 @@ nslookup ark.ilgaming.xyz
 ### Check 2: Docker Containers
 ```bash
 # Check if containers are running
-docker-compose ps
+docker compose ps
 
 # If not running, start them:
-docker-compose up -d
+docker compose up -d
 
 # Check logs if there are issues:
-docker-compose logs ark-api
+docker compose logs ark-api
 ```
 
 ### Check 3: Nginx Configuration
@@ -204,10 +204,10 @@ nano .env
 ### 2. Start API
 ```bash
 # Start containers
-docker-compose up -d
+docker compose up -d
 
 # Check status
-docker-compose ps
+docker compose ps
 
 # Test locally
 curl http://localhost:4000/health
