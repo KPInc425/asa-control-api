@@ -1,5 +1,6 @@
 # ASA API Windows Service
 # Runs the ASA API backend as a Windows service
+# Compatible with PowerShell 5.1
 
 param(
     [string]$ApiPath = "C:\ASA-API",
@@ -29,29 +30,25 @@ function Test-NodeJS {
             Write-Log "Node.js found: $nodeVersion"
             return $true
         }
-    }
-    catch {
+    } catch {
         Write-Log "Node.js not found in PATH" "ERROR"
         return $false
     }
     return $false
 }
 
-# Start the API server
-function Start-APIServer {
+# Start the API server in background
+function Start-ASAApiServer {
     try {
         Write-Log "Starting ASA API server on port $Port"
-        
-        # Change to API directory
+
         Set-Location $ApiPath
-        
-        # Check if package.json exists
+
         if (!(Test-Path "package.json")) {
             Write-Log "package.json not found in $ApiPath" "ERROR"
             return $false
         }
-        
-        # Install dependencies if node_modules doesn't exist
+
         if (!(Test-Path "node_modules")) {
             Write-Log "Installing dependencies..."
             & npm install
@@ -60,99 +57,88 @@ function Start-APIServer {
                 return $false
             }
         }
-        
+
         # Set environment variables
         $env:NODE_ENV = "production"
         $env:PORT = $Port
+        $env:HOST = "0.0.0.0"
         $env:SERVER_MODE = "native"
         $env:NATIVE_BASE_PATH = "G:\ARK"
         $env:JWT_SECRET = "fallback-secret-change-in-production"
-        $env:CORS_ORIGIN = "http://localhost:4010"
-        
-        # Start the server
-        Write-Log "Starting server with: $NodeExe server.js"
-        & $NodeExe server.js
-        
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "Server exited with code $LASTEXITCODE" "ERROR"
-            return $false
-        }
-        
+        $env:JWT_EXPIRES_IN = "24h"
+        $env:CORS_ORIGIN = "http://localhost:3000,http://localhost:5173,http://localhost:4000,http://localhost:4010"
+        $env:DOCKER_ENABLED = "false"
+        $env:RATE_LIMIT_MAX = "100"
+        $env:RATE_LIMIT_TIME_WINDOW = "900000"
+        $env:LOG_LEVEL = "info"
+        $env:LOG_FILE_PATH = "$LogPath\app.log"
+        $env:METRICS_ENABLED = "true"
+        $env:RCON_DEFAULT_PORT = "32330"
+        $env:RCON_PASSWORD = "admin"
+        $env:ASA_CONFIG_SUB_PATH = "Config/WindowsServer"
+        $env:AUTO_INSTALL_STEAMCMD = "true"
+
+        # Launch Node.js in background
+        Write-Log "Launching: $NodeExe server.js"
+        Start-Process -FilePath $NodeExe `
+            -ArgumentList "server.js" `
+            -WorkingDirectory $ApiPath `
+            -RedirectStandardOutput "$LogPath\node-out.log" `
+            -RedirectStandardError "$LogPath\node-err.log" `
+            -WindowStyle Hidden
+
+        Write-Log "Node.js process launched successfully"
         return $true
-    }
-    catch {
-        Write-Log "Error starting API server: $($_.Exception.Message)" "ERROR"
+    } catch {
+        Write-Log "Error launching API server: $($_.Exception.Message)" "ERROR"
         return $false
     }
 }
 
-# Main service loop
-function Start-Service {
-    Write-Log "ASA API Service starting..."
-    
-    # Check Node.js
+# Main entry point
+function Start-ASAApiService {
+    Write-Log "ASA API Service initializing..."
+
     if (!(Test-NodeJS)) {
         Write-Log "Node.js is required but not found. Please install Node.js and try again." "ERROR"
         return
     }
-    
-    # Create environment file if it doesn't exist
+
+    # Create .env file if missing
     $envFile = Join-Path $ApiPath ".env"
     if (!(Test-Path $envFile)) {
         $envContent = @"
 NODE_ENV=production
 PORT=$Port
+HOST=0.0.0.0
 SERVER_MODE=native
 NATIVE_BASE_PATH=G:\ARK
 JWT_SECRET=fallback-secret-change-in-production
-CORS_ORIGIN=http://localhost:4010
+JWT_EXPIRES_IN=24h
+CORS_ORIGIN=http://localhost:3000,http://localhost:5173,http://localhost:4000,http://localhost:4010
+DOCKER_ENABLED=false
+RATE_LIMIT_MAX=100
+RATE_LIMIT_TIME_WINDOW=900000
 LOG_LEVEL=info
 LOG_FILE_PATH=$LogPath\app.log
+METRICS_ENABLED=true
+RCON_DEFAULT_PORT=32330
+RCON_PASSWORD=admin
+ASA_CONFIG_SUB_PATH=Config/WindowsServer
+AUTO_INSTALL_STEAMCMD=true
 "@
         $envContent | Set-Content $envFile
-        Write-Log "Created environment file: $envFile"
+        Write-Log "Created .env file at $envFile"
     }
-    
-    # Service loop with restart capability
-    $restartCount = 0
-    $maxRestarts = 5
-    $restartDelay = 30
-    
-    while ($true) {
-        try {
-            Write-Log "Starting API server (attempt $($restartCount + 1))"
-            $success = Start-APIServer
-            
-            if ($success) {
-                Write-Log "API server stopped normally"
-                break
-            } else {
-                $restartCount++
-                if ($restartCount -ge $maxRestarts) {
-                    Write-Log "Maximum restart attempts reached. Service will stop." "ERROR"
-                    break
-                }
-                
-                Write-Log "API server failed. Restarting in $restartDelay seconds... (attempt $restartCount of $maxRestarts)"
-                Start-Sleep -Seconds $restartDelay
-            }
-        }
-        catch {
-            Write-Log "Service error: $($_.Exception.Message)" "ERROR"
-            $restartCount++
-            
-            if ($restartCount -ge $maxRestarts) {
-                Write-Log "Maximum restart attempts reached due to errors. Service will stop." "ERROR"
-                break
-            }
-            
-            Write-Log "Restarting in $restartDelay seconds... (attempt $restartCount of $maxRestarts)"
-            Start-Sleep -Seconds $restartDelay
-        }
+
+    # Start the server once and exit
+    $success = Start-ASAApiServer
+    if ($success) {
+        Write-Log "ASA API Service launched successfully"
+    } else {
+        Write-Log "ASA API Service failed to launch" "ERROR"
     }
-    
-    Write-Log "ASA API Service stopped"
 }
 
 # Start the service
-Start-Service 
+Start-ASAApiService
