@@ -1,9 +1,9 @@
 import dockerService from '../services/docker.js';
-import { createServerManager } from '../services/server-manager.js';
+import { DockerServerManager } from '../services/server-manager.js';
 import { requireRead, requireWrite } from '../middleware/auth.js';
 
-// Create hybrid server manager instance that handles both Docker and native servers
-const serverManager = createServerManager(dockerService);
+// Create Docker-only server manager instance
+const serverManager = new DockerServerManager(dockerService);
 
 /**
  * Container routes for ASA container management
@@ -51,24 +51,36 @@ export default async function containerRoutes(fastify, options) {
     try {
       const containers = await serverManager.listServers();
       
+      // Filter to only include actual Docker containers (not native servers)
+      const dockerContainers = containers.filter(container => 
+        container.type === 'container' || 
+        (container.image && !container.image.includes('native'))
+      );
+      
       // Transform the data to match the expected schema
-      const transformedContainers = containers.map(container => ({
-        id: container.name, // Use name as ID for native servers
+      const transformedContainers = dockerContainers.map(container => ({
+        id: container.name, // Use name as ID for containers
         name: container.name,
-        image: container.image || 'native',
+        image: container.image || 'unknown',
         status: container.status,
         created: container.created,
         ports: container.ports || [],
         labels: container.labels || {},
         memoryUsage: container.memoryUsage || 0,
         cpuUsage: container.cpuUsage || 0,
-        type: container.type || 'native',
+        type: 'container', // Force type to be container
         serverCount: container.serverCount || 1,
         maps: container.maps || 'Unknown'
       }));
       
       return { success: true, containers: transformedContainers };
     } catch (error) {
+      // If Docker is not running, return empty list instead of error
+      if (error.message.includes('connect ENOENT') || error.message.includes('Failed to list containers')) {
+        fastify.log.warn('Docker not running, returning empty container list');
+        return { success: true, containers: [] };
+      }
+      
       fastify.log.error('Error listing containers:', error);
       return reply.status(500).send({
         success: false,
@@ -299,6 +311,45 @@ export default async function containerRoutes(fastify, options) {
       return { success: true, running };
     } catch (error) {
       fastify.log.error(`Error checking running status for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Get container status (compatibility with native servers)
+  fastify.get('/api/containers/:name/status', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            status: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      const running = await serverManager.isRunning(name);
+      const status = {
+        status: running ? 'running' : 'stopped',
+        running: running
+      };
+      return { success: true, status };
+    } catch (error) {
+      fastify.log.error(`Error getting container status for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message

@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { promises as fs, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { EventEmitter } from 'events';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import PowerShellHelper from './powershell-helper.js';
@@ -62,13 +63,13 @@ export class ServerManager {
 export class DockerServerManager extends ServerManager {
   constructor(dockerService) {
     super();
-    this.docker = dockerService;
+    this.dockerService = dockerService;
   }
 
   async start(name) {
     try {
       logger.info(`Starting Docker container: ${name}`);
-      await this.docker.startContainer(name);
+      await this.dockerService.startContainer(name);
       return { success: true, message: `Container ${name} started successfully` };
     } catch (error) {
       logger.error(`Failed to start Docker container ${name}:`, error);
@@ -79,7 +80,7 @@ export class DockerServerManager extends ServerManager {
   async stop(name) {
     try {
       logger.info(`Stopping Docker container: ${name}`);
-      await this.docker.stopContainer(name);
+      await this.dockerService.stopContainer(name);
       return { success: true, message: `Container ${name} stopped successfully` };
     } catch (error) {
       logger.error(`Failed to stop Docker container ${name}:`, error);
@@ -90,7 +91,7 @@ export class DockerServerManager extends ServerManager {
   async restart(name) {
     try {
       logger.info(`Restarting Docker container: ${name}`);
-      await this.docker.restartContainer(name);
+      await this.dockerService.restartContainer(name);
       return { success: true, message: `Container ${name} restarted successfully` };
     } catch (error) {
       logger.error(`Failed to restart Docker container ${name}:`, error);
@@ -100,23 +101,15 @@ export class DockerServerManager extends ServerManager {
 
   async getStats(name) {
     try {
-      const container = await this.docker.getContainer(name);
-      const stats = await container.stats({ stream: false });
-      
-      // Parse Docker stats
-      const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-      const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-      const cpuPercent = (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100;
-      
-      const memoryUsage = stats.memory_stats.usage / (1024 * 1024); // Convert to MB
+      const stats = await this.dockerService.getContainerStats(name);
       
       return new ServerStats(
         name,
-        container.State.Status,
-        Math.round(cpuPercent * 100) / 100,
-        Math.round(memoryUsage * 100) / 100,
-        Math.floor((Date.now() - new Date(container.State.StartedAt).getTime()) / 1000),
-        container.State.Pid
+        'running', // Docker containers are either running or stopped
+        parseFloat(stats.cpu.percentage),
+        parseFloat(stats.memory.percentage),
+        0, // Docker uptime would need to be calculated differently
+        null // Docker doesn't expose PID directly
       );
     } catch (error) {
       logger.error(`Failed to get Docker stats for ${name}:`, error);
@@ -126,14 +119,8 @@ export class DockerServerManager extends ServerManager {
 
   async getLogs(name, options = {}) {
     try {
-      const container = await this.docker.getContainer(name);
-      const logStream = await container.logs({
-        stdout: true,
-        stderr: true,
-        tail: options.tail || 100,
-        follow: options.follow || false
-      });
-      return logStream;
+      const logs = await this.dockerService.getContainerLogs(name, options);
+      return logs.split('\n').filter(line => line.trim());
     } catch (error) {
       logger.error(`Failed to get Docker logs for ${name}:`, error);
       throw error;
@@ -142,19 +129,14 @@ export class DockerServerManager extends ServerManager {
 
   async listServers() {
     try {
-      const containers = await this.docker.listContainers();
-      return containers.filter(container => 
-        container.Names.some(name => 
-          name.startsWith('/asa-server-') && 
-          !name.includes('dashboard') && 
-          !name.includes('asa-dashboard-ui')
-        )
-      ).map(container => ({
-        name: container.Names[0].substring(1), // Remove leading slash
-        status: container.State,
-        image: container.Image,
-        ports: container.Ports,
-        created: container.Created
+      const containers = await this.dockerService.listContainers();
+      return containers.map(container => ({
+        name: container.name,
+        status: container.status,
+        image: container.image,
+        ports: container.ports,
+        created: container.created,
+        type: 'container'
       }));
     } catch (error) {
       logger.error('Failed to list Docker containers:', error);
@@ -164,9 +146,9 @@ export class DockerServerManager extends ServerManager {
 
   async isRunning(name) {
     try {
-      const container = await this.docker.getContainer(name);
-      const info = await container.inspect();
-      return info.State.Running;
+      const containers = await this.dockerService.listContainers();
+      const container = containers.find(c => c.name === name);
+      return container ? container.status === 'running' : false;
     } catch (error) {
       return false;
     }
@@ -183,6 +165,9 @@ export class NativeServerManager extends ServerManager {
     this.serversPath = path.join(this.basePath, 'servers');
     this.clustersPath = path.join(this.basePath, 'clusters');
     this.processes = new Map(); // Initialize the processes Map
+    
+    // Set up EventEmitter for crash detection
+    this.eventEmitter = new EventEmitter();
   }
 
   async start(name) {
@@ -202,52 +187,232 @@ export class NativeServerManager extends ServerManager {
         throw new Error(`Server configuration not found: ${name}`);
       }
       
+      // Debug: Log the server info to see what ports we have
+      console.log(`Server info for ${name}:`, {
+        name: serverInfo.name,
+        gamePort: serverInfo.gamePort,
+        port: serverInfo.port,
+        queryPort: serverInfo.queryPort,
+        rconPort: serverInfo.rconPort,
+        serverPath: serverInfo.serverPath
+      });
+      
       // Check if server path exists
       if (!serverInfo.serverPath || !existsSync(serverInfo.serverPath)) {
         throw new Error(`Server path does not exist: ${serverInfo.serverPath}`);
       }
       
-      // Build command line arguments
-      const args = this.buildServerArgsFromCluster(serverInfo);
+      // Check if the start.bat file exists
+      const startBatPath = path.join(serverInfo.serverPath, 'start.bat');
+      if (!existsSync(startBatPath)) {
+        throw new Error(`Start.bat file not found: ${startBatPath}`);
+      }
       
-      // Create the full command
-      const serverExePath = path.join(serverInfo.serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
-      const fullCommand = `"${serverExePath}" ${args.join(' ')}`;
+      console.log(`Using start.bat file: ${startBatPath}`);
+      console.log(`Working directory: ${serverInfo.serverPath}`);
       
-      console.log(`Starting server ${name} with command: ${fullCommand}`);
-      
-      // Start the server process
-      const childProcess = spawn(serverExePath, args, {
+      // Start the server using the start.bat file
+      const childProcess = spawn('cmd', ['/c', 'start.bat'], {
         cwd: serverInfo.serverPath,
-        detached: true,
+        detached: false,
         stdio: ['ignore', 'pipe', 'pipe']
       });
       
-      // Store process info
+      console.log(`Process spawned with PID: ${childProcess.pid}`);
+      
+      // Store process info with enhanced monitoring
       if (!this.processes) {
         this.processes = new Map();
       }
-      this.processes.set(name, {
+      
+      const processInfo = {
         process: childProcess,
         startTime: new Date(),
-        command: fullCommand
+        command: `cmd /c start.bat`,
+        name: name,
+        serverInfo: serverInfo,
+        startupOutput: '',
+        startupErrors: '',
+        status: 'starting'
+      };
+      
+      this.processes.set(name, processInfo);
+      
+      // Capture startup output for error detection
+      childProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        processInfo.startupOutput += output;
+        console.log(`[${name}] STDOUT: ${output.trim()}`);
       });
       
-      // Wait a moment to see if the process starts successfully
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      childProcess.stderr.on('data', (data) => {
+        const error = data.toString();
+        processInfo.startupErrors += error;
+        console.error(`[${name}] STDERR: ${error.trim()}`);
+      });
       
-      // Check if process is still running
-      if (childProcess.killed) {
-        throw new Error(`Server process failed to start: ${name}`);
+      // Add process event listeners for debugging
+      childProcess.on('error', (error) => {
+        console.error(`[${name}] Process error event:`, error);
+        processInfo.status = 'error';
+        processInfo.error = error.message;
+        processInfo.errorTime = new Date();
+      });
+      
+      childProcess.on('exit', (code, signal) => {
+        console.log(`[${name}] Process exit event - Code: ${code}, Signal: ${signal}`);
+        processInfo.status = 'exited';
+        processInfo.exitCode = code;
+        processInfo.exitSignal = signal;
+        processInfo.exitTime = new Date();
+      });
+      
+      childProcess.on('close', (code, signal) => {
+        console.log(`[${name}] Process close event - Code: ${code}, Signal: ${signal}`);
+        processInfo.status = 'closed';
+        processInfo.closeCode = code;
+        processInfo.closeSignal = signal;
+        processInfo.closeTime = new Date();
+      });
+      
+      // Enhanced startup monitoring - pass references to the actual output
+      // Add a small delay to capture any immediate output
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const startupResult = await this.monitorStartup(name, childProcess, serverInfo, processInfo);
+      
+      if (!startupResult.success) {
+        // Clean up failed process
+        this.processes.delete(name);
+        throw new Error(startupResult.message);
       }
       
+      // Set up crash detection
+      this.setupCrashDetection(name, childProcess);
+      
       console.log(`Server ${name} started successfully with PID: ${childProcess.pid}`);
-      return { success: true, message: `Server ${name} started successfully`, pid: childProcess.pid };
+      return { 
+        success: true, 
+        message: `Server ${name} started successfully`, 
+        pid: childProcess.pid,
+        startupTime: Date.now() - processInfo.startTime.getTime()
+      };
       
     } catch (error) {
       console.error(`Failed to start server ${name}:`, error);
       throw error;
     }
+  }
+
+  async monitorStartup(name, childProcess, serverInfo, processInfo) {
+    const maxStartupTime = 60000; // 60 seconds max startup time
+    const checkInterval = 3000; // Check every 3 seconds (increased from 2)
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxStartupTime) {
+      // Check if process is still running
+      if (childProcess.killed) {
+        // The cmd process has exited, which is normal for start.bat
+        // Check if the actual server process is running
+        const isServerRunning = await this.isRunning(name);
+        if (isServerRunning) {
+          // Update process info to reflect that the server is running
+          processInfo.status = 'running';
+          processInfo.process = null; // The cmd process is gone, but server is running
+          return {
+            success: true,
+            message: 'Server started successfully'
+          };
+        } else {
+          return {
+            success: false,
+            message: `Server process crashed during startup. Errors: ${processInfo.startupErrors || 'Unknown error'}`
+          };
+        }
+      }
+      
+      // Check for common startup errors in output
+      if (processInfo.startupErrors.includes('Fatal error') || 
+          processInfo.startupErrors.includes('Failed to start') ||
+          processInfo.startupErrors.includes('Port already in use') ||
+          processInfo.startupErrors.includes('Access denied')) {
+        return {
+          success: false,
+          message: `Server startup failed: ${processInfo.startupErrors}`
+        };
+      }
+      
+      // Check for successful startup indicators in output
+      if (processInfo.startupOutput.includes('Server started') || 
+          processInfo.startupOutput.includes('Listening on port') ||
+          processInfo.startupOutput.includes('Server is ready') ||
+          processInfo.startupOutput.includes('Game server started')) {
+        // Update process info
+        processInfo.status = 'running';
+        return {
+          success: true,
+          message: 'Server started successfully'
+        };
+      }
+      
+      // Wait before next check
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+    }
+    
+    // If we reach here, check if the server is actually running
+    const isServerRunning = await this.isRunning(name);
+    if (isServerRunning) {
+      // Update process info
+      processInfo.status = 'running';
+      processInfo.process = null; // The cmd process is gone, but server is running
+      return {
+        success: true,
+        message: 'Server appears to be running (process active)'
+      };
+    }
+    
+    return {
+      success: false,
+      message: `Server startup timed out after ${maxStartupTime/1000} seconds. Server may be stuck.`
+    };
+  }
+
+  setupCrashDetection(name, childProcess) {
+    childProcess.on('exit', (code, signal) => {
+      console.log(`Server ${name} process exited with code ${code} and signal ${signal}`);
+      
+      const processInfo = this.processes.get(name);
+      if (processInfo) {
+        processInfo.status = 'crashed';
+        processInfo.exitCode = code;
+        processInfo.exitSignal = signal;
+        processInfo.exitTime = new Date();
+        
+        // Emit crash event for real-time updates
+        this.eventEmitter.emit('serverCrashed', {
+          name: name,
+          code: code,
+          signal: signal,
+          uptime: processInfo.exitTime - processInfo.startTime
+        });
+      }
+      
+      // Clean up after a delay to allow for restart attempts
+      setTimeout(() => {
+        this.processes.delete(name);
+      }, 60000); // Keep crash info for 1 minute
+    });
+    
+    childProcess.on('error', (error) => {
+      console.error(`Server ${name} process error:`, error);
+      
+      const processInfo = this.processes.get(name);
+      if (processInfo) {
+        processInfo.status = 'error';
+        processInfo.error = error.message;
+        processInfo.errorTime = new Date();
+      }
+    });
   }
 
   async stop(name) {
@@ -270,17 +435,36 @@ export class NativeServerManager extends ServerManager {
         logger.info(`Stopped server ${name}`);
         return { success: true, message: `Server ${name} stopped` };
       } else {
-        // Try to find and kill by process name
+        // Try to find and kill by matching command line arguments
         const { exec } = await import('child_process');
         const { promisify } = await import('util');
         const execAsync = promisify(exec);
         
         try {
-          await execAsync(`taskkill /f /im ArkAscendedServer.exe /fi "WINDOWTITLE eq ${name}*"`);
-          logger.info(`Stopped server ${name} by process name`);
-          return { success: true, message: `Server ${name} stopped` };
+          // Get all running ASA processes
+          const runningProcesses = await this.getRunningProcesses();
+          
+          // Find the process that matches this server name
+          const targetProcess = runningProcesses.find(process => {
+            const commandLine = process.commandLine || '';
+            // Look for the server name in the command line arguments
+            // The server name is typically in the SessionName parameter
+            return commandLine.includes(`SessionName=${name}`) || 
+                   commandLine.includes(`SessionName=${name.replace(/\s+/g, '%20')}`) ||
+                   commandLine.includes(name);
+          });
+          
+          if (targetProcess) {
+            // Kill the specific process by PID
+            await execAsync(`taskkill /f /pid ${targetProcess.pid}`);
+            logger.info(`Stopped server ${name} by PID ${targetProcess.pid}`);
+            return { success: true, message: `Server ${name} stopped` };
+          } else {
+            logger.warn(`No running process found for server ${name}`);
+            return { success: false, message: `Server ${name} not running` };
+          }
         } catch (error) {
-          logger.warn(`Could not stop server ${name} by process name:`, error.message);
+          logger.warn(`Could not stop server ${name} by process matching:`, error.message);
           return { success: false, message: `Server ${name} not running or could not be stopped` };
         }
       }
@@ -519,11 +703,10 @@ export class NativeServerManager extends ServerManager {
                 name: serverName,
                 status: isRunning ? 'running' : 'stopped',
                 image: 'ASA Server',
-                ports: `${serverConfig.gamePort || 7777}:7777, ${serverConfig.queryPort || 27015}:32330, ${serverConfig.rconPort || 32330}:32331`,
                 created: serverConfig.created || stat.birthtime.toISOString(),
-                type: 'individual-server',
+                type: 'native', // These are native servers
                 map: serverConfig.map || 'TheIsland',
-                gamePort: serverConfig.gamePort || 7777,
+                gamePort: serverConfig.port || serverConfig.gamePort || 7777, // Use external port as gamePort
                 queryPort: serverConfig.queryPort || 27015,
                 rconPort: serverConfig.rconPort || 32330,
                 maxPlayers: serverConfig.maxPlayers || 70,
@@ -558,12 +741,11 @@ export class NativeServerManager extends ServerManager {
                   name: server.name,
                   status: isRunning ? 'running' : 'stopped',
                   image: 'ASA Cluster Server',
-                  ports: `${server.gamePort || 7777}:7777, ${server.queryPort || 27015}:32330, ${server.rconPort || 32330}:32331`,
                   created: new Date().toISOString(),
-                  type: 'cluster-server',
+                  type: 'native', // These are native servers, not cluster-server type
                   clusterName: clusterConfig.name || clusterDir,
                   map: server.map || 'TheIsland',
-                  gamePort: server.gamePort || 7777,
+                  gamePort: server.port || server.gamePort || 7777, // Use external port as gamePort
                   queryPort: server.queryPort || 27015,
                   rconPort: server.rconPort || 32330,
                   maxPlayers: server.maxPlayers || 70,
@@ -754,9 +936,9 @@ export class NativeServerManager extends ServerManager {
     // Map
     args.push(server.map || 'TheIsland');
     
-    // Basic server parameters
+    // Basic server parameters - use the correct port values
     args.push('?listen');
-    args.push(`?Port=${server.gamePort || 7777}`);
+    args.push(`?Port=${server.gamePort || server.port || 7777}`);
     args.push(`?QueryPort=${server.queryPort || 27015}`);
     args.push(`?RCONPort=${server.rconPort || 32330}`);
     args.push(`?MaxPlayers=${server.maxPlayers || 70}`);
@@ -780,7 +962,7 @@ export class NativeServerManager extends ServerManager {
     // Paths - fix ClusterDirOverride path formatting
     const clusterDataPath = path.join(path.dirname(server.serverPath || ''), 'clusterdata').replace(/\\/g, '/');
     args.push(`?ClusterDirOverride=${clusterDataPath}`);
-    args.push(`?ConfigOverridePath=./configs`);
+    // ConfigOverridePath is now handled separately based on directory existence
     
     return args;
   }
@@ -881,6 +1063,85 @@ export class NativeServerManager extends ServerManager {
     
     console.log(`Found ${processes.length} running ArkAscendedServer processes:`, processes.map(p => ({ pid: p.pid, commandLine: p.commandLine.substring(0, 100) + '...' })));
     return processes;
+  }
+
+  async getServerStatus(name) {
+    try {
+      const processInfo = this.processes.get(name);
+      const isRunning = await this.isRunning(name);
+      
+      console.log(`getServerStatus for ${name}:`, {
+        hasProcessInfo: !!processInfo,
+        isRunning: isRunning,
+        processStatus: processInfo?.status,
+        processNull: processInfo?.process === null
+      });
+      
+      if (!processInfo && !isRunning) {
+        return {
+          name: name,
+          status: 'stopped',
+          uptime: 0,
+          pid: null,
+          crashInfo: null
+        };
+      }
+      
+      if (processInfo) {
+        const uptime = Math.floor((Date.now() - processInfo.startTime.getTime()) / 1000);
+        
+        // If the process is null but we have process info, it means the cmd process exited
+        // but the actual server might still be running
+        let currentStatus = processInfo.status;
+        if (processInfo.process === null && isRunning) {
+          currentStatus = 'running';
+        } else if (processInfo.process === null && !isRunning) {
+          currentStatus = 'stopped';
+        }
+        
+        console.log(`Status calculation for ${name}:`, {
+          originalStatus: processInfo.status,
+          processNull: processInfo.process === null,
+          isRunning: isRunning,
+          finalStatus: currentStatus
+        });
+        
+        return {
+          name: name,
+          status: currentStatus,
+          uptime: uptime,
+          pid: processInfo.process?.pid || null,
+          startTime: processInfo.startTime,
+          crashInfo: processInfo.status === 'crashed' ? {
+            exitCode: processInfo.exitCode,
+            exitSignal: processInfo.exitSignal,
+            exitTime: processInfo.exitTime,
+            error: processInfo.error
+          } : null,
+          startupErrors: processInfo.startupErrors || null
+        };
+      }
+      
+      // Process not tracked but server is running
+      return {
+        name: name,
+        status: 'running',
+        uptime: 0, // Unknown uptime
+        pid: null,
+        crashInfo: null
+      };
+      
+    } catch (error) {
+      logger.error(`Failed to get server status for ${name}:`, error);
+      return {
+        name: name,
+        status: 'unknown',
+        uptime: 0,
+        pid: null,
+        crashInfo: null,
+        error: error.message
+      };
+    }
   }
 }
 
@@ -1028,31 +1289,44 @@ export class HybridServerManager extends ServerManager {
   }
 
   async getClusterServerStartBat(name) {
-    try {
-      const serverInfo = await this.getClusterServerInfo(name);
-      return {
-        success: true,
-        content: serverInfo.startBatContent,
-        path: serverInfo.startBatPath
-      };
-    } catch (error) {
-      logger.error(`Failed to get start.bat for ${name}:`, error);
-      throw error;
-    }
+    return this.nativeManager.getClusterServerStartBat(name);
   }
 
   async updateClusterServerStartBat(name, content) {
+    return this.nativeManager.updateClusterServerStartBat(name, content);
+  }
+
+  async getServerStatus(name) {
     try {
-      const serverInfo = await this.getClusterServerInfo(name);
-      await fs.writeFile(serverInfo.startBatPath, content, 'utf8');
-      return { success: true, message: `Start.bat updated for ${name}` };
+      // First try to get status as a native cluster server
+      try {
+        const result = await this.nativeManager.getServerStatus(name);
+        return result;
+      } catch (nativeError) {
+        logger.info(`Server ${name} is not a native cluster server, trying Docker container`);
+        // If it's not a native server, try as Docker container
+        const isRunning = await this.dockerManager.isRunning(name);
+        return {
+          name: name,
+          status: isRunning ? 'running' : 'stopped',
+          uptime: 0, // Docker uptime would need to be calculated differently
+          pid: null,
+          crashInfo: null
+        };
+      }
     } catch (error) {
-      logger.error(`Failed to update start.bat for ${name}:`, error);
-      throw error;
+      logger.error(`Failed to get server status for ${name}:`, error);
+      return {
+        name: name,
+        status: 'unknown',
+        uptime: 0,
+        pid: null,
+        crashInfo: null,
+        error: error.message
+      };
     }
   }
 
-  // In HybridServerManager, delegate to nativeManager
   async startCluster(name) { return this.nativeManager.startCluster(name); }
   async stopCluster(name) { return this.nativeManager.stopCluster(name); }
   async restartCluster(name) { return this.nativeManager.restartCluster(name); }

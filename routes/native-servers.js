@@ -509,6 +509,41 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
+  // Get enhanced server status with crash detection
+  fastify.get('/api/native-servers/:name/status', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            status: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      const status = await serverManager.getServerStatus(name);
+      return { success: true, status };
+    } catch (error) {
+      fastify.log.error(`Error getting enhanced server status for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
   // Get all servers (compatibility endpoint)
   fastify.get('/api/servers', {
     preHandler: requirePermission('read')
