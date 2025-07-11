@@ -963,11 +963,15 @@ pause`;
       // Use customDynamicConfigUrl if provided
       const customUrl = serverConfig.customDynamicConfigUrl || '';
       const customUrlArg = customUrl ? `?customdynamicconfigurl=\"${customUrl}\"` : '';
+      
+      // Add mods parameter if mods are configured
+      const modsArg = serverConfig.mods && serverConfig.mods.length > 0 ? ` -mods=${serverConfig.mods.join(',')}` : '';
+      
       const startScript = `@echo off
 echo Starting ${serverName}...
 
 REM Start the ASA server with proper parameters
-"${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?listen?SessionName=${serverName}?Port=${serverConfig.port || serverConfig.gamePort}?QueryPort=${serverConfig.queryPort}?RCONPort=${serverConfig.rconPort}?RCONEnabled=True?MaxPlayers=${serverConfig.maxPlayers}?ServerPassword=${serverConfig.password || serverConfig.serverPassword || ''}?ServerAdminPassword=${serverConfig.adminPassword}${customUrlArg}" -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName} -NoBattleEye
+"${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?listen?SessionName=${serverName}?Port=${serverConfig.port || serverConfig.gamePort}?QueryPort=${serverConfig.queryPort}?RCONPort=${serverConfig.rconPort}?RCONEnabled=True?MaxPlayers=${serverConfig.maxPlayers}?ServerPassword=${serverConfig.password || serverConfig.serverPassword || ''}?ServerAdminPassword=${serverConfig.adminPassword}${customUrlArg}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName} -NoBattleEye
 
 echo Server ${serverName} has stopped.
 pause`;

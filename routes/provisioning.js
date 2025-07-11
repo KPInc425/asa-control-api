@@ -421,6 +421,273 @@ export default async function provisioningRoutes(fastify) {
     }
   });
 
+  // Get shared mods configuration
+  fastify.get('/api/provisioning/shared-mods', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+      
+      try {
+        const sharedModsData = await fs.readFile(sharedModsPath, 'utf8');
+        const sharedMods = JSON.parse(sharedModsData);
+        
+        return {
+          success: true,
+          sharedMods: sharedMods.modList || []
+        };
+      } catch (fileError) {
+        // If file doesn't exist, return empty mod list
+        return {
+          success: true,
+          sharedMods: []
+        };
+      }
+    } catch (error) {
+      logger.error('Failed to get shared mods:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get shared mods configuration'
+      });
+    }
+  });
+
+  // Update shared mods configuration
+  fastify.put('/api/provisioning/shared-mods', {
+    preHandler: requirePermission('write'),
+    schema: {
+      body: {
+        type: 'object',
+        required: ['modList'],
+        properties: {
+          modList: {
+            type: 'array',
+            items: { type: 'number' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { modList } = request.body;
+      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+      
+      const sharedModsData = {
+        modList: modList || [],
+        updatedAt: new Date().toISOString()
+      };
+      
+      await fs.writeFile(sharedModsPath, JSON.stringify(sharedModsData, null, 2));
+      
+      logger.info('Shared mods configuration updated');
+      
+      // Regenerate start.bat files for all cluster servers
+      await regenerateAllClusterStartScripts();
+      
+      return {
+        success: true,
+        message: 'Shared mods configuration updated successfully. Server start scripts have been regenerated.'
+      };
+    } catch (error) {
+      logger.error('Failed to update shared mods:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update shared mods configuration'
+      });
+    }
+  });
+
+  // Get server-specific mods configuration
+  fastify.get('/api/provisioning/server-mods/:serverName', {
+    preHandler: requirePermission('read'),
+    schema: {
+      params: {
+        type: 'object',
+        required: ['serverName'],
+        properties: {
+          serverName: { type: 'string' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const serverModsPath = path.join(config.server.native.basePath, 'server-mods', `${serverName}.json`);
+      
+      try {
+        const serverModsData = await fs.readFile(serverModsPath, 'utf8');
+        const serverConfig = JSON.parse(serverModsData);
+        
+        return {
+          success: true,
+          serverConfig: {
+            additionalMods: serverConfig.additionalMods || [],
+            excludeSharedMods: serverConfig.excludeSharedMods || false
+          }
+        };
+      } catch (fileError) {
+        // Check if this is a Club ARK server and set defaults
+        const isClubArkServer = serverName.toLowerCase().includes('club') || 
+                               serverName.toLowerCase().includes('bobs');
+        
+        if (isClubArkServer) {
+          return {
+            success: true,
+            serverConfig: {
+              additionalMods: [1005639], // Club ARK mod
+              excludeSharedMods: true // Exclude shared mods
+            }
+          };
+        }
+        
+        // Return empty configuration for other servers
+        return {
+          success: true,
+          serverConfig: {
+            additionalMods: [],
+            excludeSharedMods: false
+          }
+        };
+      }
+    } catch (error) {
+      logger.error('Failed to get server mods:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get server mods configuration'
+      });
+    }
+  });
+
+  // Update server-specific mods configuration
+  fastify.put('/api/provisioning/server-mods/:serverName', {
+    preHandler: requirePermission('write'),
+    schema: {
+      params: {
+        type: 'object',
+        required: ['serverName'],
+        properties: {
+          serverName: { type: 'string' }
+        }
+      },
+      body: {
+        type: 'object',
+        required: ['additionalMods', 'excludeSharedMods'],
+        properties: {
+          additionalMods: {
+            type: 'array',
+            items: { type: 'number' }
+          },
+          excludeSharedMods: { type: 'boolean' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { additionalMods, excludeSharedMods } = request.body;
+      
+      const serverModsDir = path.join(config.server.native.basePath, 'server-mods');
+      const serverModsPath = path.join(serverModsDir, `${serverName}.json`);
+      
+      // Ensure directory exists
+      await fs.mkdir(serverModsDir, { recursive: true });
+      
+      const serverConfig = {
+        additionalMods: additionalMods || [],
+        excludeSharedMods: excludeSharedMods || false,
+        updatedAt: new Date().toISOString()
+      };
+      
+      await fs.writeFile(serverModsPath, JSON.stringify(serverConfig, null, 2));
+      
+      logger.info(`Server mods configuration updated for ${serverName}`);
+      
+      // Regenerate start.bat for this specific server
+      await regenerateServerStartScript(serverName);
+      
+      return {
+        success: true,
+        message: `Server mods configuration for ${serverName} updated successfully. Start script has been regenerated.`
+      };
+    } catch (error) {
+      logger.error('Failed to update server mods:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update server mods configuration'
+      });
+    }
+  });
+
+  // Get all mods configuration (for overview)
+  fastify.get('/api/provisioning/mods-overview', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+      const serverModsDir = path.join(config.server.native.basePath, 'server-mods');
+      
+      let sharedMods = [];
+      let serverMods = {};
+      
+      // Get shared mods
+      try {
+        const sharedModsData = await fs.readFile(sharedModsPath, 'utf8');
+        const sharedModsConfig = JSON.parse(sharedModsData);
+        sharedMods = sharedModsConfig.modList || [];
+      } catch (error) {
+        // Shared mods file doesn't exist
+      }
+      
+      // Get server-specific mods
+      try {
+        const serverModFiles = await fs.readdir(serverModsDir);
+        for (const fileName of serverModFiles) {
+          if (fileName.endsWith('.json')) {
+            const serverName = fileName.replace('.json', '');
+            const serverModsPath = path.join(serverModsDir, fileName);
+            const serverModsData = await fs.readFile(serverModsPath, 'utf8');
+            const serverModsConfig = JSON.parse(serverModsData);
+            serverMods[serverName] = serverModsConfig;
+          }
+        }
+      } catch (error) {
+        // Server mods directory doesn't exist
+      }
+      
+      return {
+        success: true,
+        sharedMods,
+        serverMods
+      };
+    } catch (error) {
+      logger.error('Failed to get mods overview:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get mods overview'
+      });
+    }
+  });
+
+  // Regenerate all start scripts with current mod configurations
+  fastify.post('/api/provisioning/regenerate-start-scripts', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      await regenerateAllClusterStartScripts();
+      
+      return {
+        success: true,
+        message: 'All start scripts have been regenerated with current mod configurations'
+      };
+    } catch (error) {
+      logger.error('Failed to regenerate start scripts:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to regenerate start scripts'
+      });
+    }
+  });
+
   // Delete cluster
   fastify.delete('/api/provisioning/clusters/:clusterName', {
     preHandler: requirePermission('write')
@@ -542,6 +809,201 @@ export default async function provisioningRoutes(fastify) {
       });
     }
   });
+
+  // Mod Management Endpoints
+
+  // Get shared mods configuration
+  fastify.get('/api/provisioning/shared-mods', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const sharedModsPath = path.join(provisioner.basePath, 'shared-mods.json');
+      let sharedMods = [];
+      
+      try {
+        const data = await fs.readFile(sharedModsPath, 'utf8');
+        const config = JSON.parse(data);
+        sharedMods = config.modList || [];
+      } catch (error) {
+        // File doesn't exist or is invalid, return empty array
+        logger.info('No shared mods configuration found, using empty array');
+      }
+      
+      return {
+        success: true,
+        sharedMods
+      };
+    } catch (error) {
+      logger.error('Failed to get shared mods:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get shared mods configuration'
+      });
+    }
+  });
+
+  // Update shared mods configuration
+  fastify.put('/api/provisioning/shared-mods', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { modList } = request.body;
+      
+      if (!Array.isArray(modList)) {
+        return reply.status(400).send({
+          success: false,
+          message: 'modList must be an array'
+        });
+      }
+      
+      const sharedModsPath = path.join(provisioner.basePath, 'shared-mods.json');
+      const config = {
+        modList: modList,
+        updatedAt: new Date().toISOString()
+      };
+      
+      await fs.writeFile(sharedModsPath, JSON.stringify(config, null, 2));
+      
+      logger.info(`Updated shared mods configuration with ${modList.length} mods`);
+      
+      return {
+        success: true,
+        message: 'Shared mods configuration updated successfully'
+      };
+    } catch (error) {
+      logger.error('Failed to update shared mods:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update shared mods configuration'
+      });
+    }
+  });
+
+  // Get server-specific mods configuration
+  fastify.get('/api/provisioning/server-mods/:serverName', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const serverModsPath = path.join(provisioner.basePath, 'server-mods.json');
+      let serverConfig = {
+        additionalMods: [],
+        excludeSharedMods: false
+      };
+      
+      try {
+        const data = await fs.readFile(serverModsPath, 'utf8');
+        const config = JSON.parse(data);
+        serverConfig = config[serverName] || serverConfig;
+      } catch (error) {
+        // File doesn't exist or is invalid, return default config
+        logger.info(`No server mods configuration found for ${serverName}, using defaults`);
+      }
+      
+      return {
+        success: true,
+        serverConfig
+      };
+    } catch (error) {
+      logger.error(`Failed to get server mods for ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get server mods configuration'
+      });
+    }
+  });
+
+  // Update server-specific mods configuration
+  fastify.put('/api/provisioning/server-mods/:serverName', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { additionalMods, excludeSharedMods } = request.body;
+      
+      if (!Array.isArray(additionalMods)) {
+        return reply.status(400).send({
+          success: false,
+          message: 'additionalMods must be an array'
+        });
+      }
+      
+      const serverModsPath = path.join(provisioner.basePath, 'server-mods.json');
+      let config = {};
+      
+      try {
+        const data = await fs.readFile(serverModsPath, 'utf8');
+        config = JSON.parse(data);
+      } catch (error) {
+        // File doesn't exist, start with empty config
+        logger.info('No existing server mods configuration found, creating new one');
+      }
+      
+      config[serverName] = {
+        additionalMods: additionalMods,
+        excludeSharedMods: excludeSharedMods || false,
+        updatedAt: new Date().toISOString()
+      };
+      
+      await fs.writeFile(serverModsPath, JSON.stringify(config, null, 2));
+      
+      logger.info(`Updated server mods configuration for ${serverName}`);
+      
+      return {
+        success: true,
+        message: `Server mods configuration for ${serverName} updated successfully`
+      };
+    } catch (error) {
+      logger.error(`Failed to update server mods for ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update server mods configuration'
+      });
+    }
+  });
+
+  // Get all mods configuration (for overview)
+  fastify.get('/api/provisioning/mods-overview', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const sharedModsPath = path.join(provisioner.basePath, 'shared-mods.json');
+      const serverModsPath = path.join(provisioner.basePath, 'server-mods.json');
+      
+      let sharedMods = [];
+      let serverMods = {};
+      
+      try {
+        const sharedData = await fs.readFile(sharedModsPath, 'utf8');
+        const sharedConfig = JSON.parse(sharedData);
+        sharedMods = sharedConfig.modList || [];
+      } catch (error) {
+        logger.info('No shared mods configuration found');
+      }
+      
+      try {
+        const serverData = await fs.readFile(serverModsPath, 'utf8');
+        serverMods = JSON.parse(serverData);
+      } catch (error) {
+        logger.info('No server mods configuration found');
+      }
+      
+      return {
+        success: true,
+        overview: {
+          sharedMods,
+          serverMods,
+          totalServers: Object.keys(serverMods).length
+        }
+      };
+    } catch (error) {
+      logger.error('Failed to get mods overview:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get mods overview'
+      });
+    }
+  });
 }
 
 // Helper functions
@@ -660,5 +1122,143 @@ async function getInstallationStatus() {
       servers: [],
       clusters: []
     };
+  }
+} 
+
+// Helper function to regenerate start.bat for a specific server
+async function regenerateServerStartScript(serverName) {
+  try {
+    const clustersPath = config.server.native.clustersPath || path.join(config.server.native.basePath, 'clusters');
+    
+    // Find which cluster contains this server
+    const clusterDirs = await fs.readdir(clustersPath);
+    
+    for (const clusterName of clusterDirs) {
+      const clusterPath = path.join(clustersPath, clusterName);
+      const clusterConfigPath = path.join(clusterPath, 'cluster.json');
+      
+      try {
+        const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+        const clusterConfig = JSON.parse(clusterConfigContent);
+        
+        // Find the server in this cluster
+        const serverConfig = clusterConfig.servers?.find(s => s.name === serverName);
+        if (serverConfig) {
+          // Get mod configuration for this server
+          const finalMods = await getFinalModListForServer(serverName);
+          
+          // Update server config with new mods
+          serverConfig.mods = finalMods;
+          
+          // Update cluster config file
+          await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
+          
+          // Regenerate start.bat file
+          const serverPath = path.join(clusterPath, serverName);
+          await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
+          
+          logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterName}`);
+          return;
+        }
+      } catch (error) {
+        // Continue to next cluster if this one fails
+        logger.warn(`Failed to process cluster ${clusterName}:`, error.message);
+      }
+    }
+    
+    logger.warn(`Server ${serverName} not found in any cluster`);
+  } catch (error) {
+    logger.error(`Failed to regenerate start script for ${serverName}:`, error);
+  }
+}
+
+// Helper function to regenerate all cluster start scripts
+async function regenerateAllClusterStartScripts() {
+  try {
+    const clustersPath = config.server.native.clustersPath || path.join(config.server.native.basePath, 'clusters');
+    
+    if (!(await fs.access(clustersPath).catch(() => false))) {
+      logger.info('No clusters directory found, skipping start script regeneration');
+      return;
+    }
+    
+    const clusterDirs = await fs.readdir(clustersPath);
+    
+    for (const clusterName of clusterDirs) {
+      const clusterPath = path.join(clustersPath, clusterName);
+      const clusterConfigPath = path.join(clusterPath, 'cluster.json');
+      
+      try {
+        const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+        const clusterConfig = JSON.parse(clusterConfigContent);
+        
+        // Update each server's mods and regenerate start.bat
+        for (const serverConfig of clusterConfig.servers || []) {
+          const finalMods = await getFinalModListForServer(serverConfig.name);
+          serverConfig.mods = finalMods;
+          
+          const serverPath = path.join(clusterPath, serverConfig.name);
+          await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
+        }
+        
+        // Update cluster config file
+        await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
+        
+        logger.info(`Regenerated start scripts for cluster ${clusterName}`);
+      } catch (error) {
+        logger.warn(`Failed to regenerate start scripts for cluster ${clusterName}:`, error.message);
+      }
+    }
+  } catch (error) {
+    logger.error('Failed to regenerate all cluster start scripts:', error);
+  }
+}
+
+// Helper function to get final mod list for a server (shared + server-specific)
+async function getFinalModListForServer(serverName) {
+  try {
+    // Get shared mods
+    const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+    let sharedMods = [];
+    
+    try {
+      const sharedModsData = await fs.readFile(sharedModsPath, 'utf8');
+      const sharedModsConfig = JSON.parse(sharedModsData);
+      sharedMods = sharedModsConfig.modList || [];
+    } catch (error) {
+      // Shared mods file doesn't exist, use empty array
+    }
+    
+    // Get server-specific mods
+    const serverModsPath = path.join(config.server.native.basePath, 'server-mods', `${serverName}.json`);
+    let serverMods = [];
+    let excludeSharedMods = false;
+    
+    try {
+      const serverModsData = await fs.readFile(serverModsPath, 'utf8');
+      const serverModsConfig = JSON.parse(serverModsData);
+      serverMods = serverModsConfig.additionalMods || [];
+      excludeSharedMods = serverModsConfig.excludeSharedMods || false;
+    } catch (error) {
+      // Server mods file doesn't exist, use defaults
+      const isClubArkServer = serverName.toLowerCase().includes('club') || 
+                             serverName.toLowerCase().includes('bobs');
+      if (isClubArkServer) {
+        serverMods = [1005639]; // Club ARK mod
+        excludeSharedMods = true;
+      }
+    }
+    
+    // Combine mods based on configuration
+    if (excludeSharedMods) {
+      return serverMods;
+    } else {
+      // Combine shared and server-specific mods, removing duplicates
+      const allMods = [...sharedMods, ...serverMods];
+      return [...new Set(allMods)];
+    }
+  } catch (error) {
+    logger.error(`Failed to get final mod list for ${serverName}:`, error);
+    return [];
   }
 } 

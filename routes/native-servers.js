@@ -509,6 +509,76 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
+  // Send RCON command to native server
+  fastify.post('/api/native-servers/:name/rcon', {
+    preHandler: [requireWrite],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      body: {
+        type: 'object',
+        required: ['command'],
+        properties: {
+          command: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' },
+            response: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      const { command } = request.body;
+      
+      // Get server info to find RCON port
+      const servers = await serverManager.listServers();
+      const server = servers.find(s => s.name === name);
+      
+      if (!server) {
+        return reply.status(404).send({
+          success: false,
+          message: `Server ${name} not found`
+        });
+      }
+
+      if (!server.rconPort) {
+        return reply.status(400).send({
+          success: false,
+          message: `No RCON port configured for server ${name}`
+        });
+      }
+
+      // Use the RCON service to send command
+      const rconService = await import('../services/rcon.js');
+      const response = await rconService.default.sendCommand('127.0.0.1', server.rconPort, command);
+      
+      return {
+        success: true,
+        message: 'Command sent successfully',
+        response: response
+      };
+    } catch (error) {
+      fastify.log.error(`Error sending RCON command to ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
   // Get enhanced server status with crash detection
   fastify.get('/api/native-servers/:name/status', {
     preHandler: [requireRead],

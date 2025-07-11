@@ -284,6 +284,32 @@ const setupSocketIO = () => {
         logger.info(`ARK log stream stopped for socket: ${socket.id}`);
       }
     });
+
+    // Handle system logs streaming requests
+    socket.on('start-system-logs', () => {
+      logger.info(`Starting system log stream for socket: ${socket.id}`);
+      
+      // Create a simple system log stream that sends API logs
+      const systemLogInterval = setInterval(() => {
+        // Send a sample system log entry (in a real implementation, this would stream actual system logs)
+        socket.emit('system-log-data', {
+          timestamp: new Date().toISOString(),
+          level: 'info',
+          message: `System log entry - API running for ${Math.floor(process.uptime())} seconds`,
+          container: 'system'
+        });
+      }, 5000); // Send a log entry every 5 seconds
+      
+      socket.systemLogInterval = systemLogInterval;
+    });
+
+    socket.on('stop-system-logs', () => {
+      if (socket.systemLogInterval) {
+        clearInterval(socket.systemLogInterval);
+        socket.systemLogInterval = null;
+        logger.info(`System log stream stopped for socket: ${socket.id}`);
+      }
+    });
     socket.on('subscribe-events', async () => {
       logger.info(`Starting container events for socket: ${socket.id}`);
       try {
@@ -345,6 +371,10 @@ const setupSocketIO = () => {
       if (socket.eventStream) {
         socket.eventStream.destroy();
         socket.eventStream = null;
+      }
+      if (socket.systemLogInterval) {
+        clearInterval(socket.systemLogInterval);
+        socket.systemLogInterval = null;
       }
     });
   });

@@ -90,6 +90,41 @@ class RconService {
   }
 
   /**
+   * Send RCON command to native server
+   */
+  async sendCommand(host, port, command, password = 'admin123') {
+    const startTime = Date.now();
+    const commandType = this.getCommandType(command);
+    
+    try {
+      const connection = new Rcon({
+        host: host || 'localhost',
+        port: port,
+        password: password,
+        timeout: 5000
+      });
+
+      await connection.connect();
+      const response = await connection.send(command);
+      await connection.end();
+      
+      const duration = (Date.now() - startTime) / 1000;
+      incrementRconCommand(`native-${host}:${port}`, commandType);
+      recordRconCommandDuration(`native-${host}:${port}`, commandType, duration);
+      
+      logger.info(`RCON command sent to native server ${host}:${port}: ${command}`);
+      return response;
+    } catch (error) {
+      const duration = (Date.now() - startTime) / 1000;
+      incrementRconCommand(`native-${host}:${port}`, commandType);
+      recordRconCommandDuration(`native-${host}:${port}`, commandType, duration);
+      
+      logger.error(`RCON command failed for native server ${host}:${port}: ${command}`, error);
+      throw new Error(`RCON command failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Get or create RCON connection
    */
   async getConnection(containerName, options = {}) {

@@ -230,12 +230,44 @@ export default async function configRoutes(fastify) {
     preHandler: requirePermission('read')
   }, async (request, reply) => {
     try {
+      // Get system memory information
+      let systemMemory = null;
+      try {
+        if (process.platform === 'win32') {
+          // Windows - use PowerShell to get system memory
+          const { execSync } = await import('child_process');
+          const memoryInfo = execSync('powershell "Get-WmiObject -Class Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json"', { encoding: 'utf8' });
+          const memory = JSON.parse(memoryInfo);
+          systemMemory = {
+            total: memory.TotalVisibleMemorySize * 1024, // Convert KB to bytes
+            free: memory.FreePhysicalMemory * 1024, // Convert KB to bytes
+            used: (memory.TotalVisibleMemorySize - memory.FreePhysicalMemory) * 1024,
+            usagePercent: Math.round(((memory.TotalVisibleMemorySize - memory.FreePhysicalMemory) / memory.TotalVisibleMemorySize) * 100)
+          };
+        } else {
+          // Linux/Mac - use os module
+          const os = await import('os');
+          const total = os.totalmem();
+          const free = os.freemem();
+          systemMemory = {
+            total,
+            free,
+            used: total - free,
+            usagePercent: Math.round(((total - free) / total) * 100)
+          };
+        }
+      } catch (memoryError) {
+        logger.warn('Failed to get system memory info:', memoryError.message);
+        // Fallback to API memory usage
+        systemMemory = process.memoryUsage();
+      }
+
       const systemInfo = {
         mode: config.server.mode,
         platform: process.platform,
         nodeVersion: process.version,
         uptime: process.uptime(),
-        memoryUsage: process.memoryUsage(),
+        memoryUsage: systemMemory,
         dockerEnabled: config.docker.enabled,
         powershellEnabled: process.env.POWERSHELL_ENABLED === 'true',
         nativeBasePath: config.server.native.basePath,
