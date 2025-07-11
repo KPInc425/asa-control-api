@@ -380,9 +380,15 @@ export default async function configRoutes(fastify) {
       // Also try to read server-config.json if it exists
       let serverConfig = null;
       try {
-        const serverConfigPath = join(configService.serverRootPath, serverName, 'server-config.json');
-        const serverConfigContent = await fs.readFile(serverConfigPath, 'utf8');
-        serverConfig = JSON.parse(serverConfigContent);
+        const serverInfo = await configService.findServerConfigPath(serverName);
+        if (serverInfo) {
+          const serverPath = serverInfo.type === 'standalone' 
+            ? join(configService.serverRootPath, serverName)
+            : join(configService.serverRootPath, 'cluster', serverInfo.clusterName, serverName);
+          const serverConfigPath = join(serverPath, 'server-config.json');
+          const serverConfigContent = await fs.readFile(serverConfigPath, 'utf8');
+          serverConfig = JSON.parse(serverConfigContent);
+        }
       } catch (error) {
         // server-config.json doesn't exist or is invalid, that's okay
         logger.info(`No server-config.json found for ${serverName}`);

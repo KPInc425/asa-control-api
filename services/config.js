@@ -6,31 +6,131 @@ import logger from '../utils/logger.js';
 
 class ConfigService {
   constructor() {
-    this.serverRootPath = config.asa.serverRootPath;
-    this.configSubPath = config.asa.configSubPath;
     this.updateLockPath = config.asa.updateLockPath;
     this.defaultConfigFiles = config.asa.defaultConfigFiles;
   }
 
   /**
+   * Get the current server root path dynamically
+   */
+  get serverRootPath() {
+    const path = config.asa.serverRootPath;
+    console.log(`[ConfigService] serverRootPath getter - path: ${path}`);
+    console.log(`[ConfigService] serverRootPath getter - SERVER_MODE: ${process.env.SERVER_MODE}`);
+    console.log(`[ConfigService] serverRootPath getter - NATIVE_BASE_PATH: ${process.env.NATIVE_BASE_PATH}`);
+    console.log(`[ConfigService] serverRootPath getter - config.asa.serverRootPath: ${config.asa.serverRootPath}`);
+    console.log(`[ConfigService] serverRootPath getter - process.cwd(): ${process.cwd()}`);
+    return path;
+  }
+
+  /**
+   * Find the actual config path for a server by searching through possible locations
+   */
+  async findServerConfigPath(serverName) {
+    const currentPath = this.serverRootPath;
+    console.log(`[findServerConfigPath] Looking for server: ${serverName}`);
+    console.log(`[findServerConfigPath] Using serverRootPath: ${currentPath}`);
+    console.log(`[findServerConfigPath] Server name length: ${serverName.length}`);
+    console.log(`[findServerConfigPath] Server name bytes: ${Buffer.from(serverName).toString('hex')}`);
+    
+    // Check if serverRootPath exists
+    if (!existsSync(currentPath)) {
+      logger.error(`[findServerConfigPath] Server root path does not exist: ${currentPath}`);
+      return null;
+    }
+    
+    // First, check if it's a standalone server
+    const standalonePath = join(currentPath, serverName, 'ShooterGame', 'Saved', 'Config', 'WindowsServer');
+    logger.info(`[findServerConfigPath] Checking standalone path: ${standalonePath}`);
+    logger.info(`[findServerConfigPath] Standalone path exists: ${existsSync(standalonePath)}`);
+    if (existsSync(standalonePath)) {
+      logger.info(`[findServerConfigPath] Found standalone server at: ${standalonePath}`);
+      return {
+        type: 'standalone',
+        path: standalonePath,
+        serverName: serverName
+      };
+    } else {
+      logger.info(`[findServerConfigPath] Standalone path does not exist`);
+    }
+
+    // If not standalone, check if it's a cluster server
+    const clusterPath = join(currentPath, 'clusters');
+    logger.info(`[findServerConfigPath] Checking cluster path: ${clusterPath}`);
+    logger.info(`[findServerConfigPath] Cluster path exists: ${existsSync(clusterPath)}`);
+    if (existsSync(clusterPath)) {
+      try {
+        const clusterEntries = await readdir(clusterPath, { withFileTypes: true });
+        logger.info(`[findServerConfigPath] All cluster entries: ${clusterEntries.map(e => e.name + (e.isDirectory() ? '/' : '')).join(', ')}`);
+        const clusterDirs = clusterEntries.filter(entry => entry.isDirectory()).map(entry => entry.name);
+        logger.info(`[findServerConfigPath] Found cluster directories: ${clusterDirs.join(', ')}`);
+        
+        for (const clusterName of clusterDirs) {
+          logger.info(`[findServerConfigPath] Checking cluster: ${clusterName}`);
+          const clusterServerPath = join(clusterPath, clusterName, serverName, 'ShooterGame', 'Saved', 'Config', 'WindowsServer');
+          logger.info(`[findServerConfigPath] Checking cluster server path: ${clusterServerPath}`);
+          logger.info(`[findServerConfigPath] Cluster server path exists: ${existsSync(clusterServerPath)}`);
+          
+          // Also check if the server directory exists without the config subpath
+          const serverDirPath = join(clusterPath, clusterName, serverName);
+          logger.info(`[findServerConfigPath] Server directory path: ${serverDirPath}`);
+          logger.info(`[findServerConfigPath] Server directory exists: ${existsSync(serverDirPath)}`);
+          
+          if (existsSync(clusterServerPath)) {
+            logger.info(`[findServerConfigPath] Found cluster server at: ${clusterServerPath}`);
+            return {
+              type: 'cluster',
+              path: clusterServerPath,
+              serverName: serverName,
+              clusterName: clusterName
+            };
+          } else {
+            logger.info(`[findServerConfigPath] Cluster server path does not exist`);
+          }
+        }
+      } catch (error) {
+        logger.error(`[findServerConfigPath] Error checking cluster directories:`, error);
+      }
+    } else {
+      logger.info(`[findServerConfigPath] Cluster path does not exist`);
+    }
+
+    logger.warn(`[findServerConfigPath] Server ${serverName} not found in any location`);
+    return null;
+  }
+
+  /**
    * Get the full config path for a specific server and file
    */
-  getConfigFilePath(serverName, fileName = 'GameUserSettings.ini') {
-    return join(this.serverRootPath, serverName, this.configSubPath, fileName);
+  async getConfigFilePath(serverName, fileName = 'GameUserSettings.ini') {
+    const serverInfo = await this.findServerConfigPath(serverName);
+    if (!serverInfo) {
+      throw new Error(`Server ${serverName} not found in any location`);
+    }
+    return join(serverInfo.path, fileName);
   }
 
   /**
    * Get the config directory path for a specific server
    */
-  getConfigDirPath(serverName) {
-    return join(this.serverRootPath, serverName, this.configSubPath);
+  async getConfigDirPath(serverName) {
+    const serverInfo = await this.findServerConfigPath(serverName);
+    if (!serverInfo) {
+      throw new Error(`Server ${serverName} not found in any location`);
+    }
+    return serverInfo.path;
   }
 
   /**
    * Create default config files if they don't exist
    */
   async ensureDefaultConfigs(serverName) {
-    const configDirPath = this.getConfigDirPath(serverName);
+    const serverInfo = await this.findServerConfigPath(serverName);
+    if (!serverInfo) {
+      throw new Error(`Server ${serverName} not found in any location`);
+    }
+
+    const configDirPath = serverInfo.path;
     
     // Create directory if it doesn't exist
     if (!existsSync(configDirPath)) {
@@ -87,26 +187,103 @@ AllowFlyerCarryPvE=True
   }
 
   /**
-   * List all available ASA servers
+   * List all available ASA servers by scanning both standalone and cluster directories
    */
   async listServers() {
-    logger.info(`[listServers] Using serverRootPath: ${this.serverRootPath}`);
+    const currentPath = this.serverRootPath;
+    logger.info(`[listServers] Using serverRootPath: ${currentPath}`);
+    logger.info(`[listServers] NATIVE_BASE_PATH env: ${process.env.NATIVE_BASE_PATH}`);
+    logger.info(`[listServers] SERVER_MODE env: ${process.env.SERVER_MODE}`);
+    logger.info(`[listServers] config.asa.serverRootPath: ${config.asa.serverRootPath}`);
+    const servers = [];
+    
     try {
-      const entries = await readdir(this.serverRootPath, { withFileTypes: true });
-      logger.info(`[listServers] Entries in root: ${entries.map(e => e.name + (e.isDirectory() ? '/' : '')).join(', ')}`);
-      const servers = entries
+      // Check if serverRootPath exists
+      if (!existsSync(currentPath)) {
+        logger.warn(`[listServers] Server root path does not exist: ${currentPath}`);
+        return {
+          success: true,
+          servers: [],
+          serverDetails: [],
+          count: 0,
+          rootPath: currentPath,
+          message: `Server root path does not exist: ${currentPath}`
+        };
+      }
+
+      // Check standalone servers
+      const entries = await readdir(currentPath, { withFileTypes: true });
+      logger.info(`[listServers] Found entries in root: ${entries.map(e => e.name + (e.isDirectory() ? '/' : '')).join(', ')}`);
+      
+      const standaloneServers = entries
         .filter(entry => entry.isDirectory())
-        .map(entry => entry.name);
-      logger.info(`[listServers] Found server directories: ${servers.join(', ')}`);
+        .filter(entry => {
+          // Check if this directory contains a ShooterGame folder (indicating it's an ASA server)
+          const shooterGamePath = join(currentPath, entry.name, 'ShooterGame');
+          const exists = existsSync(shooterGamePath);
+          logger.info(`[listServers] Checking ${entry.name}: ShooterGame exists = ${exists}`);
+          return exists;
+        })
+        .map(entry => ({
+          name: entry.name,
+          type: 'standalone',
+          path: join(currentPath, entry.name)
+        }));
       
-      logger.info(`Found ${servers.length} ASA servers: ${servers.join(', ')}`);
+      servers.push(...standaloneServers);
+      logger.info(`[listServers] Found standalone servers: ${standaloneServers.map(s => s.name).join(', ')}`);
+
+      // Check cluster servers
+      const clusterPath = join(currentPath, 'clusters');
+      logger.info(`[listServers] Checking for cluster path: ${clusterPath}`);
+      if (existsSync(clusterPath)) {
+        logger.info(`[listServers] Cluster path exists, scanning clusters...`);
+        const clusterEntries = await readdir(clusterPath, { withFileTypes: true });
+        const clusterDirs = clusterEntries.filter(entry => entry.isDirectory()).map(entry => entry.name);
+        logger.info(`[listServers] Found cluster directories: ${clusterDirs.join(', ')}`);
+        
+        for (const clusterName of clusterDirs) {
+          const clusterServerPath = join(clusterPath, clusterName);
+          logger.info(`[listServers] Scanning cluster: ${clusterName} at ${clusterServerPath}`);
+          try {
+            const clusterServerEntries = await readdir(clusterServerPath, { withFileTypes: true });
+            logger.info(`[listServers] Found entries in ${clusterName}: ${clusterServerEntries.map(e => e.name + (e.isDirectory() ? '/' : '')).join(', ')}`);
+            
+            const clusterServers = clusterServerEntries
+              .filter(entry => entry.isDirectory())
+              .filter(entry => {
+                // Check if this directory contains a ShooterGame folder
+                const shooterGamePath = join(clusterServerPath, entry.name, 'ShooterGame');
+                const exists = existsSync(shooterGamePath);
+                logger.info(`[listServers] Checking ${clusterName}/${entry.name}: ShooterGame exists = ${exists}`);
+                return exists;
+              })
+              .map(entry => ({
+                name: entry.name,
+                type: 'cluster',
+                clusterName: clusterName,
+                path: join(clusterServerPath, entry.name)
+              }));
+            
+            servers.push(...clusterServers);
+            logger.info(`[listServers] Found cluster servers in ${clusterName}: ${clusterServers.map(s => s.name).join(', ')}`);
+          } catch (error) {
+            logger.error(`[listServers] Error reading cluster ${clusterName}:`, error);
+          }
+        }
+      } else {
+        logger.info(`[listServers] No cluster directory found at: ${clusterPath}`);
+      }
       
-      return {
-        success: true,
-        servers,
-        count: servers.length,
-        rootPath: this.serverRootPath
-      };
+      logger.info(`[listServers] Total servers found: ${servers.length}`);
+      
+              return {
+          success: true,
+          servers: servers.map(s => s.name),
+          serverDetails: servers,
+          count: servers.length,
+          rootPath: currentPath
+        };
     } catch (error) {
       logger.error(`[listServers] Error: ${error.message}`);
       if (error.code === 'ENOENT') {
@@ -114,8 +291,9 @@ AllowFlyerCarryPvE=True
         return {
           success: true,
           servers: [],
+          serverDetails: [],
           count: 0,
-          rootPath: this.serverRootPath,
+          rootPath: currentPath,
           message: 'No ASA servers found'
         };
       }
@@ -129,25 +307,28 @@ AllowFlyerCarryPvE=True
    * Get config file contents for a specific server
    */
   async getConfigFile(serverName, fileName = 'GameUserSettings.ini') {
+    console.log(`[getConfigFile] Called with serverName: ${serverName}, fileName: ${fileName}`);
     try {
-      const filePath = this.getConfigFilePath(serverName, fileName);
+      const serverInfo = await this.findServerConfigPath(serverName);
+      if (!serverInfo) {
+        throw new Error(`Server ${serverName} not found in any location`);
+      }
+
+      const filePath = join(serverInfo.path, fileName);
       
-      // Check if file exists, create default if it doesn't
+      // Check if file exists
       try {
         await access(filePath);
       } catch (error) {
         if (error.code === 'ENOENT') {
           logger.info(`Config file not found: ${filePath}`);
           
-          // Only create the specific file that was requested
-          if (fileName === 'GameUserSettings.ini') {
-            await this.createDefaultConfigFile(serverName, fileName);
-          } else if (fileName === 'Game.ini') {
-            // Only create Game.ini if GameUserSettings.ini already exists
-            const gameUserSettingsPath = this.getConfigFilePath(serverName, 'GameUserSettings.ini');
+          // Only create Game.ini if GameUserSettings.ini already exists
+          if (fileName === 'Game.ini') {
+            const gameUserSettingsPath = join(serverInfo.path, 'GameUserSettings.ini');
             try {
               await access(gameUserSettingsPath);
-              await this.createDefaultConfigFile(serverName, fileName);
+              await this.createDefaultConfigFile(serverInfo, fileName);
             } catch (gameUserSettingsError) {
               throw new Error(`Cannot create Game.ini without GameUserSettings.ini for server ${serverName}`);
             }
@@ -176,11 +357,13 @@ AllowFlyerCarryPvE=True
         filePath,
         fileName,
         serverName,
-        configPath: this.getConfigDirPath(serverName)
+        configPath: serverInfo.path,
+        serverType: serverInfo.type,
+        clusterName: serverInfo.clusterName
       };
     } catch (error) {
       if (error.code === 'ENOENT') {
-        logger.warn(`Config file not found: ${this.getConfigFilePath(serverName, fileName)}`);
+        logger.warn(`Config file not found for server ${serverName}: ${fileName}`);
         throw new Error(`Config file not found: ${fileName} for server ${serverName}`);
       }
       
@@ -192,17 +375,16 @@ AllowFlyerCarryPvE=True
   /**
    * Create a single default config file
    */
-  async createDefaultConfigFile(serverName, fileName) {
-    const configDirPath = this.getConfigDirPath(serverName);
+  async createDefaultConfigFile(serverInfo, fileName) {
+    const configDirPath = serverInfo.path;
     
     // Create directory if it doesn't exist
     if (!existsSync(configDirPath)) {
       await this.createDirectory(configDirPath);
     }
 
-    let content = '';
-    if (fileName === 'Game.ini') {
-      content = `[/script/shootergame.shootergamemode]
+    // Default Game.ini content
+    const defaultGameIni = `[/script/shootergame.shootergamemode]
 MaxPlayers=70
 ServerPassword=
 ServerAdminPassword=admin123
@@ -215,8 +397,9 @@ ShowMapPlayerLocation=True
 EnablePvPGamma=False
 AllowFlyerCarryPvE=True
 `;
-    } else if (fileName === 'GameUserSettings.ini') {
-      content = `[ServerSettings]
+
+    // Default GameUserSettings.ini content
+    const defaultGameUserSettings = `[ServerSettings]
 ServerPassword=
 ServerAdminPassword=admin123
 MaxPlayers=70
@@ -230,16 +413,15 @@ ShowMapPlayerLocation=True
 EnablePvPGamma=False
 AllowFlyerCarryPvE=True
 `;
-    } else {
-      throw new Error(`Unknown config file type: ${fileName}`);
-    }
 
+    const content = fileName === 'Game.ini' ? defaultGameIni : defaultGameUserSettings;
     const filePath = join(configDirPath, fileName);
+    
     try {
       await writeFile(filePath, content, 'utf8');
-      logger.info(`Created default ${fileName} for server ${serverName}: ${filePath}`);
+      logger.info(`Created default ${fileName} for server ${serverInfo.serverName}: ${filePath}`);
     } catch (error) {
-      logger.error(`Failed to create default ${fileName} for server ${serverName}:`, error);
+      logger.error(`Failed to create default ${fileName} for server ${serverInfo.serverName}:`, error);
       throw error;
     }
   }
@@ -249,17 +431,17 @@ AllowFlyerCarryPvE=True
    */
   async updateConfigFile(serverName, content, fileName = 'GameUserSettings.ini') {
     try {
-      const filePath = this.getConfigFilePath(serverName, fileName);
-      
-      // Create directory if it doesn't exist
-      const dirPath = this.getConfigDirPath(serverName);
-      if (!existsSync(dirPath)) {
-        await this.createDirectory(dirPath);
+      const serverInfo = await this.findServerConfigPath(serverName);
+      if (!serverInfo) {
+        throw new Error(`Server ${serverName} not found in any location`);
       }
+
+      const filePath = join(serverInfo.path, fileName);
       
-      // Write file
+      // Validate the file path is within the allowed directory
+      this.validateConfigPath(filePath);
+      
       await writeFile(filePath, content, 'utf8');
-      
       logger.info(`Config file updated: ${filePath}`);
       
       return {
@@ -268,7 +450,9 @@ AllowFlyerCarryPvE=True
         filePath,
         fileName,
         serverName,
-        configPath: dirPath
+        configPath: serverInfo.path,
+        serverType: serverInfo.type,
+        clusterName: serverInfo.clusterName
       };
     } catch (error) {
       logger.error(`Error updating config file ${fileName} for server ${serverName}:`, error);
@@ -362,11 +546,22 @@ AllowFlyerCarryPvE=True
   async listConfigFiles(serverName) {
     logger.info(`[listConfigFiles] serverName: ${serverName}`);
     try {
-      const serverPath = join(this.serverRootPath, serverName);
-      logger.info(`[listConfigFiles] serverPath: ${serverPath}`);
-      await access(serverPath);
-      const configDirPath = this.getConfigDirPath(serverName);
+      const serverInfo = await this.findServerConfigPath(serverName);
+      if (!serverInfo) {
+        logger.warn(`[listConfigFiles] Server ${serverName} not found in any location`);
+        return {
+          success: true,
+          files: [],
+          serverName,
+          path: null,
+          defaultFiles: this.defaultConfigFiles,
+          message: 'Server not found'
+        };
+      }
+
+      const configDirPath = serverInfo.path;
       logger.info(`[listConfigFiles] configDirPath: ${configDirPath}`);
+      
       try {
         await access(configDirPath);
       } catch (error) {
@@ -384,30 +579,25 @@ AllowFlyerCarryPvE=True
           throw error;
         }
       }
+      
       const files = await readdir(configDirPath);
       logger.info(`[listConfigFiles] Files in configDirPath: ${files.join(', ')}`);
       const configFiles = files.filter(file => 
         file.endsWith('.ini') || file.endsWith('.cfg') || file.endsWith('.json')
       );
       logger.info(`[listConfigFiles] Filtered config files: ${configFiles.join(', ')}`);
+      
       return {
         success: true,
         files: configFiles,
         serverName,
         path: configDirPath,
-        defaultFiles: this.defaultConfigFiles
+        defaultFiles: this.defaultConfigFiles,
+        serverType: serverInfo.type,
+        clusterName: serverInfo.clusterName
       };
     } catch (error) {
       logger.error(`[listConfigFiles] Error: ${error.message}`);
-      if (error.code === 'ENOENT') {
-        return {
-          success: true,
-          files: [],
-          serverName,
-          path: join(this.serverRootPath, serverName),
-          message: 'Server directory not found'
-        };
-      }
       throw new Error(`Failed to list config files: ${error.message}`);
     }
   }
@@ -418,10 +608,19 @@ AllowFlyerCarryPvE=True
   async getServerInfo(serverName) {
     logger.info(`[getServerInfo] serverName: ${serverName}`);
     try {
-      const serverPath = join(this.serverRootPath, serverName);
+      const serverInfo = await this.findServerConfigPath(serverName);
+      if (!serverInfo) {
+        throw new Error(`Server ${serverName} not found in any location`);
+      }
+
+      const serverPath = serverInfo.type === 'standalone' 
+        ? join(this.serverRootPath, serverName)
+        : join(this.serverRootPath, 'cluster', serverInfo.clusterName, serverName);
+      
       logger.info(`[getServerInfo] serverPath: ${serverPath}`);
-      const configDirPath = this.getConfigDirPath(serverName);
+      const configDirPath = serverInfo.path;
       logger.info(`[getServerInfo] configDirPath: ${configDirPath}`);
+      
       await access(serverPath);
       let configExists = false;
       let configFiles = [];
@@ -452,7 +651,9 @@ AllowFlyerCarryPvE=True
         configFiles,
         defaultFiles: this.defaultConfigFiles,
         hasGameIni: configFiles.includes('Game.ini'),
-        hasGameUserSettings: configFiles.includes('GameUserSettings.ini')
+        hasGameUserSettings: configFiles.includes('GameUserSettings.ini'),
+        serverType: serverInfo.type,
+        clusterName: serverInfo.clusterName
       };
     } catch (error) {
       logger.error(`[getServerInfo] Error: ${error.message}`);
