@@ -6,6 +6,8 @@ import { promisify } from 'util';
 import logger from '../utils/logger.js';
 import config from '../config/index.js';
 import { requirePermission } from '../middleware/auth.js';
+import { join } from 'path';
+import configService from '../services/config.js';
 
 const execAsync = promisify(exec);
 
@@ -283,6 +285,146 @@ export default async function configRoutes(fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to get system information'
+      });
+    }
+  });
+
+  // ARK Server Config File Management
+  // =================================
+
+  // Get ARK config file for a server
+  fastify.get('/api/configs/ark/:serverName/:fileName', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName, fileName } = request.params;
+      
+      // Validate fileName
+      if (!['Game.ini', 'GameUserSettings.ini'].includes(fileName)) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Invalid config file name. Must be Game.ini or GameUserSettings.ini'
+        });
+      }
+
+      const content = await configService.getConfigFile(serverName, fileName);
+      
+      return {
+        success: true,
+        content,
+        fileName,
+        serverName,
+        requiresRestart: true // ARK config changes require server restart
+      };
+    } catch (error) {
+      logger.error('Failed to get ARK config file:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Update ARK config file for a server
+  fastify.put('/api/configs/ark/:serverName/:fileName', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName, fileName } = request.params;
+      const { content } = request.body;
+      
+      if (!content) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Content is required'
+        });
+      }
+      
+      // Validate fileName
+      if (!['Game.ini', 'GameUserSettings.ini'].includes(fileName)) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Invalid config file name. Must be Game.ini or GameUserSettings.ini'
+        });
+      }
+
+      await configService.updateConfigFile(serverName, content, fileName);
+      
+      logger.info(`ARK config file updated by user ${request.user?.username}: ${serverName}/${fileName}`);
+      
+      return {
+        success: true,
+        message: `${fileName} updated successfully`,
+        fileName,
+        serverName,
+        requiresRestart: true // ARK config changes require server restart
+      };
+    } catch (error) {
+      logger.error('Failed to update ARK config file:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Get server config info (server-config.json)
+  fastify.get('/api/configs/ark/:serverName/info', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      
+      const serverInfo = await configService.getServerInfo(serverName);
+      
+      // Also try to read server-config.json if it exists
+      let serverConfig = null;
+      try {
+        const serverConfigPath = join(configService.serverRootPath, serverName, 'server-config.json');
+        const serverConfigContent = await fs.readFile(serverConfigPath, 'utf8');
+        serverConfig = JSON.parse(serverConfigContent);
+      } catch (error) {
+        // server-config.json doesn't exist or is invalid, that's okay
+        logger.info(`No server-config.json found for ${serverName}`);
+      }
+      
+      return {
+        success: true,
+        serverInfo,
+        serverConfig,
+        serverName
+      };
+    } catch (error) {
+      logger.error('Failed to get server config info:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // List available ARK config files for a server
+  fastify.get('/api/configs/ark/:serverName/files', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      
+      const serverInfo = await configService.getServerInfo(serverName);
+      
+      return {
+        success: true,
+        files: serverInfo.configFiles,
+        serverName,
+        configPath: serverInfo.configPath,
+        hasGameIni: serverInfo.hasGameIni,
+        hasGameUserSettings: serverInfo.hasGameUserSettings
+      };
+    } catch (error) {
+      logger.error('Failed to list ARK config files:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
       });
     }
   });
