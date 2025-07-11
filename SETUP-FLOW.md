@@ -1,192 +1,323 @@
-# ASA Server Management - Setup Flow
+# ASA API Setup Flow
 
-## 🎯 **Simple User Journey**
+This document outlines the recommended setup flow for the ASA Management API.
 
-### **For New Users (Recommended)**
+## 🎯 Setup Options
 
-```
-1. Clone Repository
-   ↓
-2. Run Setup Script
-   PowerShell: .\setup-asa.ps1
-   CMD: setup-asa.bat
-   ↓
-3. Answer Questions
-   - Base path (e.g., G:\ARK)
-   - Server mode (native/docker)
-   - SteamCMD setup
-   ↓
-4. System Configures Everything
-   - Creates .env file
-   - Installs dependencies
-   - Sets up directories
-   - Installs SteamCMD
-   - Downloads ASA binaries
-   - Starts backend API
-   ↓
-5. Launch Interactive Console
-   - Create ASA server clusters
-   - Configure maps and mods
-   - Start/stop servers
-   ↓
-6. Access Web Dashboard
-   - Manage servers via web UI
-   - Monitor performance
-   - Edit configurations
-```
+### Option 1: Windows Service (NSSM) - Recommended
+- **Best for:** Production environments
+- **Pros:** Automatic startup, reliable, easy management
+- **Cons:** Windows-only
 
-### **For Advanced Users**
+### Option 2: Manual Operation
+- **Best for:** Development, testing, Linux
+- **Pros:** Cross-platform, simple
+- **Cons:** Manual startup, no automatic restart
 
-```
-1. Manual Configuration
-   cp env.example .env
-   # Edit .env manually
-   ↓
-2. Install Dependencies
+### Option 3: Docker Container
+- **Best for:** Containerized environments
+- **Pros:** Isolated, portable, scalable
+- **Cons:** Additional complexity
+
+## 🚀 Recommended Setup Flow
+
+### Phase 1: Prerequisites
+
+1. **Install Node.js 18+**
+   ```bash
+   # Download from https://nodejs.org/
+   # Or use nvm-windows
+   nvm install 18.17.0
+   nvm use 18.17.0
+   ```
+
+2. **Verify installation**
+   ```bash
+   node --version
+   npm --version
+   ```
+
+3. **Clone repository**
+   ```bash
+   git clone <repository-url>
+   cd asa-docker-control-api
+   ```
+
+### Phase 2: Configuration
+
+1. **Install dependencies**
+   ```bash
    npm install
-   ↓
-3. Start Backend
-   npm start
-   ↓
-4. Use Interactive Console
-   node scripts/interactive-console.js
-```
+   ```
 
-## 📋 **What Each Component Does**
+2. **Set up environment**
+   ```bash
+   copy env.example .env
+   ```
 
-### **setup-asa.ps1** (PowerShell Setup Script)
-- **Purpose**: Complete setup wizard for new users (PowerShell version)
-- **What it does**:
-  - Configures environment variables
-  - Installs npm dependencies
-  - Creates directory structure
-  - Sets up SteamCMD
-  - Downloads ASA binaries
-  - Starts the backend API
-  - Launches interactive console
+3. **Configure .env file**
+   ```bash
+   # Essential settings
+   PORT=4000
+   JWT_SECRET=your-secure-jwt-secret
+   CONFIG_BASE_PATH=G:\ARK
+   CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+   
+   # Optional settings
+   NODE_ENV=production
+   LOG_LEVEL=info
+   DOCKER_SOCKET=/var/run/docker.sock
+   ```
 
-### **setup-asa.bat** (Batch Setup Script)
-- **Purpose**: Complete setup wizard for new users (Command Prompt version)
-- **What it does**:
-  - Same functionality as PowerShell version
-  - Compatible with older Windows systems
-  - Works without PowerShell execution policy restrictions
+### Phase 3: Service Installation (Recommended)
 
-### **interactive-console.js** (Management Console)
-- **Purpose**: Command-line interface for server management
-- **What it does**:
-  - Create ASA server clusters
-  - Install SteamCMD and ASA binaries
-  - Start/stop/delete clusters
-  - View system information
-  - Configure environment settings
+1. **Run NSSM installer**
+   ```powershell
+   # Run PowerShell as Administrator
+   .\install-nssm-service.ps1
+   ```
 
-### **server.js** (Backend API)
-- **Purpose**: REST API for web dashboard and automation
-- **What it does**:
-  - Container management (Docker mode)
-  - Native server management
-  - RCON communication
-  - Configuration file editing
-  - Log streaming
-  - Authentication
+2. **Verify installation**
+   ```powershell
+   Get-Service ASA-API
+   ```
 
-### **Web Dashboard** (Frontend)
-- **Purpose**: User-friendly web interface
-- **What it does**:
-  - Visual server management
-  - Real-time monitoring
-  - Configuration editing
-  - Log viewing
-  - Cluster creation
+3. **Start service**
+   ```powershell
+   Start-Service ASA-API
+   ```
 
-## 🔧 **Environment Modes**
+4. **Test API**
+   ```powershell
+   Invoke-WebRequest -Uri "http://localhost:4000/health"
+   ```
 
-### **Native Mode** (Recommended for Windows)
-- Runs ASA servers directly on Windows
-- Better performance and direct file access
-- Easier debugging and troubleshooting
-- No Docker required
+### Phase 4: Verification
 
-### **Docker Mode** (Advanced)
-- Runs ASA servers in Docker containers
-- Isolated environment
-- Consistent deployment
-- Requires Docker Desktop
+1. **Check service status**
+   ```powershell
+   Get-Service ASA-API
+   ```
 
-## 🚀 **Quick Start Commands**
+2. **Check API health**
+   ```powershell
+   curl http://localhost:4000/health
+   ```
 
-| Task | Command | Description |
-|------|---------|-------------|
-| **Complete Setup (PowerShell)** | `.\setup-asa.ps1` | Full setup for new users |
-| **Complete Setup (CMD)** | `setup-asa.bat` | Full setup for new users (CMD) |
-| **Start Backend** | `npm start` | Start API server |
-| **Interactive Console** | `node scripts/interactive-console.js` | Command-line management |
-| **Docker Mode** | `docker compose up -d` | Start with Docker |
-| **Development** | `npm run dev` | Start with hot reload |
-| **Help (PowerShell)** | `.\setup-asa.ps1 -Help` | Show setup options |
+3. **Check logs**
+   ```powershell
+   Get-Content "C:\ASA-API\logs\nssm-out.log" -Tail 10
+   Get-Content "C:\ASA-API\logs\app.log" -Tail 10
+   ```
 
-## 📁 **Directory Structure After Setup**
+## 🔄 Alternative Setup Flows
 
-```
-G:\ARK\ (or your chosen path)
-├── steamcmd\           # SteamCMD installation
-├── binaries\           # ASA server files
-├── servers\            # Individual server instances
-├── clusters\           # Server cluster configurations
-├── logs\               # Server and application logs
-└── backups\            # Configuration backups
-```
+### Manual Operation Flow
 
-## ⚙️ **Configuration Files**
-
-### **.env** (Main Configuration)
 ```bash
-# Server Configuration
-SERVER_MODE=native
-NATIVE_BASE_PATH=G:\ARK
-PORT=3000
+# Install dependencies
+npm install
 
-# SteamCMD Configuration
-STEAMCMD_PATH=
-AUTO_INSTALL_STEAMCMD=true
+# Configure environment
+copy env.example .env
+# Edit .env
 
-# Authentication
-JWT_SECRET=your-secret-key
+# Start manually
+npm start
+
+# Or for development
+npm run dev
 ```
 
-### **docker-compose.yml** (Docker Configuration)
-- Maps environment variables to containers
-- Sets up monitoring stack (Prometheus, Grafana)
-- Configures volume mounts
+### Docker Flow
 
-## 🎮 **Creating Your First Cluster**
+```bash
+# Build and run with Docker Compose
+docker-compose -f docker-compose.unified.yml up -d
 
-1. **Run Setup**: `.\setup-asa.ps1`
-2. **Launch Console**: Choose "Y" when prompted
-3. **Create Cluster**: Select option 1 in console
-4. **Configure**:
-   - Choose maps (TheIsland, ScorchedEarth, etc.)
-   - Set server settings (players, difficulty, etc.)
-   - Add mods (optional)
-   - Configure ports
-5. **Start Cluster**: Choose to start immediately
-6. **Access Server**: Connect via ARK client
+# Check status
+docker-compose -f docker-compose.unified.yml ps
 
-## 🔍 **Troubleshooting**
+# View logs
+docker-compose -f docker-compose.unified.yml logs -f
+```
 
-### **Common Issues**
-- **Node.js not found**: Install Node.js 18+ from https://nodejs.org/
-- **Permission errors**: Run PowerShell as Administrator
-- **Port conflicts**: Change PORT in .env file
-- **Docker not running**: Start Docker Desktop
+## 🔧 Post-Setup Configuration
 
-### **Getting Help**
-- **Documentation**: README.md, QUICK-SETUP.md
-- **Interactive Console**: Built-in help and system info
-- **Logs**: Check logs/ directory for error details
+### ASA Server Configuration
 
----
+1. **Set server paths in .env**
+   ```bash
+   ASA_SERVER_1_PATH=G:\ARK\TheIsland
+   ASA_SERVER_2_PATH=G:\ARK\Ragnarok
+   ASA_SERVER_3_PATH=G:\ARK\ClubARK
+   ```
 
-**Result**: A simple, clear setup process that gets users from zero to running ASA servers in minutes! 
+2. **Verify server configurations**
+   ```bash
+   # Check if servers are accessible
+   dir G:\ARK\TheIsland
+   dir G:\ARK\Ragnarok
+   ```
+
+### Frontend Integration
+
+1. **Start the dashboard**
+   ```bash
+   cd ../asa-servers-dashboard
+   npm start
+   ```
+
+2. **Verify connection**
+   - Dashboard should connect to API at `http://localhost:4000`
+   - Check browser console for connection errors
+
+### Monitoring Setup
+
+1. **Enable metrics endpoint**
+   ```bash
+   # Already enabled by default
+   curl http://localhost:4000/metrics
+   ```
+
+2. **Configure log rotation**
+   ```bash
+   # Logs are in C:\ASA-API\logs\
+   # Consider setting up log rotation
+   ```
+
+## 🛠️ Troubleshooting Flow
+
+### Service Won't Start
+
+1. **Check NSSM logs**
+   ```powershell
+   Get-Content "C:\ASA-API\logs\nssm-*.log"
+   ```
+
+2. **Verify Node.js**
+   ```powershell
+   node --version
+   ```
+
+3. **Check service configuration**
+   ```powershell
+   nssm.exe dump ASA-API
+   ```
+
+4. **Reinstall if needed**
+   ```powershell
+   nssm.exe remove ASA-API confirm
+   .\install-nssm-service.ps1
+   ```
+
+### API Not Responding
+
+1. **Check service status**
+   ```powershell
+   Get-Service ASA-API
+   ```
+
+2. **Check application logs**
+   ```powershell
+   Get-Content "C:\ASA-API\logs\app.log" -Tail 20
+   ```
+
+3. **Test manually**
+   ```powershell
+   cd C:\ASA-API
+   node server.js
+   ```
+
+### Configuration Issues
+
+1. **Verify .env file**
+   ```powershell
+   Get-Content "C:\ASA-API\.env"
+   ```
+
+2. **Check file permissions**
+   ```powershell
+   Get-Acl "C:\ASA-API"
+   ```
+
+3. **Test configuration**
+   ```powershell
+   node -e "console.log(require('dotenv').config())"
+   ```
+
+## 📋 Setup Checklist
+
+### Prerequisites
+- [ ] Node.js 18+ installed
+- [ ] PowerShell Administrator access
+- [ ] Repository cloned
+- [ ] Dependencies installed
+
+### Configuration
+- [ ] Environment file created (.env)
+- [ ] JWT secret configured
+- [ ] Server paths configured
+- [ ] CORS origins set
+
+### Service Installation
+- [ ] NSSM service installed
+- [ ] Service starts successfully
+- [ ] API responds to health check
+- [ ] Logs are being written
+
+### Integration
+- [ ] Frontend dashboard connects
+- [ ] ASA servers accessible
+- [ ] RCON commands work
+- [ ] Configuration editing works
+
+## 🔄 Maintenance Flow
+
+### Regular Maintenance
+
+1. **Check service status**
+   ```powershell
+   Get-Service ASA-API
+   ```
+
+2. **Review logs**
+   ```powershell
+   Get-Content "C:\ASA-API\logs\app.log" -Tail 50
+   ```
+
+3. **Update if needed**
+   ```powershell
+   Stop-Service ASA-API
+   # Update code
+   Start-Service ASA-API
+   ```
+
+### Backup and Recovery
+
+1. **Backup configuration**
+   ```powershell
+   copy "C:\ASA-API\.env" "C:\ASA-API\.env.backup"
+   ```
+
+2. **Backup logs**
+   ```powershell
+   copy "C:\ASA-API\logs" "C:\ASA-API\logs.backup" -Recurse
+   ```
+
+3. **Restore if needed**
+   ```powershell
+   copy "C:\ASA-API\.env.backup" "C:\ASA-API\.env"
+   Restart-Service ASA-API
+   ```
+
+## 📞 Support
+
+If you encounter issues during setup:
+
+1. Check the troubleshooting section above
+2. Review logs in `C:\ASA-API\logs\`
+3. Verify all prerequisites are met
+4. Ensure PowerShell is run as Administrator
+5. Check the main README for additional details 
  

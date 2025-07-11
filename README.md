@@ -1,529 +1,260 @@
-# ASA Control API
+# ASA Management API
 
-> 🔗 This is the backend API for the [ASA Dashboard UI](https://github.com/kpinc425/asa-dashboard-ui)
+A Node.js backend API for managing ARK: Survival Ascended servers, providing container management, RCON control, configuration editing, and log streaming capabilities.
 
-A secure, high-performance Node.js backend API for managing ARK: Survival Ascended (ASA) Docker clusters. Built with Fastify for optimal performance and includes comprehensive monitoring, authentication, and real-time features.
+## 🚀 Quick Start
 
-## 🚀 Features
-
-- **Container Management**: Start, stop, restart ASA containers
-- **RCON Integration**: Send commands to ASA servers via RCON
-- **Config Management**: Read and write ASA configuration files
-- **Environment Management**: Edit .env variables and Docker Compose configuration from the frontend
-- **ARK Server Management**: Add, edit, and remove ARK servers with mod support
-- **Real-time Monitoring**: WebSocket streams for logs and events
-- **Authentication**: JWT-based user authentication with role-based access
-- **Metrics**: Prometheus-compatible metrics for monitoring
-- **Rate Limiting**: Built-in rate limiting for API protection
-- **Update Lock Management**: Prevent updates during critical operations
-
-## 📋 Prerequisites
-
+### Prerequisites
 - Node.js 18+ 
-- Docker and Docker Compose
-- Access to Docker socket
-- ASA containers running on the same host
+- Windows (for NSSM service installation)
+- Docker (optional, for container management)
 
-## 🛠️ Installation & Setup
+### Installation
 
-### **One-Command Setup (Recommended)**
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd asa-docker-control-api
+   ```
 
-For new users, run the complete setup wizard:
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-**PowerShell (Recommended):**
+3. **Configure environment:**
+   ```bash
+   copy env.example .env
+   # Edit .env with your configuration
+   ```
+
+4. **Install as Windows Service (Recommended):**
+   ```powershell
+   # Run as Administrator
+   .\install-nssm-service.ps1
+   ```
+
+5. **Or run manually:**
+   ```bash
+   npm start
+   ```
+
+## 🔧 Service Installation
+
+### Windows Service (NSSM)
+
+The recommended approach is to install the API as a Windows service using NSSM (Non-Sucking Service Manager).
+
+**Installation:**
 ```powershell
-.\setup-asa.ps1
+# Run PowerShell as Administrator
+.\install-nssm-service.ps1
 ```
 
-**Command Prompt (Alternative):**
-```cmd
-setup-asa.bat
+**Service Control:**
+```powershell
+# Start the service
+Start-Service ASA-API
+
+# Stop the service  
+Stop-Service ASA-API
+
+# Check status
+Get-Service ASA-API
+
+# Restart
+Restart-Service ASA-API
 ```
 
-This single script will:
-1. **Configure Environment** - Set up your `.env` file with paths and preferences
-2. **Install Dependencies** - Install all required npm packages
-3. **Initialize System** - Create necessary directories and check system
-4. **Setup SteamCMD** - Install or configure SteamCMD for ASA downloads
-5. **Install ASA Binaries** - Download ASA server files
-6. **Start Backend** - Launch the API server (native or Docker mode)
-7. **Launch Console** - Open interactive console for cluster creation
+**NSSM Commands:**
+```powershell
+# Direct NSSM control
+nssm.exe start ASA-API
+nssm.exe stop ASA-API
+nssm.exe restart ASA-API
+nssm.exe remove ASA-API confirm
+```
 
-### **Manual Setup (Advanced Users)**
+### Manual Operation
 
-If you prefer manual setup:
+For development or testing, you can run the API manually:
 
-#### 1. Configure Environment
 ```bash
-cp env.example .env
-# Edit .env with your preferences
-```
-
-#### 2. Install Dependencies
-```bash
-npm install
-```
-
-#### 3. Start the Application
-
-**Native Mode (Recommended for Windows):**
-```bash
-npm start
-```
-
-**Docker Mode:**
-```bash
-docker-compose up -d
-```
-
-**Development Mode:**
-```bash
+# Development mode
 npm run dev
+
+# Production mode
+npm start
+
+# With custom port
+PORT=4001 npm start
 ```
 
-#### 4. Interactive Console
-```bash
-node scripts/interactive-console.js
-```
+## 📡 API Endpoints
 
-### **Quick Commands**
-
-| Action | Command |
-|--------|---------|
-| Complete Setup (PowerShell) | `.\setup-asa.ps1` |
-| Complete Setup (CMD) | `setup-asa.bat` |
-| Start Backend | `npm start` |
-| Interactive Console | `node scripts/interactive-console.js` |
-| Docker Mode | `docker-compose up -d` |
-| Help (PowerShell) | `.\setup-asa.ps1 -Help` |
-
-The interactive console provides a user-friendly interface for:
-- Creating and managing ASA server clusters
-- Installing SteamCMD and ASA binaries
-- Configuring environment settings
-- Viewing system information
-- Managing server operations
-
-## ⚙️ Configuration
-
-### First-Time Setup
-
-The setup wizard will guide you through configuring the following essential settings:
-
-1. **Base Path**: Where all ASA server files will be stored (e.g., `G:\ARK`, `D:\ASA`)
-2. **Server Mode**: Choose between `native` (recommended) or `docker` mode
-3. **SteamCMD**: Configure SteamCMD installation or use existing installation
-4. **API Settings**: Port, log level, and other backend configuration
-
-### Environment Variables
-
-| Variable | Description | Default | Requires Restart |
-|----------|-------------|---------|------------------|
-| `PORT` | Server port | `3000` | ✅ |
-| `HOST` | Server host | `0.0.0.0` | ✅ |
-| `NODE_ENV` | Environment | `development` | ❌ |
-| `JWT_SECRET` | JWT signing secret | `fallback-secret` | ❌ |
-| `SERVER_MODE` | Server mode (native/docker) | `native` | ✅ |
-| `NATIVE_BASE_PATH` | Base path for ASA files | `G:\ARK` | ✅ |
-| `STEAMCMD_PATH` | SteamCMD installation path | Auto-detected | ❌ |
-| `AUTO_INSTALL_STEAMCMD` | Auto-install SteamCMD if not found | `true` | ❌ |
-| `DOCKER_SOCKET_PATH` | Docker socket path | `/var/run/docker.sock` | ✅ |
-| `ASA_CONFIG_SUB_PATH` | ASA configs directory | `/opt/asa/configs` | ❌ |
-| `RCON_DEFAULT_PORT` | Default RCON port | `32330` | ❌ |
-| `RCON_PASSWORD` | Default RCON password | `admin` | ❌ |
-
-### Environment Management
-
-The system provides an API endpoint to reload environment configuration:
-
-#### POST `/api/environment/reload`
-Reload environment variables and check if Docker restart is needed.
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Environment configuration reloaded",
-  "needsRestart": false,
-  "restartCommand": null
-}
-```
-
-**Note:** Variables marked with ✅ require Docker restart to take effect. The API will indicate if a restart is needed.
-
-### Default Users
-
-The system comes with three default users:
-
-| Username | Password | Role | Permissions |
-|----------|----------|------|-------------|
-| `admin` | `admin123` | Admin | read, write, admin |
-| `operator` | `operator123` | Operator | read, write |
-| `viewer` | `viewer123` | Viewer | read |
-
-**⚠️ Change these passwords in production!**
-
-## 🔌 API Endpoints
-
-### Authentication
-
-#### POST `/api/auth/login`
-Authenticate user and get JWT token.
-
-```json
-{
-  "username": "admin",
-  "password": "admin123"
-}
-```
-
-#### GET `/api/auth/me`
-Get current user information (requires authentication).
+### Health Check
+- `GET /health` - Service health status
 
 ### Container Management
+- `GET /api/containers` - List Docker containers
+- `POST /api/containers/:id/start` - Start container
+- `POST /api/containers/:id/stop` - Stop container
+- `POST /api/containers/:id/restart` - Restart container
 
-#### GET `/api/containers`
-List all ASA containers and their status.
-
-#### POST `/api/containers/:name/start`
-Start a container.
-
-#### POST `/api/containers/:name/stop`
-Stop a container.
-
-#### POST `/api/containers/:name/restart`
-Restart a container.
-
-#### GET `/api/containers/:name/logs`
-Get container logs (supports WebSocket streaming).
-
-#### GET `/api/containers/:name/stats`
-Get container resource usage statistics.
-
-### RCON Commands
-
-#### POST `/api/containers/:name/rcon`
-Send RCON command to ASA server.
-
-```json
-{
-  "command": "SaveWorld",
-  "host": "localhost",
-  "port": 32330,
-  "password": "admin"
-}
-```
-
-#### GET `/api/containers/:name/server-info`
-Get server information via RCON.
-
-#### GET `/api/containers/:name/players`
-Get player list via RCON.
-
-#### POST `/api/containers/:name/save-world`
-Save the world via RCON.
-
-#### POST `/api/containers/:name/broadcast`
-Broadcast message to players.
-
-```json
-{
-  "message": "Server restarting in 5 minutes!"
-}
-```
+### RCON Control
+- `POST /api/rcon/:server` - Send RCON command
+- `GET /api/rcon/:server/status` - Get server status
 
 ### Configuration Management
+- `GET /api/configs/:map` - Get server configuration
+- `PUT /api/configs/:map` - Update server configuration
 
-#### GET `/api/configs/:map`
-Get configuration file contents.
+### Native Server Management
+- `GET /api/native-servers` - List native servers
+- `POST /api/native-servers/:server/start` - Start native server
+- `POST /api/native-servers/:server/stop` - Stop native server
 
-#### PUT `/api/configs/:map`
-Update configuration file.
-
-```json
-{
-  "content": "[ServerSettings]\nServerPassword=MyPassword",
-  "file": "GameUserSettings.ini"
-}
-```
-
-#### GET `/api/lock-status`
-Check update lock status.
-
-#### POST `/api/lock-status`
-Create update lock.
-
-```json
-{
-  "reason": "Scheduled maintenance"
-}
-```
-
-#### DELETE `/api/lock-status`
-Remove update lock.
-
-### Environment Management
-
-#### GET `/api/environment`
-Get .env file content and parsed variables.
-
-#### PUT `/api/environment`
-Update .env file content.
-
-```json
-{
-  "content": "PORT=4000\nHOST=0.0.0.0\nNODE_ENV=production"
-}
-```
-
-#### PUT `/api/environment/:key`
-Update specific environment variable.
-
-```json
-{
-  "value": "new-value"
-}
-```
-
-#### GET `/api/docker-compose`
-Get Docker Compose file content.
-
-#### PUT `/api/docker-compose`
-Update Docker Compose file content.
-
-#### POST `/api/docker-compose/reload`
-Reload Docker Compose configuration (restarts containers).
-
-### ARK Server Management
-
-#### GET `/api/ark-servers`
-Get ARK server configurations from Docker Compose.
-
-#### POST `/api/ark-servers`
-Add new ARK server to Docker Compose.
-
-```json
-{
-  "name": "ark-server-theisland",
-  "containerName": "asa-server-theisland",
-  "image": "ark:latest",
-  "gamePort": "7777",
-  "rconPort": "32330",
-  "serverName": "The Island Server",
-  "mapName": "TheIsland",
-  "serverPassword": "",
-  "adminPassword": "admin123",
-  "maxPlayers": "70",
-  "mods": ["123456789", "987654321"],
-  "additionalArgs": "-servergamelog",
-  "dataPath": "./ark-data"
-}
-```
-
-#### PUT `/api/ark-servers/:name`
-Update ARK server configuration.
-
-#### DELETE `/api/ark-servers/:name`
-Remove ARK server from Docker Compose.
-
-### Mods Management
-
-#### GET `/api/mods`
-Get available mods (placeholder for Steam Workshop integration).
-
-### Real-time Features
-
-#### WebSocket `/api/logs/:container`
-Stream container logs in real-time.
-
-#### WebSocket `/api/events`
-Stream Docker container events in real-time.
-
-### Monitoring
-
-#### GET `/metrics`
-Prometheus-compatible metrics endpoint.
-
-#### GET `/health`
-Health check endpoint.
+### Logs
+- `GET /api/logs/:server` - Get server logs
+- `GET /api/logs/:server/stream` - Stream server logs (WebSocket)
 
 ## 🔐 Authentication
 
-All API endpoints (except login) require authentication. Include the JWT token in the Authorization header:
+The API uses JWT-based authentication. Include the JWT token in the Authorization header:
 
 ```
 Authorization: Bearer <your-jwt-token>
 ```
 
-### Role-based Access Control
+## 🌐 CORS Configuration
 
-- **Admin**: Full access to all features including environment management
-- **Operator**: Can manage containers and send RCON commands
-- **Viewer**: Read-only access to containers and configs
+CORS is configured to allow requests from:
+- `http://localhost:3000` (React dev server)
+- `http://localhost:5173` (Vite dev server)
+- `http://localhost:4000` (API server)
+- `http://localhost:4010` (Dashboard)
 
-## 📊 Monitoring
-
-The application includes comprehensive monitoring with Prometheus and Grafana:
-
-### Metrics Available
-
-- Container operations (start, stop, restart)
-- RCON command statistics
-- API request metrics
-- ARK server status
-- Resource usage
-
-### Accessing Monitoring
-
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3001 (admin/admin)
-- **cAdvisor**: http://localhost:8080
-
-## 🐳 Docker Deployment
-
-### Using Docker Compose
-
-```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f ark-api
-
-# Stop services
-docker-compose down
-```
-
-### Manual Docker Build
-
-```bash
-# Build image
-docker build -t asa-control-api .
-
-# Run container
-docker run -d \
-  --name asa-control-api \
-  -p 4000:3000 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v ./logs:/app/logs \
-  -v ./asa-configs:/opt/asa/configs \
-  asa-control-api
-```
-
-## 🔧 Development
-
-### Project Structure
+## 📁 Project Structure
 
 ```
 asa-docker-control-api/
-├── config/          # Configuration management
-├── middleware/      # Authentication and metrics middleware
-├── metrics/         # Prometheus metrics
-├── routes/          # API route handlers
-│   ├── auth.js      # Authentication routes
-│   ├── containers.js # Container management
-│   ├── configs.js   # Configuration management
-│   ├── environment.js # Environment management
-│   ├── logs.js      # Log streaming
-│   └── rcon.js      # RCON commands
-├── services/        # Business logic
-│   ├── auth.js      # Authentication service
-│   ├── config.js    # Configuration service
-│   ├── docker.js    # Docker operations
-│   ├── environment.js # Environment management
-│   ├── rcon.js      # RCON service
-│   └── ark-logs.js  # ARK log management
-├── utils/           # Utility functions
-├── server.js        # Main application entry point
-└── docker-compose.yml # Docker Compose configuration
+├── install-nssm-service.ps1    # NSSM service installer
+├── windows-service/            # Service-related files
+│   └── asa-api-service-direct.bat
+├── routes/                     # API route handlers
+├── services/                   # Business logic
+├── middleware/                 # Express middleware
+├── config/                     # Configuration files
+├── utils/                      # Utility functions
+├── logs/                       # Application logs
+├── docker-compose.unified.yml  # Unified Docker setup
+├── docker-compose.env          # Docker environment
+└── start-asa-suite.ps1        # Suite startup script
 ```
 
-### Environment Management Features
+## 🐳 Docker Support
 
-The API now includes comprehensive environment management capabilities:
+The API can run in Docker containers and manage other Docker containers:
 
-#### .env File Management
-- Read and edit .env file content
-- Update individual environment variables
-- Automatic backup creation before changes
-- Validation of environment variable format
+```bash
+# Build and run with Docker
+docker-compose -f docker-compose.unified.yml up -d
+```
 
-#### Docker Compose Management
-- Read and edit docker-compose.yml
-- Add, edit, and remove ARK server configurations
-- Reload Docker Compose configuration
-- YAML validation and syntax checking
+## 🔍 Monitoring
 
-#### ARK Server Configuration
-- Add new ARK servers with full configuration
-- Edit existing server settings
-- Configure mods for each server
-- Set command line arguments
-- Manage server ports and passwords
+The API includes built-in monitoring and metrics:
 
-#### Mod Management
-- Browse available mods (placeholder for Steam Workshop integration)
-- Select mods for individual servers
-- Configure mod load order
+- Health check endpoint: `/health`
+- Metrics endpoint: `/metrics` (Prometheus format)
+- Structured logging with Winston
 
-### Security Features
+## 📝 Logging
 
-- Automatic backup creation before file changes
-- Role-based access control for environment management
-- Input validation and sanitization
-- Secure file operations with proper error handling
+Logs are written to:
+- `logs/app.log` - Application logs
+- `logs/nssm-out.log` - NSSM stdout (when running as service)
+- `logs/nssm-err.log` - NSSM stderr (when running as service)
 
-### Backup System
+## 🛠️ Development
 
-The environment management system automatically creates backups before making changes:
+### Environment Variables
 
-- Backups are stored in the `backups/` directory
-- Timestamped backup files for easy recovery
-- Separate backups for .env and docker-compose.yml files
+Key environment variables (see `env.example`):
 
-## 🚀 Quick Start
+```bash
+PORT=4000                    # API port
+JWT_SECRET=your-secret       # JWT signing secret
+DOCKER_SOCKET=/var/run/docker.sock  # Docker socket path
+CONFIG_BASE_PATH=/path/to/configs   # Config files path
+CORS_ORIGINS=http://localhost:3000  # Allowed CORS origins
+```
 
-1. **Clone and setup:**
-   ```bash
-   git clone <repository-url>
-   cd asa-docker-control-api
-   cp env.example .env
-   # Edit .env with your settings
+### Scripts
+
+```bash
+npm start          # Start production server
+npm run dev        # Start development server
+npm test           # Run tests
+npm run lint       # Run linting
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+## 🆘 Troubleshooting
+
+### Service Issues
+
+If the Windows service fails to start:
+
+1. **Check NSSM logs:**
+   ```powershell
+   Get-Content "C:\ASA-API\logs\nssm-*.log"
    ```
 
-2. **Start with Docker Compose:**
-   ```bash
-   docker-compose up -d
+2. **Verify Node.js installation:**
+   ```powershell
+   node --version
    ```
 
-3. **Access the API:**
-   - API: http://localhost:4000
-   - Health check: http://localhost:4000/health
-   - Metrics: http://localhost:4000/metrics
+3. **Check service configuration:**
+   ```powershell
+   nssm.exe dump ASA-API
+   ```
 
-4. **Connect frontend:**
-   - Update frontend API URL to point to your backend
-   - Login with admin/admin123
+4. **Reinstall service:**
+   ```powershell
+   nssm.exe remove ASA-API confirm
+   .\install-nssm-service.ps1
+   ```
 
-## 🔒 Security Notes
+### API Issues
 
-- Change default passwords in production
-- Set a strong JWT_SECRET
-- Configure proper CORS origins
-- Use HTTPS in production
-- Regularly update dependencies
-- Monitor logs for suspicious activity
+1. **Check application logs:**
+   ```bash
+   tail -f logs/app.log
+   ```
 
-## 📝 License
+2. **Verify environment configuration:**
+   ```bash
+   node -e "console.log(require('dotenv').config())"
+   ```
 
-MIT License - see LICENSE file for details.
+3. **Test API endpoints:**
+   ```bash
+   curl http://localhost:4000/health
+   ```
 
-## Unified Startup (Optional)
+## 🔗 Related Projects
 
-If you have both the backend and frontend repos in the same parent folder, you can use the `start-asa-suite.ps1` script and `docker-compose.unified.yml` to start both at once. These files are copies for convenience; the latest version is maintained at the root of the suite if you have one.
-
-- To start both: `powershell -ExecutionPolicy Bypass -File start-asa-suite.ps1 unified`
-- To start only backend: `powershell -ExecutionPolicy Bypass -File start-asa-suite.ps1 backend`
-- To start only frontend: `powershell -ExecutionPolicy Bypass -File start-asa-suite.ps1 frontend`
-
-Otherwise, use the individual scripts as usual.
+- [ASA Servers Dashboard](https://github.com/your-org/asa-servers-dashboard) - React frontend for ASA management

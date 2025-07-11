@@ -1,5 +1,5 @@
-# ASA API Windows Service Installer
-# Installs the ASA API backend as a Windows service
+# ASA API Windows Service Installer (Enhanced with Permissions)
+# Installs the ASA API backend as a Windows service with proper permissions
 # Requires Administrator privileges
 
 param(
@@ -75,7 +75,7 @@ function Remove-ExistingService {
     return $true
 }
 
-# Install the service
+# Install the service with proper permissions
 function Install-Service {
     param(
         [string]$ServiceName,
@@ -87,7 +87,7 @@ function Install-Service {
         [string]$NodeExe
     )
     
-    Write-Log "Installing ASA API service..."
+    Write-Log "Installing ASA API service with enhanced permissions..."
     
     # Get the path to the service batch file
     $batchPath = Join-Path $PSScriptRoot "asa-api-service.bat"
@@ -119,9 +119,62 @@ function Install-Service {
             Write-Log "Warning: Could not configure service failure actions: $failureResult" "WARN"
         }
         
+        # Set enhanced security descriptor with proper permissions
+        Write-Log "Setting enhanced service permissions..."
+        $securityDescriptor = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;AU)(A;;CCLCSWRPWPDTLOCRRC;;;PU)"
+        $permResult = sc.exe sdset $ServiceName $securityDescriptor 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "Enhanced permissions set successfully"
+        } else {
+            Write-Log "Warning: Could not set enhanced permissions: $permResult" "WARN"
+        }
+        
         return $true
     } else {
         Write-Log "Failed to install service: $result" "ERROR"
+        return $false
+    }
+}
+
+# Test service control
+function Test-ServiceControl {
+    param([string]$ServiceName)
+    
+    Write-Log "Testing service control..."
+    
+    # Test start
+    Write-Log "Testing service start..."
+    $result = sc.exe start $ServiceName 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "Service start test successful"
+        
+        # Wait a moment
+        Start-Sleep -Seconds 3
+        
+        # Check status
+        $service = Get-Service -Name $ServiceName
+        Write-Log "Service status after start: $($service.Status)"
+        
+        # Test stop
+        Write-Log "Testing service stop..."
+        $result = sc.exe stop $ServiceName 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "Service stop test successful"
+            
+            # Wait a moment
+            Start-Sleep -Seconds 3
+            
+            # Check final status
+            $service = Get-Service -Name $ServiceName
+            Write-Log "Service status after stop: $($service.Status)"
+            
+            return $true
+        } else {
+            Write-Log "Service stop test failed: $result" "ERROR"
+            return $false
+        }
+    } else {
+        Write-Log "Service start test failed: $result" "ERROR"
         return $false
     }
 }
@@ -133,8 +186,8 @@ if (!(Test-Administrator)) {
     exit 1
 }
 
-Write-Log "ASA API Windows Service Installer"
-Write-Log "=================================="
+Write-Log "ASA API Windows Service Installer (Enhanced with Permissions)"
+Write-Log "============================================================="
 
 if ($Uninstall) {
     Write-Log "Uninstalling service: $ServiceName"
@@ -206,6 +259,10 @@ $success = Install-Service -ServiceName $ServiceName -DisplayName $DisplayName -
 
 if ($success) {
     Write-Log "Service installed successfully!"
+    
+    # Test service control
+    $testSuccess = Test-ServiceControl $ServiceName
+    
     Write-Log ""
     Write-Log "Service Details:"
     Write-Log "  Name: $ServiceName"
@@ -213,6 +270,17 @@ if ($success) {
     Write-Log "  API Path: $ApiPath"
     Write-Log "  Port: $Port"
     Write-Log "  Log Path: $LogPath"
+    Write-Log "  Enhanced Permissions: Enabled"
+    Write-Log ""
+    
+    if ($testSuccess) {
+        Write-Log "Service control test: PASSED" -ForegroundColor Green
+        Write-Log "The service should now respond properly to start/stop commands." -ForegroundColor Green
+    } else {
+        Write-Log "Service control test: FAILED" -ForegroundColor Red
+        Write-Log "The service may still have control issues." -ForegroundColor Yellow
+    }
+    
     Write-Log ""
     Write-Log "To start the service:"
     Write-Log "  Start-Service $ServiceName"
@@ -224,7 +292,7 @@ if ($success) {
     Write-Log "  Get-Service $ServiceName"
     Write-Log ""
     Write-Log "To uninstall the service:"
-    Write-Log "  .\install-api-service.ps1 -Uninstall"
+    Write-Log "  .\install-api-service-with-permissions.ps1 -Uninstall"
     Write-Log ""
     Write-Log "The service will start automatically on system boot."
     Write-Log "You can start it now with: Start-Service $ServiceName"
@@ -232,4 +300,3 @@ if ($success) {
     Write-Log "Failed to install service" "ERROR"
     exit 1
 } 
- 

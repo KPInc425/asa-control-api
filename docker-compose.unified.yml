@@ -1,0 +1,95 @@
+# This is a copy of the unified Docker Compose file. See the root for the latest version.
+# (The rest of the file is identical to the root docker-compose.unified.yml)
+
+version: '3.8'
+
+services:
+  # Backend API Service
+  asa-backend:
+    build:
+      context: ./asa-docker-control-api
+      dockerfile: Dockerfile.local
+    container_name: asa-backend
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - HOST=0.0.0.0
+      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+      - JWT_EXPIRES_IN=24h
+      - SERVER_MODE=native
+      - NATIVE_BASE_PATH=/ark-data
+      - NATIVE_SERVER_PATH=/ark-data/Server
+      - NATIVE_CONFIG_FILE=${COMPOSE_NATIVE_CONFIG_FILE:-native-servers.json}
+      - CORS_ORIGIN=http://localhost:5173,http://localhost:3000,http://localhost:4000
+      - LOG_LEVEL=info
+    volumes:
+      - ./asa-docker-control-api:/app
+      - ${COMPOSE_NATIVE_BASE_PATH:-C:/ARK}:/ark-data
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - asa-network
+    restart: unless-stopped
+    profiles:
+      - unified
+      - backend-only
+
+  # Frontend Service (for development)
+  asa-dashboard-ui:
+    build:
+      context: ./asa-servers-dashboard
+      dockerfile: Dockerfile.local
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
+        VITE_FRONTEND_ONLY: ${VITE_FRONTEND_ONLY:-false}
+    container_name: asa-dashboard-ui
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:4000}
+      - VITE_SOCKET_URL=${VITE_SOCKET_URL:-http://localhost:4000}
+    volumes:
+      - ./asa-servers-dashboard:/app
+      - /app/node_modules
+    networks:
+      - asa-network
+    restart: unless-stopped
+    depends_on:
+      - asa-backend
+    profiles:
+      - unified
+      - frontend-only
+
+  # Combined Service (production-like)
+  asa-combined:
+    build:
+      context: ./asa-docker-control-api
+      dockerfile: Dockerfile.combined
+    container_name: asa-combined
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - HOST=0.0.0.0
+      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+      - JWT_EXPIRES_IN=24h
+      - SERVER_MODE=native
+      - NATIVE_BASE_PATH=/ark-data
+      - NATIVE_SERVER_PATH=/ark-data/Server
+      - NATIVE_CONFIG_FILE=${COMPOSE_NATIVE_CONFIG_FILE:-native-servers.json}
+      - CORS_ORIGIN=http://localhost:4000
+      - LOG_LEVEL=info
+    volumes:
+      - ${COMPOSE_NATIVE_BASE_PATH:-C:/ARK}:/ark-data
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - asa-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+networks:
+  asa-network:
+    driver: bridge 

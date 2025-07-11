@@ -1,17 +1,10 @@
-# ASA API Windows Service
-# Runs the ASA API backend as a Windows service
-# Compatible with PowerShell 5.1 and Windows Service Control Manager
+# ASA API Windows Service Wrapper
+# This PowerShell script properly communicates with Windows Service Control Manager
 
 param(
     [string]$ApiPath = "C:\ASA-API",
-    [int]$Port = 4000,
-    [string]$LogPath = "C:\ASA-API\logs",
-    [string]$NodeExe = "node.exe"
+    [string]$LogPath = "C:\ASA-API\logs"
 )
-
-# Create directories if they don't exist
-if (!(Test-Path $ApiPath)) { New-Item -ItemType Directory -Path $ApiPath -Force }
-if (!(Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force }
 
 # Global variables
 $global:nodeProcess = $null
@@ -23,23 +16,7 @@ function Write-Log {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logMessage = "[$timestamp] [$Level] $Message"
     Write-Host $logMessage
-    Add-Content -Path "$LogPath\asa-api-service.log" -Value $logMessage
-}
-
-# Check if Node.js is installed
-function Test-NodeJS {
-    try {
-        $nodeVersion = & $NodeExe --version 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Log "Node.js found: $nodeVersion"
-            return $true
-        }
-    }
-    catch {
-        Write-Log "Node.js not found in PATH" "ERROR"
-        return $false
-    }
-    return $false
+    Add-Content -Path "$LogPath\service-wrapper.log" -Value $logMessage
 }
 
 # Stop the Node.js process
@@ -57,45 +34,17 @@ function Stop-NodeProcess {
     $global:nodeProcess = $null
 }
 
-# Start the API server
-function Start-APIServer {
+# Start the Node.js process
+function Start-NodeProcess {
     try {
-        Write-Log "Starting ASA API server on port $Port"
+        Write-Log "Starting Node.js process..."
         
         # Change to API directory
         Set-Location $ApiPath
         
-        # Check if package.json exists
-        if (!(Test-Path "package.json")) {
-            Write-Log "package.json not found in $ApiPath" "ERROR"
-            return $false
-        }
-        
-        # Install dependencies if node_modules doesn't exist
-        if (!(Test-Path "node_modules")) {
-            Write-Log "Installing dependencies..."
-            & npm install
-            if ($LASTEXITCODE -ne 0) {
-                Write-Log "Failed to install dependencies" "ERROR"
-                return $false
-            }
-        }
-        
-        # Check if .env file exists
-        $envFile = Join-Path $ApiPath ".env"
-        if (!(Test-Path $envFile)) {
-            Write-Log ".env file not found in $ApiPath" "ERROR"
-            Write-Log "Please run the fix-service-env.ps1 script to create the .env file" "ERROR"
-            return $false
-        }
-        
-        Write-Log ".env file found, using configuration from file"
-        
-        # Start the server
-        Write-Log "Starting server with: $NodeExe server.js"
-        
+        # Start Node.js with proper process management
         $processArgs = @{
-            FilePath = $NodeExe
+            FilePath = "node.exe"
             ArgumentList = "server.js"
             WorkingDirectory = $ApiPath
             RedirectStandardOutput = "$LogPath\node-out.log"
@@ -107,7 +56,7 @@ function Start-APIServer {
         $global:nodeProcess = Start-Process @processArgs
         
         if ($global:nodeProcess) {
-            Write-Log "Node.js process launched with PID $($global:nodeProcess.Id)"
+            Write-Log "Node.js process started with PID $($global:nodeProcess.Id)"
             
             # Wait a moment for the process to start
             Start-Sleep -Seconds 2
@@ -119,14 +68,6 @@ function Start-APIServer {
                 return $true
             } else {
                 Write-Log "Node.js process exited immediately" "ERROR"
-                
-                # Show error log if it exists
-                $errorLog = "$LogPath\node-err.log"
-                if (Test-Path $errorLog) {
-                    Write-Log "Node.js error log:" "ERROR"
-                    Get-Content $errorLog | ForEach-Object { Write-Log "  $_" "ERROR" }
-                }
-                
                 return $false
             }
         } else {
@@ -135,7 +76,7 @@ function Start-APIServer {
         }
     }
     catch {
-        Write-Log "Error starting API server: $($_.Exception.Message)" "ERROR"
+        Write-Log "Error starting Node.js process: $($_.Exception.Message)" "ERROR"
         return $false
     }
 }
@@ -149,7 +90,6 @@ function Stop-Service {
 
 # Set up signal handling
 try {
-    # Register exit handler
     $null = Register-EngineEvent PowerShell.Exiting -Action {
         Write-Log "PowerShell is exiting"
         Stop-Service
@@ -159,22 +99,16 @@ try {
 }
 
 # Main service execution
-Write-Log "ASA API Service script starting..."
+Write-Log "ASA API Service Wrapper starting..."
 
-# Check Node.js
-if (!(Test-NodeJS)) {
-    Write-Log "Node.js is required but not found. Please install Node.js and try again." "ERROR"
-    exit 1
-}
-
-# Start the API server
-$success = Start-APIServer
+# Start the Node.js process
+$success = Start-NodeProcess
 if (!$success) {
-    Write-Log "Failed to start API server" "ERROR"
+    Write-Log "Failed to start Node.js process" "ERROR"
     exit 1
 }
 
-Write-Log "Service is now running. Monitoring Node.js process..."
+Write-Log "Service wrapper is now running. Monitoring Node.js process..."
 
 # Main monitoring loop - keep PowerShell alive for SCM
 while ($global:serviceRunning) {
@@ -188,7 +122,7 @@ while ($global:serviceRunning) {
                 # Try to restart if service is still supposed to be running
                 if ($global:serviceRunning) {
                     Write-Log "Attempting to restart Node.js process..."
-                    $success = Start-APIServer
+                    $success = Start-NodeProcess
                     if (!$success) {
                         Write-Log "Failed to restart Node.js process" "ERROR"
                         break
@@ -207,7 +141,7 @@ while ($global:serviceRunning) {
 }
 
 # Clean up when service is stopping
-Write-Log "Service is stopping..."
+Write-Log "Service wrapper is stopping..."
 Stop-NodeProcess
-Write-Log "ASA API Service stopped"
-exit 0
+Write-Log "ASA API Service Wrapper stopped"
+exit 0 

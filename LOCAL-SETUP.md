@@ -1,403 +1,333 @@
-# 🏠 Local Setup Guide
+# ASA API Local Setup Guide
 
-This guide shows you how to run the ASA Management Suite entirely on your local machine, with everything served from a single server.
+This guide covers setting up the ASA Management API for local development and production use.
 
-## 🎯 Overview
+## 🏗️ Architecture Overview
 
-The ASA Management Suite can run in several modes:
+The ASA API supports multiple deployment modes:
 
-1. **Local Development**: Frontend and backend running separately (for development)
-2. **Local Production**: Everything served from a single backend server
-3. **Docker Deployment**: Containerized deployment
-4. **Remote Hosting**: Frontend and backend on separate servers
+1. **Windows Service (NSSM)** - Recommended for production
+2. **Manual Operation** - For development and testing
+3. **Docker Container** - For containerized environments
 
-This guide focuses on **Local Production** mode where everything runs from one server.
-
-## 🚀 Quick Start (Local Production)
+## 🚀 Windows Service Setup (Recommended)
 
 ### Prerequisites
+- Windows 10/11
+- Node.js 18+
+- PowerShell (Administrator access)
 
-- **Node.js**: Version 18 or higher
-- **npm**: Latest version
-- **Windows**: For native server support
-- **Docker**: For Docker server support (optional)
+### Installation Steps
 
-### Step 1: Clone the Repository
+1. **Clone and prepare:**
+   ```powershell
+   git clone <repository-url>
+   cd asa-docker-control-api
+   npm install
+   ```
 
-```bash
-git clone <your-repo-url>
-cd asa-management
+2. **Configure environment:**
+   ```powershell
+   copy env.example .env
+   # Edit .env with your configuration
+   ```
+
+3. **Install as Windows service:**
+   ```powershell
+   # Run as Administrator
+   .\install-nssm-service.ps1
+   ```
+
+4. **Start the service:**
+   ```powershell
+   Start-Service ASA-API
+   ```
+
+### Service Management
+
+```powershell
+# Standard Windows service commands
+Start-Service ASA-API
+Stop-Service ASA-API
+Restart-Service ASA-API
+Get-Service ASA-API
+
+# NSSM direct commands
+nssm.exe start ASA-API
+nssm.exe stop ASA-API
+nssm.exe restart ASA-API
+nssm.exe remove ASA-API confirm
 ```
 
-### Step 2: Install Dependencies
+### Service Configuration
+
+The NSSM service is configured with:
+- **Working Directory:** `C:\ASA-API`
+- **Executable:** `node.exe`
+- **Arguments:** `server.js`
+- **Startup Type:** Automatic
+- **Log Files:** `C:\ASA-API\logs\nssm-*.log`
+
+## 🔧 Manual Operation
+
+### Development Mode
 
 ```bash
-# Install backend dependencies
-cd asa-docker-control-api
+# Install dependencies
 npm install
 
-# Install frontend dependencies
-cd ../asa-servers-dashboard
-npm install
+# Set up environment
+copy env.example .env
+# Edit .env
+
+# Start development server
+npm run dev
 ```
 
-### Step 3: Build and Setup
+### Production Mode
 
 ```bash
-# Go back to backend directory
-cd ../asa-docker-control-api
+# Install dependencies
+npm install
 
-# Build frontend and copy to backend (one command)
-npm run build-frontend
+# Set up environment
+copy env.example .env
+# Edit .env
+
+# Start production server
+npm start
+
+# Or with custom port
+PORT=4001 npm start
 ```
 
-This command will:
-1. Build the frontend React app
-2. Copy the built files to the backend's public directory
-3. Set up everything for local serving
+## 🐳 Docker Setup
 
-### Step 4: Configure Environment
+### Using Docker Compose
 
-Create a `.env` file in the `asa-docker-control-api` directory:
+```bash
+# Start with unified compose
+docker-compose -f docker-compose.unified.yml up -d
+
+# Check status
+docker-compose -f docker-compose.unified.yml ps
+
+# View logs
+docker-compose -f docker-compose.unified.yml logs -f
+```
+
+### Manual Docker Build
+
+```bash
+# Build image
+docker build -t asa-api .
+
+# Run container
+docker run -d \
+  --name asa-api \
+  -p 4000:4000 \
+  -v /path/to/configs:/app/configs \
+  --env-file .env \
+  asa-api
+```
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+Key configuration options in `.env`:
 
 ```bash
 # Server Configuration
 PORT=4000
-HOST=0.0.0.0
 NODE_ENV=production
 
-# JWT Configuration
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-JWT_EXPIRES_IN=24h
+# Security
+JWT_SECRET=your-secure-jwt-secret
 
-# Server Management Mode
-SERVER_MODE=native  # or 'docker'
+# File Paths
+CONFIG_BASE_PATH=G:\ARK
+LOCK_FILE_PATH=/app/.update.lock
 
-# Native Windows Server Configuration
-NATIVE_BASE_PATH=C:\\ARK
-# NATIVE_SERVER_PATH is automatically calculated as NATIVE_BASE_PATH/servers
-NATIVE_CONFIG_FILE=native-servers.json
+# CORS
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:4000
 
-# Docker Configuration (if using Docker mode)
-DOCKER_SOCKET_PATH=/var/run/docker.sock
-
-# CORS Configuration
-CORS_ORIGIN=http://localhost:4000
+# Docker (if using)
+DOCKER_SOCKET=/var/run/docker.sock
 
 # Logging
 LOG_LEVEL=info
-LOG_FILE_PATH=./logs/app.log
 ```
 
-### Step 5: Start the Server
+### ASA Server Configuration
+
+Configure your ASA servers in the environment:
 
 ```bash
-npm start
+# Example ASA server paths
+ASA_SERVER_1_PATH=G:\ARK\TheIsland
+ASA_SERVER_2_PATH=G:\ARK\Ragnarok
+ASA_SERVER_3_PATH=G:\ARK\ClubARK
 ```
 
-### Step 6: Access the Dashboard
+## 🔍 Monitoring and Logs
 
-Open your browser and go to:
-```
-http://localhost:4000
-```
+### Log Locations
 
-That's it! Everything is now running from a single server.
+- **Service Logs:** `C:\ASA-API\logs\nssm-*.log`
+- **Application Logs:** `C:\ASA-API\logs\app.log`
+- **Error Logs:** `C:\ASA-API\logs\error.log`
 
-## 🔧 Development Mode
-
-If you want to develop with hot reloading:
-
-### Option 1: Separate Frontend/Backend (Development)
+### Health Checks
 
 ```bash
-# Terminal 1: Start backend
-cd asa-docker-control-api
-npm run dev
+# API Health
+curl http://localhost:4000/health
 
-# Terminal 2: Start frontend
-cd asa-servers-dashboard
-npm run dev
+# Service Status
+Get-Service ASA-API
+
+# Process Check
+Get-Process node -ErrorAction SilentlyContinue
 ```
 
-Access:
-- Backend API: `http://localhost:4000`
-- Frontend: `http://localhost:5173`
+### Metrics
 
-### Option 2: Combined Development
-
-```bash
-# Build frontend and start backend
-cd asa-docker-control-api
-npm run build-frontend
-npm run dev
-```
-
-Access everything at: `http://localhost:4000`
-
-## 📁 Directory Structure
-
-After setup, your directory structure will look like:
-
-```
-asa-management/
-├── asa-docker-control-api/
-│   ├── public/                    # Frontend files (copied here)
-│   │   ├── index.html
-│   │   ├── assets/
-│   │   └── ...
-│   ├── server.js                  # Main server
-│   ├── services/
-│   │   ├── static-server.js       # Serves frontend files
-│   │   ├── server-provisioner.js  # Server provisioning
-│   │   └── ...
-│   ├── routes/
-│   └── ...
-├── asa-servers-dashboard/
-│   ├── src/                       # Frontend source code
-│   ├── dist/                      # Built frontend (copied to backend)
-│   └── ...
-└── ...
-```
-
-## 🎮 Usage
-
-### First Time Setup
-
-1. **Access Dashboard**: Go to `http://localhost:4000`
-2. **Login**: Use default credentials (check your auth configuration)
-3. **Initialize System**: Go to "Provisioning" page
-4. **Install Components**: Install SteamCMD and ASA binaries
-5. **Create Clusters**: Build your server infrastructure
-
-### Daily Usage
-
-1. **Start Server**: `npm start` in backend directory
-2. **Access Dashboard**: `http://localhost:4000`
-3. **Manage Servers**: Use the web interface
-4. **Stop Server**: Ctrl+C in terminal
-
-## 🔄 Updating
-
-### Frontend Updates
-
-When you make changes to the frontend:
-
-```bash
-# Rebuild and copy frontend
-cd asa-docker-control-api
-npm run build-frontend
-```
-
-### Backend Updates
-
-```bash
-# Restart the server
-npm start
-```
-
-### Full Update
-
-```bash
-# Pull latest changes
-git pull
-
-# Reinstall dependencies
-npm install
-cd ../asa-servers-dashboard && npm install
-cd ../asa-docker-control-api
-
-# Rebuild everything
-npm run build-frontend
-npm start
-```
-
-## 🔒 Security Considerations
-
-### Local Network Access
-
-By default, the server only accepts connections from `localhost`. To allow access from other devices on your network:
-
-1. **Change HOST in .env**:
-   ```bash
-   HOST=0.0.0.0
-   ```
-
-2. **Update CORS settings**:
-   ```bash
-   CORS_ORIGIN=http://your-local-ip:4000
-   ```
-
-3. **Configure Firewall**: Allow port 4000 through Windows Firewall
-
-### Authentication
-
-- **Change JWT_SECRET**: Use a strong, unique secret
-- **Set up proper users**: Configure authentication properly
-- **Use HTTPS**: For production, set up SSL certificates
+The API provides Prometheus-compatible metrics at `/metrics`.
 
 ## 🛠️ Troubleshooting
 
-### Common Issues
+### Service Issues
 
-#### Frontend Not Loading
+**Service won't start:**
+```powershell
+# Check NSSM logs
+Get-Content "C:\ASA-API\logs\nssm-*.log"
 
-**Symptoms**: Dashboard shows blank page or errors
-**Solutions**:
-1. Check if frontend was built: `ls public/`
-2. Rebuild frontend: `npm run build-frontend`
-3. Check browser console for errors
-4. Verify API endpoints are working
+# Verify Node.js
+node --version
 
-#### Port Already in Use
+# Check service config
+nssm.exe dump ASA-API
 
-**Symptoms**: Server fails to start with port error
-**Solutions**:
-1. Change PORT in .env file
-2. Kill process using the port: `netstat -ano | findstr :4000`
-3. Use different port: `PORT=4001`
+# Reinstall if needed
+nssm.exe remove ASA-API confirm
+.\install-nssm-service.ps1
+```
 
-#### Build Errors
+**Service stops unexpectedly:**
+```powershell
+# Check application logs
+Get-Content "C:\ASA-API\logs\app.log" -Tail 50
 
-**Symptoms**: `npm run build-frontend` fails
-**Solutions**:
-1. Check Node.js version: `node --version`
-2. Clear npm cache: `npm cache clean --force`
-3. Reinstall dependencies: `rm -rf node_modules && npm install`
-4. Check for TypeScript errors in frontend
+# Check for errors
+Get-Content "C:\ASA-API\logs\error.log" -Tail 50
+```
 
-#### Permission Errors
+### API Issues
 
-**Symptoms**: Cannot create directories or files
-**Solutions**:
-1. Run as Administrator (Windows)
-2. Check file permissions
-3. Ensure write access to directories
-
-### Logs
-
-Check logs for debugging:
-
+**API not responding:**
 ```bash
-# Backend logs
+# Check if running
+curl http://localhost:4000/health
+
+# Check logs
 tail -f logs/app.log
 
-# Real-time logs
-npm run dev
+# Test manually
+node server.js
 ```
 
-## 🚀 Production Deployment
+**Permission issues:**
+```powershell
+# Run as Administrator
+# Check file permissions
+Get-Acl "C:\ASA-API"
+```
 
-For production use on a single server:
+### Docker Issues
 
-### 1. Build Everything
+**Container won't start:**
+```bash
+# Check logs
+docker logs asa-api
+
+# Check environment
+docker exec asa-api env
+
+# Restart container
+docker restart asa-api
+```
+
+## 🔄 Development Workflow
+
+### Making Changes
+
+1. **Stop the service:**
+   ```powershell
+   Stop-Service ASA-API
+   ```
+
+2. **Make your changes**
+
+3. **Restart the service:**
+   ```powershell
+   Start-Service ASA-API
+   ```
+
+### Testing Changes
 
 ```bash
-cd asa-docker-control-api
-npm run build-frontend
+# Run tests
+npm test
+
+# Lint code
+npm run lint
+
+# Manual testing
+curl http://localhost:4000/health
 ```
 
-### 2. Set Production Environment
+## 📁 Project Structure
+
+```
+asa-docker-control-api/
+├── install-nssm-service.ps1    # NSSM service installer
+├── windows-service/            # Service files
+├── routes/                     # API routes
+├── services/                   # Business logic
+├── middleware/                 # Express middleware
+├── config/                     # Configuration
+├── utils/                      # Utilities
+├── logs/                       # Log files
+├── docker-compose.unified.yml  # Docker setup
+└── .env                        # Environment config
+```
+
+## 🔗 Integration
+
+### Frontend Dashboard
+
+The API is designed to work with the ASA Servers Dashboard:
 
 ```bash
-NODE_ENV=production
-PORT=4000
-HOST=0.0.0.0
+# Start dashboard (in separate project)
+cd ../asa-servers-dashboard
+npm start
 ```
 
-### 3. Use Process Manager
+### External Tools
 
-```bash
-# Install PM2
-npm install -g pm2
+The API can be integrated with:
+- Monitoring tools (Prometheus, Grafana)
+- CI/CD pipelines
+- Backup systems
+- Log aggregation
 
-# Start with PM2
-pm2 start server.js --name asa-management
+## 📞 Support
 
-# Save PM2 configuration
-pm2 save
-pm2 startup
-```
-
-### 4. Set up Reverse Proxy (Optional)
-
-For better security and SSL:
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-    
-    location / {
-        proxy_pass http://localhost:4000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-## 📊 Performance
-
-### Resource Usage
-
-**Typical resource usage:**
-- **Memory**: 100-200MB for backend
-- **CPU**: Low usage (mostly idle)
-- **Disk**: ~50MB for application + ASA binaries
-- **Network**: Minimal (local only)
-
-### Scaling
-
-**For multiple users:**
-- **Memory**: 512MB+ recommended
-- **CPU**: 2+ cores for multiple servers
-- **Storage**: 100GB+ for ASA servers
-- **Network**: 1Gbps recommended
-
-## 🎯 Benefits of Local Setup
-
-### Advantages
-
-1. **Single Server**: Everything runs from one machine
-2. **No External Dependencies**: Works offline after initial setup
-3. **Easy Management**: One process to start/stop
-4. **Fast Development**: Quick iteration and testing
-5. **Cost Effective**: No hosting fees
-6. **Full Control**: Complete control over the system
-
-### Use Cases
-
-- **Home Server**: Personal ARK server management
-- **Development**: Local development and testing
-- **Small Communities**: Small to medium gaming communities
-- **Offline Environments**: Networks without internet access
-- **Testing**: Testing server configurations
-
-## 🔄 Migration from Separate Setup
-
-If you're currently running frontend and backend separately:
-
-1. **Stop both servers**
-2. **Run setup**: `npm run build-frontend`
-3. **Start combined server**: `npm start`
-4. **Update bookmarks**: Use `http://localhost:4000`
-5. **Remove old processes**: Stop separate frontend/backend
-
-## 📚 Additional Resources
-
-- [Server Provisioning Guide](./SERVER-PROVISIONING.md)
-- [Native Server Management](./NATIVE-SERVERS.md)
-- [API Documentation](./API.md)
-- [Configuration Guide](./CONFIGURATION.md)
-
-## 🆘 Support
-
-If you encounter issues:
-
-1. **Check logs**: Look at application logs
-2. **Verify setup**: Ensure all steps were completed
-3. **Test components**: Verify each part works independently
-4. **Check requirements**: Ensure system meets requirements
-5. **Search issues**: Check existing issues and solutions
-
-The local setup provides a complete, self-contained solution for managing your ASA servers without any external dependencies! 
+For issues and questions:
+1. Check the troubleshooting section
+2. Review logs in `C:\ASA-API\logs\`
+3. Verify configuration in `.env`
+4. Ensure all prerequisites are met 
