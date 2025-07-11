@@ -1,18 +1,40 @@
 # Install ASA API Service using NSSM
 # NSSM (Non-Sucking Service Manager) is much more reliable for Windows services
 
-Write-Host "Installing ASA API Service using NSSM..." -ForegroundColor Yellow
-Write-Host ""
-
 # Check if running as Administrator
 $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+
 if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "This script must be run as Administrator!" -ForegroundColor Red
-    Write-Host "Please right-click PowerShell and select 'Run as Administrator'" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+    Write-Host "This script requires Administrator privileges to install the Windows service." -ForegroundColor Yellow
+    Write-Host "Requesting elevated permissions..." -ForegroundColor Cyan
+    
+    # Get the current script path
+    $scriptPath = $MyInvocation.MyCommand.Path
+    if (!$scriptPath) {
+        $scriptPath = $PSCommandPath
+    }
+    
+    # Restart the script with elevated permissions
+    try {
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs -Wait
+        exit 0
+    } catch {
+        Write-Host "Failed to request elevated permissions: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please run this script as Administrator:" -ForegroundColor Yellow
+        Write-Host "1. Right-click on PowerShell" -ForegroundColor White
+        Write-Host "2. Select 'Run as Administrator'" -ForegroundColor White
+        Write-Host "3. Navigate to this directory and run the script again" -ForegroundColor White
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 }
+
+# If we get here, we're running as Administrator
+Write-Host "Installing ASA API Service using NSSM..." -ForegroundColor Yellow
+Write-Host "Running with Administrator privileges ✓" -ForegroundColor Green
+Write-Host ""
 
 # Stop any existing Node.js processes
 Write-Host "Stopping any existing Node.js processes..." -ForegroundColor Cyan

@@ -30,7 +30,10 @@ A Node.js backend API for managing ARK: Survival Ascended servers, providing con
 
 4. **Install as Windows Service (Recommended):**
    ```powershell
-   # Run as Administrator
+   # Option A: Double-click to install (easiest)
+   install-service.bat
+   
+   # Option B: Run PowerShell script (auto-elevates)
    .\install-nssm-service.ps1
    ```
 
@@ -47,9 +50,14 @@ The recommended approach is to install the API as a Windows service using NSSM (
 
 **Installation:**
 ```powershell
-# Run PowerShell as Administrator
+# Option A: Double-click to install (easiest)
+install-service.bat
+
+# Option B: Run PowerShell script (auto-elevates)
 .\install-nssm-service.ps1
 ```
+
+Both methods will automatically request Administrator privileges when needed.
 
 **Service Control:**
 ```powershell

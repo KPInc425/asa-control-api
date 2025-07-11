@@ -7,7 +7,7 @@ This guide provides a quick setup for the ASA Management API using the recommend
 ### Prerequisites
 - Windows 10/11
 - Node.js 18+ installed
-- PowerShell (run as Administrator)
+- PowerShell (will request Administrator privileges automatically)
 
 ### Step 1: Clone and Setup
 
@@ -40,12 +40,20 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 
 ### Step 3: Install as Windows Service
 
+**Option A: Double-click to install (Recommended)**
 ```powershell
-# Run PowerShell as Administrator
+# Simply double-click this file:
+install-service.bat
+```
+
+**Option B: Run PowerShell script directly**
+```powershell
+# The script will automatically request Administrator privileges
 .\install-nssm-service.ps1
 ```
 
-This script will:
+Both methods will:
+- Automatically request Administrator privileges (UAC prompt)
 - Download and install NSSM
 - Create the Windows service
 - Configure all settings
