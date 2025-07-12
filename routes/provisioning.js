@@ -853,47 +853,129 @@ export default async function provisioningRoutes(fastify) {
 
       const logs = {};
       
-      if (type === 'all' || type === 'api') {
+      // Define log directory - try multiple possible locations
+      const possibleLogDirs = [
+        'C:\\ASA-API\\logs',
+        path.join(process.cwd(), 'logs'),
+        path.join(process.cwd(), '..', 'logs'),
+        'C:\\logs'
+      ];
+      
+      let logDir = null;
+      for (const dir of possibleLogDirs) {
         try {
-          // Get API logs from the current process
-          const apiLogPath = path.join(process.cwd(), 'logs', 'api.log');
-          const apiLogContent = await fs.readFile(apiLogPath, 'utf8');
-          logs.api = apiLogContent.split('\n').slice(-lines).join('\n');
+          await fs.access(dir);
+          logDir = dir;
+          break;
         } catch (error) {
-          logs.api = 'No API logs available';
+          // Continue to next directory
         }
       }
       
-      if (type === 'all' || type === 'server') {
-        try {
-          // Get server manager logs
-          const serverLogPath = path.join(process.cwd(), 'logs', 'server-manager.log');
-          const serverLogContent = await fs.readFile(serverLogPath, 'utf8');
-          logs.server = serverLogContent.split('\n').slice(-lines).join('\n');
-        } catch (error) {
-          logs.server = 'No server logs available';
+      if (!logDir) {
+        logs.api = 'No log directory found. Tried: ' + possibleLogDirs.join(', ');
+        logs.server = 'No log directory found';
+        logs.docker = 'No log directory found';
+        logs.system = 'No log directory found';
+      } else {
+        if (type === 'all' || type === 'api') {
+          try {
+            // Try multiple API log file names
+            const apiLogFiles = ['combined.log', 'api.log', 'app.log', 'server.log'];
+            let apiLogContent = '';
+            
+            for (const fileName of apiLogFiles) {
+              try {
+                const apiLogPath = path.join(logDir, fileName);
+                apiLogContent = await fs.readFile(apiLogPath, 'utf8');
+                logs.api = `Log file: ${fileName}\n\n` + apiLogContent.split('\n').slice(-lines).join('\n');
+                break;
+              } catch (error) {
+                // Continue to next file
+              }
+            }
+            
+            if (!apiLogContent) {
+              logs.api = `No API log files found in ${logDir}. Tried: ${apiLogFiles.join(', ')}`;
+            }
+          } catch (error) {
+            logs.api = `Error reading API logs: ${error.message}`;
+          }
         }
-      }
-      
-      if (type === 'all' || type === 'docker') {
-        try {
-          // Get Docker logs
-          const dockerLogPath = path.join(process.cwd(), 'logs', 'docker.log');
-          const dockerLogContent = await fs.readFile(dockerLogPath, 'utf8');
-          logs.docker = dockerLogContent.split('\n').slice(-lines).join('\n');
-        } catch (error) {
-          logs.docker = 'No Docker logs available';
+        
+        if (type === 'all' || type === 'server') {
+          try {
+            // Try multiple server log file names
+            const serverLogFiles = ['server.log', 'server-manager.log', 'combined.log'];
+            let serverLogContent = '';
+            
+            for (const fileName of serverLogFiles) {
+              try {
+                const serverLogPath = path.join(logDir, fileName);
+                serverLogContent = await fs.readFile(serverLogPath, 'utf8');
+                logs.server = `Log file: ${fileName}\n\n` + serverLogContent.split('\n').slice(-lines).join('\n');
+                break;
+              } catch (error) {
+                // Continue to next file
+              }
+            }
+            
+            if (!serverLogContent) {
+              logs.server = `No server log files found in ${logDir}. Tried: ${serverLogFiles.join(', ')}`;
+            }
+          } catch (error) {
+            logs.server = `Error reading server logs: ${error.message}`;
+          }
         }
-      }
-      
-      if (type === 'all' || type === 'system') {
-        try {
-          // Get system logs (Windows Event Log equivalent)
-          const systemLogPath = path.join(process.cwd(), 'logs', 'system.log');
-          const systemLogContent = await fs.readFile(systemLogPath, 'utf8');
-          logs.system = systemLogContent.split('\n').slice(-lines).join('\n');
-        } catch (error) {
-          logs.system = 'No system logs available';
+        
+        if (type === 'all' || type === 'docker') {
+          try {
+            // Try multiple docker log file names
+            const dockerLogFiles = ['docker.log', 'container.log', 'combined.log'];
+            let dockerLogContent = '';
+            
+            for (const fileName of dockerLogFiles) {
+              try {
+                const dockerLogPath = path.join(logDir, fileName);
+                dockerLogContent = await fs.readFile(dockerLogPath, 'utf8');
+                logs.docker = `Log file: ${fileName}\n\n` + dockerLogContent.split('\n').slice(-lines).join('\n');
+                break;
+              } catch (error) {
+                // Continue to next file
+              }
+            }
+            
+            if (!dockerLogContent) {
+              logs.docker = `No Docker log files found in ${logDir}. Tried: ${dockerLogFiles.join(', ')}`;
+            }
+          } catch (error) {
+            logs.docker = `Error reading Docker logs: ${error.message}`;
+          }
+        }
+        
+        if (type === 'all' || type === 'system') {
+          try {
+            // Try multiple system log file names
+            const systemLogFiles = ['error.log', 'nssm-err.log', 'nssm-out.log', 'system.log', 'combined.log'];
+            let systemLogContent = '';
+            
+            for (const fileName of systemLogFiles) {
+              try {
+                const systemLogPath = path.join(logDir, fileName);
+                systemLogContent = await fs.readFile(systemLogPath, 'utf8');
+                logs.system = `Log file: ${fileName}\n\n` + systemLogContent.split('\n').slice(-lines).join('\n');
+                break;
+              } catch (error) {
+                // Continue to next file
+              }
+            }
+            
+            if (!systemLogContent) {
+              logs.system = `No system log files found in ${logDir}. Tried: ${systemLogFiles.join(', ')}`;
+            }
+          } catch (error) {
+            logs.system = `Error reading system logs: ${error.message}`;
+          }
         }
       }
       

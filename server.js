@@ -149,16 +149,27 @@ let io;
 
 // Register your Socket.IO handlers
 const setupSocketIO = () => {
+  logger.info('Setting up Socket.IO handlers...');
+  
   io.use((socket, next) => {
+    logger.info(`Socket.IO authentication attempt from ${socket.handshake.address}`);
+    logger.info(`Socket.IO handshake auth:`, socket.handshake.auth);
+    logger.info(`Socket.IO handshake headers:`, socket.handshake.headers);
+    
     const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
     if (!token) {
+      logger.warn('Socket.IO authentication failed: No token provided');
       return next(new Error('Authentication required'));
     }
+    
+    logger.info(`Socket.IO token length: ${token.length}`);
+    
     import('./services/user-management.js').then(({ default: userManagementService }) => {
       try {
         const result = userManagementService.verifyToken(token);
         if (result.success) {
           socket.user = result.user;
+          logger.info(`Socket.IO authentication successful for user: ${result.user.username}`);
           next();
         } else {
           logger.warn('Socket.IO authentication failed:', result.message);
@@ -175,6 +186,12 @@ const setupSocketIO = () => {
   });
   io.on('connection', (socket) => {
     logger.info(`Socket.IO client connected: ${socket.id} (User: ${socket.user?.username || 'unknown'})`);
+    logger.info(`Socket.IO connection details:`, {
+      id: socket.id,
+      user: socket.user?.username,
+      address: socket.handshake.address,
+      userAgent: socket.handshake.headers['user-agent']
+    });
     
     // Handle container log streaming requests
     socket.on('start-container-logs', async (data) => {
@@ -542,8 +559,14 @@ const start = async () => {
           : ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-      }
+      },
+      transports: ['websocket', 'polling'],
+      allowEIO3: true,
+      pingTimeout: 60000,
+      pingInterval: 25000
     });
+    
+    logger.info('Socket.IO server created with CORS origins:', io.engine.opts.cors.origin);
 
     // Make Socket.IO instance available to routes and globally
     fastify.io = io;

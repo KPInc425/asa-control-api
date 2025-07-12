@@ -3,10 +3,12 @@ import path from 'path';
 import { createReadStream } from 'fs';
 import logger from '../utils/logger.js';
 import config from '../config/index.js';
+import { createServerManager } from './server-manager.js';
 
 class ArkLogsService {
   constructor() {
     this.basePath = config.arkLogs.basePath || '/home/gameserver/server-files';
+    this.serverManager = createServerManager();
   }
 
   /**
@@ -14,28 +16,59 @@ class ArkLogsService {
    */
   async getAvailableLogs(serverName) {
     try {
-      const serverPath = path.join(this.basePath, serverName, 'logs');
-      const files = await fs.readdir(serverPath);
+      // First, try to get server info to find the correct path
+      let serverInfo = null;
+      try {
+        serverInfo = await this.serverManager.getClusterServerInfo(serverName);
+      } catch (error) {
+        logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
+      }
+
+      let serverPath = null;
+      if (serverInfo && serverInfo.serverPath) {
+        serverPath = serverInfo.serverPath;
+      } else {
+        // Fallback to default path
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+      }
+
+      // Look for logs in the Saved directory structure
+      const possibleLogDirs = [
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
+        path.join(serverPath, 'logs'),
+        serverPath
+      ];
+
+      const logFiles = [];
       
-      // Filter for log files
-      const logFiles = files.filter(file => 
-        file.endsWith('.log') || 
-        file.endsWith('.txt') ||
-        file.includes('log')
-      );
-      
-      const logFilesWithSize = [];
-      for (const file of logFiles) {
-        const filePath = path.join(serverPath, file);
-        const size = await this.getFileSize(filePath);
-        logFilesWithSize.push({
-          name: file,
-          path: filePath,
-          size: size
-        });
+      for (const logDir of possibleLogDirs) {
+        try {
+          const files = await fs.readdir(logDir);
+          for (const file of files) {
+            if (file.endsWith('.log') || 
+                file.endsWith('.txt') ||
+                file.includes('ShooterGame') ||
+                file.includes('WindowsServer') ||
+                file.includes('ServGame') ||
+                file.includes('crashcallstack') ||
+                file.includes('FailedWaterDinoSpawns')) {
+              
+              const filePath = path.join(logDir, file);
+              const size = await this.getFileSize(filePath);
+              logFiles.push({
+                name: file,
+                path: filePath,
+                size: size
+              });
+            }
+          }
+        } catch (error) {
+          // Directory doesn't exist or can't be read
+          continue;
+        }
       }
       
-      return logFilesWithSize;
+      return logFiles.sort((a, b) => b.size - a.size); // Sort by size, largest first
     } catch (error) {
       logger.error(`Failed to get available logs for server ${serverName}:`, error);
       return [];
@@ -59,9 +92,46 @@ class ArkLogsService {
    */
   async createLogStream(serverName, logFileName, options = {}) {
     const { tail = 100, follow = true } = options;
-    const logPath = path.join(this.basePath, serverName, 'logs', logFileName);
     
-    logger.info(`Creating log stream for ${serverName}/${logFileName}`);
+    // First, try to get server info to find the correct path
+    let serverInfo = null;
+    try {
+      serverInfo = await this.serverManager.getClusterServerInfo(serverName);
+    } catch (error) {
+      logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
+    }
+
+    let serverPath = null;
+    if (serverInfo && serverInfo.serverPath) {
+      serverPath = serverInfo.serverPath;
+    } else {
+      // Fallback to default path
+      serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+    }
+
+    // Look for the log file in multiple possible locations
+    const possibleLogPaths = [
+      path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', logFileName),
+      path.join(serverPath, 'logs', logFileName),
+      path.join(serverPath, logFileName)
+    ];
+
+    let logPath = null;
+    for (const path of possibleLogPaths) {
+      try {
+        await fs.access(path);
+        logPath = path;
+        break;
+      } catch (error) {
+        // Continue to next path
+      }
+    }
+
+    if (!logPath) {
+      throw new Error(`Log file ${logFileName} not found for server ${serverName}`);
+    }
+    
+    logger.info(`Creating log stream for ${serverName}/${logFileName} at ${logPath}`);
     
     try {
       // Get file size if we need to tail
@@ -89,7 +159,44 @@ class ArkLogsService {
    */
   async getRecentLogs(serverName, logFileName, lines = 100) {
     try {
-      const logPath = path.join(this.basePath, serverName, 'logs', logFileName);
+      // First, try to get server info to find the correct path
+      let serverInfo = null;
+      try {
+        serverInfo = await this.serverManager.getClusterServerInfo(serverName);
+      } catch (error) {
+        logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
+      }
+
+      let serverPath = null;
+      if (serverInfo && serverInfo.serverPath) {
+        serverPath = serverInfo.serverPath;
+      } else {
+        // Fallback to default path
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+      }
+
+      // Look for the log file in multiple possible locations
+      const possibleLogPaths = [
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', logFileName),
+        path.join(serverPath, 'logs', logFileName),
+        path.join(serverPath, logFileName)
+      ];
+
+      let logPath = null;
+      for (const path of possibleLogPaths) {
+        try {
+          await fs.access(path);
+          logPath = path;
+          break;
+        } catch (error) {
+          // Continue to next path
+        }
+      }
+
+      if (!logPath) {
+        throw new Error(`Log file ${logFileName} not found for server ${serverName}`);
+      }
+
       const content = await fs.readFile(logPath, 'utf8');
       const linesArray = content.split('\n');
       return linesArray.slice(-lines).join('\n');
@@ -104,9 +211,39 @@ class ArkLogsService {
    */
   async logFileExists(serverName, logFileName) {
     try {
-      const logPath = path.join(this.basePath, serverName, 'logs', logFileName);
-      await fs.access(logPath);
-      return true;
+      // First, try to get server info to find the correct path
+      let serverInfo = null;
+      try {
+        serverInfo = await this.serverManager.getClusterServerInfo(serverName);
+      } catch (error) {
+        logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
+      }
+
+      let serverPath = null;
+      if (serverInfo && serverInfo.serverPath) {
+        serverPath = serverInfo.serverPath;
+      } else {
+        // Fallback to default path
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+      }
+
+      // Look for the log file in multiple possible locations
+      const possibleLogPaths = [
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', logFileName),
+        path.join(serverPath, 'logs', logFileName),
+        path.join(serverPath, logFileName)
+      ];
+
+      for (const path of possibleLogPaths) {
+        try {
+          await fs.access(path);
+          return true;
+        } catch (error) {
+          // Continue to next path
+        }
+      }
+
+      return false;
     } catch (error) {
       return false;
     }
