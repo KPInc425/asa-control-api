@@ -570,6 +570,59 @@ export class NativeServerManager extends ServerManager {
     }
   }
 
+  async listLogFiles(name) {
+    try {
+      // First, try to get server info to find the correct path
+      let serverInfo = null;
+      try {
+        serverInfo = await this.getClusterServerInfo(name);
+      } catch (error) {
+        logger.warn(`Could not get cluster server info for ${name}:`, error.message);
+      }
+
+      let serverPath = null;
+      if (serverInfo && serverInfo.serverPath) {
+        serverPath = serverInfo.serverPath;
+      } else {
+        // Fallback to default path
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', name);
+      }
+
+      const logFiles = [];
+      const possibleLogDirs = [
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
+        path.join(serverPath, 'logs'),
+        serverPath
+      ];
+
+      for (const logDir of possibleLogDirs) {
+        try {
+          const files = await fs.readdir(logDir);
+          for (const file of files) {
+            if (file.endsWith('.log') || file.includes('ShooterGame') || file.includes('WindowsServer')) {
+              const filePath = path.join(logDir, file);
+              const stat = await fs.stat(filePath);
+              logFiles.push({
+                name: file,
+                path: filePath,
+                size: stat.size,
+                modified: stat.mtime.toISOString()
+              });
+            }
+          }
+        } catch (error) {
+          // Directory doesn't exist or can't be read
+          continue;
+        }
+      }
+
+      return logFiles.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+    } catch (error) {
+      logger.error(`Failed to list log files for ${name}:`, error);
+      throw error;
+    }
+  }
+
   async getClusterServerStartBat(name) {
     try {
       const serverInfo = await this.getClusterServerInfo(name);
@@ -682,21 +735,85 @@ export class NativeServerManager extends ServerManager {
 
   async getLogs(name, options = {}) {
     try {
-      const processInfo = this.processes.get(name);
-      if (!processInfo) {
-        throw new Error(`Server ${name} is not running`);
+      // First, try to get server info to find the correct path
+      let serverInfo = null;
+      try {
+        serverInfo = await this.getClusterServerInfo(name);
+      } catch (error) {
+        logger.warn(`Could not get cluster server info for ${name}:`, error.message);
       }
 
-      // For native servers, we'll stream the process output
-      const logStream = processInfo.process.stdout;
-      
-      if (options.follow) {
-        return logStream;
+      let serverPath = null;
+      if (serverInfo && serverInfo.serverPath) {
+        serverPath = serverInfo.serverPath;
       } else {
-        // For non-following logs, we'd need to read from log files
-        const logPath = path.join(processInfo.config.serverPath || path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers'), 'logs', `${name}.log`);
-        const content = await fs.readFile(logPath, 'utf8');
-        return content;
+        // Fallback to default path
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', name);
+      }
+
+      // Look for logs in the Saved directory structure
+      const possibleLogPaths = [
+        // ARK server logs in Saved/Logs
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'ShooterGame.log'),
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'ShooterGame_*.log'),
+        // Alternative log locations
+        path.join(serverPath, 'logs', `${name}.log`),
+        path.join(serverPath, 'ShooterGame.log'),
+        // Windows server logs
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'WindowsServer.log'),
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'WindowsServer_*.log')
+      ];
+
+      let logContent = '';
+      let foundLog = false;
+
+      for (const logPath of possibleLogPaths) {
+        try {
+          if (logPath.includes('*')) {
+            // Handle wildcard patterns
+            const logDir = path.dirname(logPath);
+            const logFiles = await fs.readdir(logDir);
+            const matchingFiles = logFiles.filter(file => file.startsWith('ShooterGame') || file.startsWith('WindowsServer'));
+            
+            if (matchingFiles.length > 0) {
+              // Get the most recent log file
+              const latestLogFile = matchingFiles.sort().pop();
+              const fullLogPath = path.join(logDir, latestLogFile);
+              logContent = await fs.readFile(fullLogPath, 'utf8');
+              foundLog = true;
+              logger.info(`Found log file for ${name}: ${fullLogPath}`);
+              break;
+            }
+          } else {
+            // Direct file path
+            logContent = await fs.readFile(logPath, 'utf8');
+            foundLog = true;
+            logger.info(`Found log file for ${name}: ${logPath}`);
+            break;
+          }
+        } catch (error) {
+          // Continue to next path
+          continue;
+        }
+      }
+
+      if (!foundLog) {
+        // If no log files found, try to get process output if server is running
+        const processInfo = this.processes.get(name);
+        if (processInfo && processInfo.process && !processInfo.process.killed) {
+          logger.info(`No log files found for ${name}, server is running but no logs available`);
+          return `Server ${name} is running but no log files found in:\n${possibleLogPaths.join('\n')}`;
+        } else {
+          throw new Error(`No log files found for server ${name} and server is not running`);
+        }
+      }
+
+      if (options.follow) {
+        // For following logs, we'd need to implement file watching
+        // For now, return the current content
+        return logContent;
+      } else {
+        return logContent;
       }
     } catch (error) {
       logger.error(`Failed to get native server logs for ${name}:`, error);
@@ -1428,6 +1545,10 @@ export class HybridServerManager extends ServerManager {
 
   async updateClusterServerStartBat(name, content) {
     return this.nativeManager.updateClusterServerStartBat(name, content);
+  }
+
+  async listLogFiles(name) {
+    return this.nativeManager.listLogFiles(name);
   }
 
   async getServerStatus(name) {

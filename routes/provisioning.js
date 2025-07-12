@@ -8,6 +8,7 @@ import config from '../config/index.js';
 import { requirePermission } from '../middleware/auth.js';
 import { ServerProvisioner } from '../services/server-provisioner.js';
 import { createJob, updateJob, addJobProgress, getJob, getAllJobs } from '../services/job-manager.js';
+import { createServerManager } from '../services/server-manager.js';
 
 const execAsync = promisify(exec);
 
@@ -335,6 +336,132 @@ export default async function provisioningRoutes(fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to list clusters'
+      });
+    }
+  });
+
+  // Get cluster details
+  fastify.get('/api/provisioning/clusters/:clusterName', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const clusters = await provisioner.listClusters();
+      const cluster = clusters.find(c => c.name === clusterName);
+      
+      if (!cluster) {
+        return reply.status(404).send({
+          success: false,
+          message: `Cluster "${clusterName}" not found`
+        });
+      }
+      
+      // Get server status for each server in the cluster
+      const serverManager = createServerManager();
+      const serversWithStatus = [];
+      
+      if (cluster.config && cluster.config.servers) {
+        for (const server of cluster.config.servers) {
+          try {
+            const isRunning = await serverManager.isRunning(server.name);
+            serversWithStatus.push({
+              ...server,
+              status: isRunning ? 'running' : 'stopped'
+            });
+          } catch (error) {
+            logger.warn(`Failed to get status for server ${server.name}:`, error);
+            serversWithStatus.push({
+              ...server,
+              status: 'unknown'
+            });
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        cluster: {
+          ...cluster,
+          servers: serversWithStatus
+        }
+      };
+    } catch (error) {
+      logger.error(`Failed to get cluster details for ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get cluster details'
+      });
+    }
+  });
+
+  // Start cluster
+  fastify.post('/api/provisioning/clusters/:clusterName/start', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const serverManager = createServerManager();
+      
+      const result = await serverManager.startCluster(clusterName);
+      
+      return {
+        success: true,
+        message: `Cluster ${clusterName} start initiated`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to start cluster ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to start cluster'
+      });
+    }
+  });
+
+  // Stop cluster
+  fastify.post('/api/provisioning/clusters/:clusterName/stop', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const serverManager = createServerManager();
+      
+      const result = await serverManager.stopCluster(clusterName);
+      
+      return {
+        success: true,
+        message: `Cluster ${clusterName} stop initiated`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to stop cluster ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to stop cluster'
+      });
+    }
+  });
+
+  // Restart cluster
+  fastify.post('/api/provisioning/clusters/:clusterName/restart', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const serverManager = createServerManager();
+      
+      const result = await serverManager.restartCluster(clusterName);
+      
+      return {
+        success: true,
+        message: `Cluster ${clusterName} restart initiated`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to restart cluster ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to restart cluster'
       });
     }
   });
@@ -705,6 +832,82 @@ export default async function provisioningRoutes(fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to get mods overview'
+      });
+    }
+  });
+
+  // Get system logs
+  fastify.get('/api/provisioning/system-logs', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { type = 'all', lines = 100 } = request.query;
+      const logTypes = ['api', 'server', 'docker', 'system'];
+      
+      if (type !== 'all' && !logTypes.includes(type)) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Invalid log type. Must be one of: all, api, server, docker, system'
+        });
+      }
+
+      const logs = {};
+      
+      if (type === 'all' || type === 'api') {
+        try {
+          // Get API logs from the current process
+          const apiLogPath = path.join(process.cwd(), 'logs', 'api.log');
+          const apiLogContent = await fs.readFile(apiLogPath, 'utf8');
+          logs.api = apiLogContent.split('\n').slice(-lines).join('\n');
+        } catch (error) {
+          logs.api = 'No API logs available';
+        }
+      }
+      
+      if (type === 'all' || type === 'server') {
+        try {
+          // Get server manager logs
+          const serverLogPath = path.join(process.cwd(), 'logs', 'server-manager.log');
+          const serverLogContent = await fs.readFile(serverLogPath, 'utf8');
+          logs.server = serverLogContent.split('\n').slice(-lines).join('\n');
+        } catch (error) {
+          logs.server = 'No server logs available';
+        }
+      }
+      
+      if (type === 'all' || type === 'docker') {
+        try {
+          // Get Docker logs
+          const dockerLogPath = path.join(process.cwd(), 'logs', 'docker.log');
+          const dockerLogContent = await fs.readFile(dockerLogPath, 'utf8');
+          logs.docker = dockerLogContent.split('\n').slice(-lines).join('\n');
+        } catch (error) {
+          logs.docker = 'No Docker logs available';
+        }
+      }
+      
+      if (type === 'all' || type === 'system') {
+        try {
+          // Get system logs (Windows Event Log equivalent)
+          const systemLogPath = path.join(process.cwd(), 'logs', 'system.log');
+          const systemLogContent = await fs.readFile(systemLogPath, 'utf8');
+          logs.system = systemLogContent.split('\n').slice(-lines).join('\n');
+        } catch (error) {
+          logs.system = 'No system logs available';
+        }
+      }
+      
+      return {
+        success: true,
+        logs,
+        type,
+        lines: parseInt(lines)
+      };
+    } catch (error) {
+      logger.error('Failed to get system logs:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get system logs'
       });
     }
   });

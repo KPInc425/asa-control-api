@@ -448,6 +448,55 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
+  // List log files for a server
+  fastify.get('/api/native-servers/:name/log-files', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            logFiles: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  path: { type: 'string' },
+                  size: { type: 'number' },
+                  modified: { type: 'string' }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      const logFiles = await serverManager.listLogFiles(name);
+      return {
+        success: true,
+        logFiles
+      };
+    } catch (error) {
+      fastify.log.error(`Error listing log files for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
   // Update cluster server start.bat
   fastify.put('/api/native-servers/:name/start-bat', {
     preHandler: [requireWrite],
