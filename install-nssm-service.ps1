@@ -54,17 +54,45 @@ if (!(Test-Path "C:\ASA-API\logs")) {
 
 # Copy files
 Write-Host "Copying files..." -ForegroundColor Cyan
-$sourceDir = Split-Path $PSScriptRoot -Parent
-$sourceDir = Join-Path $sourceDir "asa-docker-control-api"
+$sourceDir = $PSScriptRoot
 
 if (Test-Path $sourceDir) {
-    Get-ChildItem -Path $sourceDir -Exclude "node_modules", "logs", ".git", "windows-service" | ForEach-Object {
+    Write-Host "Copying from: $sourceDir" -ForegroundColor Gray
+    Get-ChildItem -Path $sourceDir -Exclude "node_modules", "logs", ".git", "windows-service", "*.ps1" | ForEach-Object {
         if ($_.PSIsContainer) {
+            Write-Host "Copying directory: $($_.Name)" -ForegroundColor Gray
             Copy-Item -Path $_.FullName -Destination "C:\ASA-API" -Recurse -Force
         } else {
+            Write-Host "Copying file: $($_.Name)" -ForegroundColor Gray
             Copy-Item -Path $_.FullName -Destination "C:\ASA-API" -Force
         }
     }
+    
+    # Verify key files were copied
+    $requiredFiles = @("server.js", "package.json", ".env")
+    foreach ($file in $requiredFiles) {
+        if (Test-Path "C:\ASA-API\$file") {
+            Write-Host "✓ $file copied successfully" -ForegroundColor Green
+        } else {
+            Write-Host "✗ $file missing!" -ForegroundColor Red
+        }
+    }
+    
+    # Install Node.js dependencies
+    Write-Host "Installing Node.js dependencies..." -ForegroundColor Cyan
+    Push-Location "C:\ASA-API"
+    try {
+        npm install --production
+        Write-Host "✓ Dependencies installed successfully" -ForegroundColor Green
+    } catch {
+        Write-Host "✗ Failed to install dependencies: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Please run 'npm install' manually in C:\ASA-API" -ForegroundColor Yellow
+    }
+    Pop-Location
+} else {
+    Write-Host "Source directory not found: $sourceDir" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit 1
 }
 
 # Check if NSSM is available in multiple locations

@@ -1,5 +1,6 @@
-# Force Remove ASA API Service
+# Force Remove ASA API Service (Fixed Version)
 # This script forcefully removes a stuck service that's marked for deletion
+# Updated to fix invisible character issues
 
 # Check if running as Administrator
 $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
