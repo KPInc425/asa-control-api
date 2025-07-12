@@ -823,7 +823,7 @@ pause`;
       const steamCmdExe = this.steamCmdExe;
       const installPath = serverPath; // Install directly to server folder, not a binaries subfolder
       
-      // Build the full SteamCMD command
+      // Build the full SteamCMD command with proper error handling
       const steamCmdCommand = `"${steamCmdExe}" +force_install_dir "${installPath}" +login anonymous +app_update 2430930 validate +quit`;
       
       if (foreground) {
@@ -844,32 +844,101 @@ pause`;
         // Clean up .bat file
         await fs.unlink(batPath);
       } else {
-        // Write the .bat file
+        // Write the .bat file with better error handling
         const batPath = path.join(this.clustersPath, clusterName, 'install_asa.bat');
-        const batContent = `@echo off\n${steamCmdCommand}\n`;
+        const batContent = `@echo off
+echo Installing ASA binaries for ${serverName}...
+echo SteamCMD path: ${this.steamCmdExe}
+echo Install path: ${installPath}
+
+${steamCmdCommand}
+
+echo Installation completed with exit code: %ERRORLEVEL%
+if %ERRORLEVEL% NEQ 0 (
+    echo SteamCMD exited with error code: %ERRORLEVEL%
+    echo Checking if files were actually downloaded...
+    if exist "${path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" (
+        echo ASA server executable found - installation may have succeeded despite error code
+        exit 0
+    ) else (
+        echo ASA server executable not found - installation failed
+        exit 1
+    )
+) else (
+    echo Installation completed successfully
+    exit 0
+)`;
         await fs.writeFile(batPath, batContent);
         
         // Run the .bat file
         logger.info(`Running install batch: ${batPath}`);
-        const { stdout, stderr } = await execAsync(`cmd /c "${batPath}"`, {
-          cwd: path.dirname(batPath),
-          timeout: 300000 // 5 minute timeout
-        });
-        if (stderr) {
-          logger.warn(`SteamCMD stderr for ${serverName}: ${stderr}`);
+        logger.info(`SteamCMD command: ${steamCmdCommand}`);
+        
+        try {
+          const { stdout, stderr } = await execAsync(`cmd /c "${batPath}"`, {
+            cwd: path.dirname(batPath),
+            timeout: 300000 // 5 minute timeout
+          });
+          
+          if (stderr) {
+            logger.warn(`SteamCMD stderr for ${serverName}: ${stderr}`);
+          }
+          if (stdout) {
+            logger.info(`SteamCMD stdout for ${serverName}: ${stdout.substring(0, 500)}...`);
+          }
+          
+          // Check if the installation was successful by looking for key files
+          const arkServerExe = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+          const exists = await fs.access(arkServerExe).then(() => true).catch(() => false);
+          
+          if (!exists) {
+            throw new Error(`ASA server executable not found at ${arkServerExe} after installation`);
+          }
+          
+          logger.info(`ASA server executable verified at: ${arkServerExe}`);
+        } catch (execError) {
+          logger.error(`SteamCMD execution failed for ${serverName}:`, execError);
+          
+          // Check if the installation actually succeeded despite the error
+          const arkServerExe = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+          const exists = await fs.access(arkServerExe).then(() => true).catch(() => false);
+          
+          if (exists) {
+            logger.info(`ASA server executable found despite error, continuing: ${arkServerExe}`);
+          } else {
+            throw execError;
+          }
+        } finally {
+          // Clean up .bat file
+          await fs.unlink(batPath);
         }
-        if (stdout) {
-          logger.info(`SteamCMD stdout for ${serverName}: ${stdout.substring(0, 500)}...`);
-        }
-        // Clean up .bat file
-        await fs.unlink(batPath);
       }
       
-      logger.info(`ASA binaries installed for server: ${serverName} in cluster ${clusterName}`);
-      this.emitProgress?.(`ASA binaries installed for server: ${serverName}`);
+      // Verify installation by checking for key files
+      const arkServerExe = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+      const shooterGameDir = path.join(serverPath, 'ShooterGame');
+      
+      try {
+        await fs.access(arkServerExe);
+        logger.info(`ASA server executable verified: ${arkServerExe}`);
+        
+        // Check if ShooterGame directory exists and has content
+        const shooterGameStats = await fs.stat(shooterGameDir);
+        if (shooterGameStats.isDirectory()) {
+          const contents = await fs.readdir(shooterGameDir);
+          logger.info(`ShooterGame directory contents: ${contents.join(', ')}`);
+        }
+        
+        this.emitProgress?.(`ASA binaries installed for server: ${serverName}`);
+        logger.info(`ASA binaries installed for server: ${serverName} in cluster ${clusterName}`);
+      } catch (accessError) {
+        logger.error(`Installation verification failed for ${serverName}:`, accessError);
+        throw new Error(`ASA server executable not found at ${arkServerExe} after installation`);
+      }
     } catch (error) {
       logger.error(`Failed to install ASA binaries for server ${serverName} in cluster ${clusterName}:`, error);
       this.emitProgress?.(`Failed to install ASA binaries for server ${serverName}: ${error.message}`);
+      
       // Provide more specific error messages
       let errorMessage = `Failed to install ASA binaries for server ${serverName}`;
       if (error.message) {
@@ -879,10 +948,21 @@ pause`;
           errorMessage = `SteamCMD installation timed out for server ${serverName}. Please try again.`;
         } else if (error.message.includes('steamcmd')) {
           errorMessage = `SteamCMD installation failed for server ${serverName}. Please check if SteamCMD is properly installed.`;
+        } else if (error.message.includes('ArkAscendedServer.exe')) {
+          errorMessage = `ASA server files not found after installation for server ${serverName}. Installation may have failed.`;
         } else {
           errorMessage = error.message;
         }
       }
+      
+      // Log additional debugging information
+      logger.error(`Error details for ${serverName}:`, {
+        errorCode: error.code,
+        errorMessage: error.message,
+        serverPath: serverPath,
+        steamCmdExe: this.steamCmdExe
+      });
+      
       throw new Error(errorMessage);
     }
   }
