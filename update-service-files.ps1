@@ -91,42 +91,35 @@ Write-Host "Copying updated files..." -ForegroundColor Cyan
 $copyCount = 0
 $errorCount = 0
 
-try {
-    # Get all files and directories to copy
-    $itemsToCopy = Get-ChildItem -Path $sourceDir -Exclude "node_modules", "logs", ".git", "windows-service", "*.ps1", "backup-*", "update-service-files.ps1"
-    
-    foreach ($item in $itemsToCopy) {
-        if ($item.PSIsContainer) {
-            Write-Host "Copying directory: $($item.Name)" -ForegroundColor Gray
-            try {
-                Copy-Item -Path $item.FullName -Destination $ServicePath -Recurse -Force
-                $copyCount++
-            } catch {
-                Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
-                $errorCount++
-            }
-        } else {
-            Write-Host "Copying file: $($item.Name)" -ForegroundColor Gray
-            try {
-                Copy-Item -Path $item.FullName -Destination $ServicePath -Force
-                $copyCount++
-            } catch {
-                Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
-                $errorCount++
-            }
+# Get all files and directories to copy
+$itemsToCopy = Get-ChildItem -Path $sourceDir -Exclude "node_modules", "logs", ".git", "windows-service", "*.ps1", "backup-*", "update-service-files.ps1"
+
+foreach ($item in $itemsToCopy) {
+    if ($item.PSIsContainer) {
+        Write-Host "Copying directory: $($item.Name)" -ForegroundColor Gray
+        try {
+            Copy-Item -Path $item.FullName -Destination $ServicePath -Recurse -Force
+            $copyCount++
+        } catch {
+            Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
+            $errorCount++
+        }
+    } else {
+        Write-Host "Copying file: $($item.Name)" -ForegroundColor Gray
+        try {
+            Copy-Item -Path $item.FullName -Destination $ServicePath -Force
+            $copyCount++
+        } catch {
+            Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
+            $errorCount++
         }
     }
-    
-    Write-Host ""
-    Write-Host "✓ Successfully copied $copyCount items" -ForegroundColor Green
-    if ($errorCount -gt 0) {
-        Write-Host "⚠ Failed to copy $errorCount items" -ForegroundColor Yellow
-    }
-    
-} catch {
-    Write-Host "✗ Error during file copy: $($_.Exception.Message)" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+}
+
+Write-Host ""
+Write-Host "✓ Successfully copied $copyCount items" -ForegroundColor Green
+if ($errorCount -gt 0) {
+    Write-Host "⚠ Failed to copy $errorCount items" -ForegroundColor Yellow
 }
 
 # Verify key files were copied
