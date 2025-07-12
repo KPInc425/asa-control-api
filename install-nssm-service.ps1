@@ -76,10 +76,26 @@ if (Test-Path $sourceDir) {
     }
 }
 
-# Check if NSSM is available
-$nssmPath = "C:\nssm\nssm.exe"
-if (!(Test-Path $nssmPath)) {
-    Write-Host "NSSM not found at $nssmPath" -ForegroundColor Yellow
+# Check if NSSM is available in multiple locations
+$nssmPath = $null
+$possiblePaths = @(
+    "C:\nssm\nssm.exe",
+    "C:\nssm\nssm-2.24\win64\nssm.exe",
+    "C:\nssm\nssm-2.24\win32\nssm.exe",
+    "C:\Program Files\nssm\nssm.exe",
+    "C:\Program Files (x86)\nssm\nssm.exe"
+)
+
+foreach ($path in $possiblePaths) {
+    if (Test-Path $path) {
+        $nssmPath = $path
+        Write-Host "Found NSSM at: $nssmPath" -ForegroundColor Green
+        break
+    }
+}
+
+if (!$nssmPath) {
+    Write-Host "NSSM not found in any expected location" -ForegroundColor Yellow
     Write-Host "Downloading NSSM..." -ForegroundColor Cyan
     
     # Create NSSM directory
@@ -99,11 +115,24 @@ if (!(Test-Path $nssmPath)) {
         # Find the correct executable (32-bit or 64-bit)
         if (Test-Path "C:\nssm\win64\nssm.exe") {
             Copy-Item "C:\nssm\win64\nssm.exe" "C:\nssm\nssm.exe" -Force
+            $nssmPath = "C:\nssm\nssm.exe"
         } elseif (Test-Path "C:\nssm\win32\nssm.exe") {
             Copy-Item "C:\nssm\win32\nssm.exe" "C:\nssm\nssm.exe" -Force
+            $nssmPath = "C:\nssm\nssm.exe"
+        } else {
+            # If copy failed, try using the extracted version directly
+            if (Test-Path "C:\nssm\nssm-2.24\win64\nssm.exe") {
+                $nssmPath = "C:\nssm\nssm-2.24\win64\nssm.exe"
+            } elseif (Test-Path "C:\nssm\nssm-2.24\win32\nssm.exe") {
+                $nssmPath = "C:\nssm\nssm-2.24\win32\nssm.exe"
+            }
         }
         
-        Write-Host "NSSM downloaded and installed successfully" -ForegroundColor Green
+        if ($nssmPath) {
+            Write-Host "NSSM downloaded and installed successfully at: $nssmPath" -ForegroundColor Green
+        } else {
+            throw "Failed to locate NSSM executable after download"
+        }
     } catch {
         Write-Host "Failed to download NSSM: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "Please download NSSM manually from https://nssm.cc/" -ForegroundColor Yellow
@@ -121,9 +150,14 @@ $nodePath = (Get-Command node.exe).Source
 Write-Host "Node.js path: $nodePath" -ForegroundColor Gray
 
 # Install the service
-$process = Start-Process -FilePath $nssmPath -ArgumentList "install", "ASA-API", $nodePath, "server.js" -PassThru -Wait -NoNewWindow
-$result = $process.ExitCode
-if ($result -eq 0) {
+try {
+    $result = & $nssmPath install ASA-API $nodePath "server.js"
+    $exitCode = $LASTEXITCODE
+} catch {
+    Write-Host "Error executing NSSM: $($_.Exception.Message)" -ForegroundColor Red
+    $exitCode = 1
+}
+if ($exitCode -eq 0) {
     Write-Host "Service installed successfully!" -ForegroundColor Green
     
     # Configure the service
