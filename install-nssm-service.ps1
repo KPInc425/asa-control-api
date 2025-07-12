@@ -121,8 +121,9 @@ $nodePath = (Get-Command node.exe).Source
 Write-Host "Node.js path: $nodePath" -ForegroundColor Gray
 
 # Install the service
-$result = & $nssmPath install ASA-API $nodePath "server.js"
-if ($LASTEXITCODE -eq 0) {
+$process = Start-Process -FilePath $nssmPath -ArgumentList "install", "ASA-API", $nodePath, "server.js" -PassThru -Wait -NoNewWindow
+$result = $process.ExitCode
+if ($result -eq 0) {
     Write-Host "Service installed successfully!" -ForegroundColor Green
     
     # Configure the service
