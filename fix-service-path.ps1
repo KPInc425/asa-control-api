@@ -1,4 +1,4 @@
-# Fix ASA API Service Node.js Path
+﻿# Fix ASA API Service Node.js Path
 # This script fixes the incorrect Node.js path in the NSSM service configuration
 
 # Check if running as Administrator
