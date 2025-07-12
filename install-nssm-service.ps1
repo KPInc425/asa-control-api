@@ -164,20 +164,39 @@ if ($service) {
     } while ($service -and $waitCount -lt $maxWait)
     
     if ($service) {
-        Write-Host "Warning: Service may still be marked for deletion. Trying to force removal..." -ForegroundColor Yellow
-        # Try to force restart the service manager
-        try {
-            Restart-Service -Name "DcomLaunch" -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 5
-        } catch {
-            # Ignore errors, just try to continue
+        Write-Host "Warning: Service is still marked for deletion!" -ForegroundColor Red
+        Write-Host "This can happen when Windows hasn't fully processed the deletion." -ForegroundColor Yellow
+        Write-Host "Options:" -ForegroundColor Cyan
+        Write-Host "1. Run the force-remove-service.ps1 script to clean up" -ForegroundColor White
+        Write-Host "2. Restart the computer and try again" -ForegroundColor White
+        Write-Host "3. Use a different service name" -ForegroundColor White
+        Write-Host ""
+        
+        $choice = Read-Host "Choose option (1-3) or press Enter to use different service name"
+        
+        if ($choice -eq "1") {
+            Write-Host "Please run: .\force-remove-service.ps1" -ForegroundColor Yellow
+            Write-Host "Then run this installation script again." -ForegroundColor Yellow
+            Read-Host "Press Enter to exit"
+            exit 1
+        } elseif ($choice -eq "2") {
+            Write-Host "Please restart the computer and run this script again." -ForegroundColor Yellow
+            Read-Host "Press Enter to exit"
+            exit 1
+        } else {
+            # Use a different service name
+            $serviceName = "ASA-API-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+            Write-Host "Using alternative service name: $serviceName" -ForegroundColor Green
         }
     } else {
         Write-Host "Service removed successfully" -ForegroundColor Green
+        $serviceName = "ASA-API"
     }
     
     # Additional wait to ensure deletion is complete
     Start-Sleep -Seconds 3
+} else {
+    $serviceName = "ASA-API"
 }
 
 # Install service using NSSM
@@ -197,7 +216,7 @@ do {
     Write-Host "Installation attempt $retryCount of $maxRetries..." -ForegroundColor Cyan
     
     try {
-        $result = & $nssmPath install ASA-API $nodePath "server.js"
+        $result = & $nssmPath install $serviceName $nodePath "server.js"
         $exitCode = $LASTEXITCODE
     } catch {
         Write-Host "Error executing NSSM: $($_.Exception.Message)" -ForegroundColor Red
@@ -223,27 +242,27 @@ if ($installSuccess) {
     Write-Host "Configuring service..." -ForegroundColor Cyan
     
     # Set working directory
-    & $nssmPath set ASA-API AppDirectory "C:\ASA-API"
+    & $nssmPath set $serviceName AppDirectory "C:\ASA-API"
     
     # Set display name
-    & $nssmPath set ASA-API DisplayName "ASA Management API"
+    & $nssmPath set $serviceName DisplayName "ASA Management API"
     
     # Set description
-    & $nssmPath set ASA-API Description "ASA Management API Backend Service"
+    & $nssmPath set $serviceName Description "ASA Management API Backend Service"
     
     # Set startup type to automatic
-    & $nssmPath set ASA-API Start SERVICE_AUTO_START
+    & $nssmPath set $serviceName Start SERVICE_AUTO_START
     
     # Set output files
-    & $nssmPath set ASA-API AppStdout "C:\ASA-API\logs\nssm-out.log"
-    & $nssmPath set ASA-API AppStderr "C:\ASA-API\logs\nssm-err.log"
+    & $nssmPath set $serviceName AppStdout "C:\ASA-API\logs\nssm-out.log"
+    & $nssmPath set $serviceName AppStderr "C:\ASA-API\logs\nssm-err.log"
     
     # Set restart on failure
-    & $nssmPath set ASA-API AppRestartDelay 10000
-    & $nssmPath set ASA-API AppStopMethodSkip 0
-    & $nssmPath set ASA-API AppStopMethodConsole 1500
-    & $nssmPath set ASA-API AppStopMethodWindow 1500
-    & $nssmPath set ASA-API AppStopMethodThreads 1500
+    & $nssmPath set $serviceName AppRestartDelay 10000
+    & $nssmPath set $serviceName AppStopMethodSkip 0
+    & $nssmPath set $serviceName AppStopMethodConsole 1500
+    & $nssmPath set $serviceName AppStopMethodWindow 1500
+    & $nssmPath set $serviceName AppStopMethodThreads 1500
     
     Write-Host "Service configured successfully!" -ForegroundColor Green
     
@@ -253,10 +272,10 @@ if ($installSuccess) {
     
     # Test start
     Write-Host "Starting service..." -ForegroundColor Yellow
-    Start-Service ASA-API
+    Start-Service $serviceName
     Start-Sleep -Seconds 5
     
-    $service = Get-Service ASA-API
+    $service = Get-Service $serviceName
     Write-Host "Service status: $($service.Status)" -ForegroundColor Cyan
     
     if ($service.Status -eq "Running") {
@@ -273,10 +292,10 @@ if ($installSuccess) {
         
         # Test stop
         Write-Host "Stopping service..." -ForegroundColor Yellow
-        Stop-Service ASA-API
+        Stop-Service $serviceName
         Start-Sleep -Seconds 3
         
-        $service = Get-Service ASA-API
+        $service = Get-Service $serviceName
         Write-Host "Service status after stop: $($service.Status)" -ForegroundColor Cyan
         
         if ($service.Status -eq "Stopped") {
@@ -291,7 +310,7 @@ if ($installSuccess) {
     
     Write-Host ""
     Write-Host "Service Details:" -ForegroundColor Cyan
-    Write-Host "  Name: ASA-API" -ForegroundColor White
+    Write-Host "  Name: $serviceName" -ForegroundColor White
     Write-Host "  Display Name: ASA Management API" -ForegroundColor White
     Write-Host "  Path: C:\ASA-API" -ForegroundColor White
     Write-Host "  Node.js: $nodePath" -ForegroundColor White
@@ -299,16 +318,16 @@ if ($installSuccess) {
     Write-Host "  Logs: C:\ASA-API\logs\nssm-*.log" -ForegroundColor White
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Cyan
-    Write-Host "  Start-Service ASA-API" -ForegroundColor White
-    Write-Host "  Stop-Service ASA-API" -ForegroundColor White
-    Write-Host "  Get-Service ASA-API" -ForegroundColor White
-    Write-Host "  nssm.exe restart ASA-API" -ForegroundColor White
+    Write-Host "  Start-Service $serviceName" -ForegroundColor White
+    Write-Host "  Stop-Service $serviceName" -ForegroundColor White
+    Write-Host "  Get-Service $serviceName" -ForegroundColor White
+    Write-Host "  nssm.exe restart $serviceName" -ForegroundColor White
     Write-Host ""
     Write-Host "NSSM Commands:" -ForegroundColor Cyan
-    Write-Host "  nssm.exe start ASA-API" -ForegroundColor White
-    Write-Host "  nssm.exe stop ASA-API" -ForegroundColor White
-    Write-Host "  nssm.exe restart ASA-API" -ForegroundColor White
-    Write-Host "  nssm.exe remove ASA-API confirm" -ForegroundColor White
+    Write-Host "  nssm.exe start $serviceName" -ForegroundColor White
+    Write-Host "  nssm.exe stop $serviceName" -ForegroundColor White
+    Write-Host "  nssm.exe restart $serviceName" -ForegroundColor White
+    Write-Host "  nssm.exe remove $serviceName confirm" -ForegroundColor White
     Write-Host ""
     Write-Host "The service should now respond properly to start/stop commands." -ForegroundColor Green
     Write-Host "NSSM is much more reliable than custom service wrappers!" -ForegroundColor Green
