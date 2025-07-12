@@ -260,17 +260,34 @@ export default async function nativeServerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
+      
       // Check if this is a cluster summary card
       const servers = await serverManager.listServers();
       const cluster = servers.find(s => s.type === 'cluster' && s.name === name);
+      
       if (cluster) {
-        const result = await serverManager.startCluster(name);
-        return result;
+        // For clusters, start in background and return immediately
+        serverManager.startCluster(name).catch(error => {
+          fastify.log.error(`Background cluster start failed for ${name}:`, error);
+        });
+        
+        return {
+          success: true,
+          message: `Cluster ${name} start initiated. Check server status for progress.`
+        };
+      } else {
+        // For individual servers, start in background and return immediately
+        serverManager.start(name).catch(error => {
+          fastify.log.error(`Background server start failed for ${name}:`, error);
+        });
+        
+        return {
+          success: true,
+          message: `Server ${name} start initiated. Check server status for progress.`
+        };
       }
-      const result = await serverManager.start(name);
-      return result;
     } catch (error) {
-      fastify.log.error(`Error starting native server ${request.params.name}:`, error);
+      fastify.log.error(`Error initiating native server start for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message
@@ -607,6 +624,41 @@ export default async function nativeServerRoutes(fastify, options) {
       return { success: true, status };
     } catch (error) {
       fastify.log.error(`Error getting enhanced server status for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Simple running status check (fast response)
+  fastify.get('/api/native-servers/:name/running', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            running: { type: 'boolean' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      const isRunning = await serverManager.isRunning(name);
+      return { success: true, running: isRunning };
+    } catch (error) {
+      fastify.log.error(`Error checking running status for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message

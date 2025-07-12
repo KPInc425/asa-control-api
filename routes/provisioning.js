@@ -709,6 +709,167 @@ export default async function provisioningRoutes(fastify) {
     }
   });
 
+  // Get global config files
+  fastify.get('/api/provisioning/global-configs', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const globalConfigsPath = path.join(config.server.native.basePath, 'global-configs');
+      
+      let gameIni = '';
+      let gameUserSettingsIni = '';
+      
+      try {
+        const gameIniPath = path.join(globalConfigsPath, 'Game.ini');
+        gameIni = await fs.readFile(gameIniPath, 'utf8');
+      } catch (error) {
+        // Game.ini doesn't exist
+      }
+      
+      try {
+        const gameUserSettingsIniPath = path.join(globalConfigsPath, 'GameUserSettings.ini');
+        gameUserSettingsIni = await fs.readFile(gameUserSettingsIniPath, 'utf8');
+      } catch (error) {
+        // GameUserSettings.ini doesn't exist
+      }
+      
+      return {
+        success: true,
+        gameIni,
+        gameUserSettingsIni
+      };
+    } catch (error) {
+      logger.error('Failed to get global configs:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get global configs'
+      });
+    }
+  });
+
+  // Update global config files
+  fastify.put('/api/provisioning/global-configs', {
+    preHandler: requirePermission('write'),
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          gameIni: { type: 'string' },
+          gameUserSettingsIni: { type: 'string' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { gameIni, gameUserSettingsIni } = request.body;
+      const globalConfigsPath = path.join(config.server.native.basePath, 'global-configs');
+      
+      // Ensure directory exists
+      await fs.mkdir(globalConfigsPath, { recursive: true });
+      
+      // Save Game.ini if provided
+      if (gameIni !== undefined) {
+        const gameIniPath = path.join(globalConfigsPath, 'Game.ini');
+        await fs.writeFile(gameIniPath, gameIni);
+      }
+      
+      // Save GameUserSettings.ini if provided
+      if (gameUserSettingsIni !== undefined) {
+        const gameUserSettingsIniPath = path.join(globalConfigsPath, 'GameUserSettings.ini');
+        await fs.writeFile(gameUserSettingsIniPath, gameUserSettingsIni);
+      }
+      
+      logger.info('Global config files updated');
+      
+      // Regenerate start scripts for all servers to apply new configs
+      await regenerateAllClusterStartScripts();
+      
+      return {
+        success: true,
+        message: 'Global config files updated successfully. Server configs have been regenerated.'
+      };
+    } catch (error) {
+      logger.error('Failed to update global configs:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update global configs'
+      });
+    }
+  });
+
+  // Get server config exclusion list
+  fastify.get('/api/provisioning/config-exclusions', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const exclusionsPath = path.join(config.server.native.basePath, 'config-exclusions.json');
+      
+      let excludedServers = [];
+      
+      try {
+        const exclusionsData = await fs.readFile(exclusionsPath, 'utf8');
+        const exclusionsConfig = JSON.parse(exclusionsData);
+        excludedServers = exclusionsConfig.excludedServers || [];
+      } catch (error) {
+        // Exclusions file doesn't exist
+      }
+      
+      return {
+        success: true,
+        excludedServers
+      };
+    } catch (error) {
+      logger.error('Failed to get config exclusions:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get config exclusions'
+      });
+    }
+  });
+
+  // Update server config exclusion list
+  fastify.put('/api/provisioning/config-exclusions', {
+    preHandler: requirePermission('write'),
+    schema: {
+      body: {
+        type: 'object',
+        required: ['excludedServers'],
+        properties: {
+          excludedServers: {
+            type: 'array',
+            items: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { excludedServers } = request.body;
+      
+      const exclusionsPath = path.join(config.server.native.basePath, 'config-exclusions.json');
+      
+      const exclusionsData = {
+        excludedServers: excludedServers || [],
+        updatedAt: new Date().toISOString()
+      };
+      
+      await fs.writeFile(exclusionsPath, JSON.stringify(exclusionsData, null, 2));
+      
+      logger.info('Config exclusions updated');
+      
+      return {
+        success: true,
+        message: 'Config exclusions updated successfully'
+      };
+    } catch (error) {
+      logger.error('Failed to update config exclusions:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update config exclusions'
+      });
+    }
+  });
+
   // Regenerate all start scripts with current mod configurations
   fastify.post('/api/provisioning/regenerate-start-scripts', {
     preHandler: requirePermission('write')

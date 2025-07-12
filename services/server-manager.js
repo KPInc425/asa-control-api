@@ -305,8 +305,8 @@ export class NativeServerManager extends ServerManager {
   }
 
   async monitorStartup(name, childProcess, serverInfo, processInfo) {
-    const maxStartupTime = 60000; // 60 seconds max startup time
-    const checkInterval = 3000; // Check every 3 seconds (increased from 2)
+    const maxStartupTime = 30000; // 30 seconds max startup time (reduced from 60)
+    const checkInterval = 2000; // Check every 2 seconds (reduced from 3)
     const startTime = Date.now();
     
     while (Date.now() - startTime < maxStartupTime) {
@@ -368,6 +368,26 @@ export class NativeServerManager extends ServerManager {
       return {
         success: true,
         message: 'Server appears to be running (process active)'
+      };
+    }
+    
+    // If we timeout but the server process exists, consider it a success
+    // This handles cases where the server takes longer to fully initialize
+    const runningProcesses = await this.getRunningProcesses();
+    const serverProcess = runningProcesses.find(process => {
+      const commandLine = process.commandLine || '';
+      return commandLine.includes(`SessionName=${name}`) || 
+             commandLine.includes(`SessionName=${name.replace(/\s+/g, '%20')}`) ||
+             commandLine.includes(name);
+    });
+    
+    if (serverProcess) {
+      // Update process info
+      processInfo.status = 'running';
+      processInfo.process = null;
+      return {
+        success: true,
+        message: 'Server process detected (startup may still be in progress)'
       };
     }
     

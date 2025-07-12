@@ -366,6 +366,18 @@ const setupSocketIO = () => {
         logger.info(`Container events stopped for socket: ${socket.id}`);
       }
     });
+    // Test endpoint for job progress
+    socket.on('test-job-progress', (data) => {
+      logger.info(`Test job progress request from socket: ${socket.id}`);
+      socket.emit('job-progress', {
+        jobId: 'test',
+        status: 'running',
+        progress: 50,
+        message: 'Test job progress message',
+        timestamp: new Date().toISOString()
+      });
+    });
+
     socket.on('disconnect', () => {
       logger.info(`Socket.IO client disconnected: ${socket.id}`);
       if (socket.containerLogStream) {
@@ -525,13 +537,17 @@ const start = async () => {
     // Attach Socket.IO to the HTTP server before Fastify starts
     io = new SocketIOServer(server, {
       cors: {
-        origin: ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
-        credentials: true
+        origin: process.env.CORS_ORIGIN 
+          ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+          : ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
       }
     });
 
-    // Make Socket.IO instance available to routes
+    // Make Socket.IO instance available to routes and globally
     fastify.io = io;
+    global.io = io;
 
     // Setup Socket.IO event handlers
     setupSocketIO();

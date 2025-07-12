@@ -38,6 +38,31 @@ async function saveJobs() {
   }
 }
 
+// Broadcast job updates to Socket.IO clients
+function broadcastJobUpdate(jobId, job) {
+  try {
+    // Get the Socket.IO instance from the global scope
+    const io = global.io || global.fastify?.io;
+    if (io) {
+      const progressData = {
+        jobId: job.id,
+        status: job.status,
+        progress: job.status === 'completed' ? 100 : job.status === 'failed' ? 0 : 50,
+        message: job.progress && job.progress.length > 0 ? job.progress[job.progress.length - 1].message : 'Processing...',
+        error: job.error,
+        result: job.result
+      };
+      
+      logger.debug(`Broadcasting job progress for ${jobId}:`, progressData);
+      io.emit('job-progress', progressData);
+    } else {
+      logger.warn('Socket.IO instance not available for job progress broadcast');
+    }
+  } catch (error) {
+    logger.error('Failed to broadcast job update:', error);
+  }
+}
+
 // Initialize job storage
 await loadJobs();
 
@@ -69,6 +94,9 @@ export function updateJob(jobId, update) {
     // Save to file immediately
     saveJobs();
     
+    // Broadcast update to Socket.IO clients
+    broadcastJobUpdate(jobId, jobs[jobId]);
+    
     logger.info(`Updated job ${jobId}: ${update.status || 'progress'}`);
   }
 }
@@ -80,6 +108,9 @@ export function addJobProgress(jobId, message) {
     
     // Save to file immediately
     saveJobs();
+    
+    // Broadcast update to Socket.IO clients
+    broadcastJobUpdate(jobId, jobs[jobId]);
     
     logger.info(`Job ${jobId} progress: ${message}`);
   }

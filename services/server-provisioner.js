@@ -986,12 +986,15 @@ if %ERRORLEVEL% NEQ 0 (
       // Create configs directory if it doesn't exist
       await fs.mkdir(configsPath, { recursive: true });
       
+      // Get final configs for this server (global + server-specific)
+      const finalConfigs = await this.getFinalConfigsForServer(serverConfig.name);
+      
       // Create Game.ini
-      const gameIni = this.generateGameIni(serverConfig);
+      const gameIni = finalConfigs.gameIni || this.generateGameIni(serverConfig);
       await fs.writeFile(path.join(configsPath, 'Game.ini'), gameIni);
       
       // Create GameUserSettings.ini
-      const gameUserSettings = this.generateGameUserSettings(serverConfig);
+      const gameUserSettings = finalConfigs.gameUserSettings || this.generateGameUserSettings(serverConfig);
       await fs.writeFile(path.join(configsPath, 'GameUserSettings.ini'), gameUserSettings);
       
       // Create server-config.json
@@ -1088,6 +1091,54 @@ pause`;
     } catch (error) {
       logger.error(`Failed to create stop script for ${serverName} in cluster ${clusterName}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Get final configs for a server (global + server-specific)
+   */
+  async getFinalConfigsForServer(serverName) {
+    try {
+      // Check if server is excluded from global configs
+      const exclusionsPath = path.join(this.basePath, 'config-exclusions.json');
+      let excludedServers = [];
+      
+      try {
+        const exclusionsData = await fs.readFile(exclusionsPath, 'utf8');
+        const exclusionsConfig = JSON.parse(exclusionsData);
+        excludedServers = exclusionsConfig.excludedServers || [];
+      } catch (error) {
+        // Exclusions file doesn't exist
+      }
+      
+      // If server is excluded, return empty configs (will use defaults)
+      if (excludedServers.includes(serverName)) {
+        return { gameIni: null, gameUserSettings: null };
+      }
+      
+      // Get global configs
+      const globalConfigsPath = path.join(this.basePath, 'global-configs');
+      let gameIni = null;
+      let gameUserSettings = null;
+      
+      try {
+        const gameIniPath = path.join(globalConfigsPath, 'Game.ini');
+        gameIni = await fs.readFile(gameIniPath, 'utf8');
+      } catch (error) {
+        // Global Game.ini doesn't exist
+      }
+      
+      try {
+        const gameUserSettingsIniPath = path.join(globalConfigsPath, 'GameUserSettings.ini');
+        gameUserSettings = await fs.readFile(gameUserSettingsIniPath, 'utf8');
+      } catch (error) {
+        // Global GameUserSettings.ini doesn't exist
+      }
+      
+      return { gameIni, gameUserSettings };
+    } catch (error) {
+      logger.error(`Failed to get final configs for server ${serverName}:`, error);
+      return { gameIni: null, gameUserSettings: null };
     }
   }
 
