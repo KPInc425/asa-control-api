@@ -95,18 +95,24 @@ try {
     $itemsToCopy = Get-ChildItem -Path $sourceDir -Exclude "node_modules", "logs", ".git", "windows-service", "*.ps1", "backup-*", "update-service-files.ps1"
     
     foreach ($item in $itemsToCopy) {
-        try {
-            if ($item.PSIsContainer) {
-                Write-Host "Copying directory: $($item.Name)" -ForegroundColor Gray
+        if ($item.PSIsContainer) {
+            Write-Host "Copying directory: $($item.Name)" -ForegroundColor Gray
+            try {
                 Copy-Item -Path $item.FullName -Destination $ServicePath -Recurse -Force
-            } else {
-                Write-Host "Copying file: $($item.Name)" -ForegroundColor Gray
-                Copy-Item -Path $item.FullName -Destination $ServicePath -Force
+                $copyCount++
+            } catch {
+                Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
+                $errorCount++
             }
-            $copyCount++
-        } catch {
-            Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
-            $errorCount++
+        } else {
+            Write-Host "Copying file: $($item.Name)" -ForegroundColor Gray
+            try {
+                Copy-Item -Path $item.FullName -Destination $ServicePath -Force
+                $copyCount++
+            } catch {
+                Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
+                $errorCount++
+            }
         }
     }
     
