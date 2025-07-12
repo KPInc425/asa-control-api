@@ -57,17 +57,24 @@ class ArkLogsService {
   /**
    * Create a read stream for a specific log file
    */
-  createLogStream(serverName, logFileName, options = {}) {
+  async createLogStream(serverName, logFileName, options = {}) {
     const { tail = 100, follow = true } = options;
     const logPath = path.join(this.basePath, serverName, 'logs', logFileName);
     
     logger.info(`Creating log stream for ${serverName}/${logFileName}`);
     
     try {
+      // Get file size if we need to tail
+      let startPosition = 0;
+      if (follow) {
+        const fileSize = await this.getFileSize(logPath);
+        startPosition = Math.max(0, fileSize - (tail * 1000));
+      }
+      
       // Create a read stream
       const stream = createReadStream(logPath, {
         encoding: 'utf8',
-        start: follow ? Math.max(0, this.getFileSize(logPath) - (tail * 1000)) : 0
+        start: startPosition
       });
       
       return stream;

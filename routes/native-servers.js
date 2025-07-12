@@ -491,6 +491,53 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
+  // Regenerate start.bat for a server with latest mods and config
+  fastify.post('/api/native-servers/:name/regenerate-start-bat', {
+    preHandler: [requireWrite],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      // Check if this is a native server manager
+      if (serverManager.regenerateServerStartScript) {
+        await serverManager.regenerateServerStartScript(name);
+        return {
+          success: true,
+          message: `Start.bat regenerated for server ${name} with latest mods and configuration`
+        };
+      } else {
+        return reply.status(400).send({
+          success: false,
+          message: 'Start.bat regeneration is only available for native servers'
+        });
+      }
+    } catch (error) {
+      fastify.log.error(`Error regenerating start.bat for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
   // Check if native server is running
   fastify.get('/api/native-servers/:name/running', {
     preHandler: [requireRead],
@@ -631,40 +678,7 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
-  // Simple running status check (fast response)
-  fastify.get('/api/native-servers/:name/running', {
-    preHandler: [requireRead],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-          name: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            running: { type: 'boolean' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { name } = request.params;
-      const isRunning = await serverManager.isRunning(name);
-      return { success: true, running: isRunning };
-    } catch (error) {
-      fastify.log.error(`Error checking running status for ${request.params.name}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
+
 
   // Get all servers (compatibility endpoint)
   fastify.get('/api/servers', {

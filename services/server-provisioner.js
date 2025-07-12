@@ -1050,14 +1050,30 @@ if %ERRORLEVEL% NEQ 0 (
       // Add mods parameter if mods are configured
       const modsArg = serverConfig.mods && serverConfig.mods.length > 0 ? ` -mods=${serverConfig.mods.join(',')}` : '';
       
+      // Build the query string for the server parameters
+      let queryParams = [
+        `SessionName=${serverName}`,
+        `Port=${serverConfig.port || serverConfig.gamePort}`,
+        `QueryPort=${serverConfig.queryPort}`,
+        `RCONPort=${serverConfig.rconPort}`,
+        `RCONEnabled=True`,
+        `MaxPlayers=${serverConfig.maxPlayers}`,
+        `ServerPassword=${serverConfig.password || serverConfig.serverPassword || ''}`,
+        `ServerAdminPassword=${serverConfig.adminPassword}`
+      ];
+      if (customUrl) {
+        queryParams.push(`customdynamicconfigurl=\"${customUrl}\"`);
+      }
+      const queryString = queryParams.join('?');
+
       const startScript = `@echo off
-echo Starting ${serverName}...
+      echo Starting ${serverName}...
 
-REM Start the ASA server with proper parameters
-"${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?listen?SessionName=${serverName}?Port=${serverConfig.port || serverConfig.gamePort}?QueryPort=${serverConfig.queryPort}?RCONPort=${serverConfig.rconPort}?RCONEnabled=True?MaxPlayers=${serverConfig.maxPlayers}?ServerPassword=${serverConfig.password || serverConfig.serverPassword || ''}?ServerAdminPassword=${serverConfig.adminPassword}${customUrlArg}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName} -NoBattleEye
+      REM Start the ASA server with proper parameters
+      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?${queryString}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName} -NoBattleEye
 
-echo Server ${serverName} has stopped.
-pause`;
+      echo Server ${serverName} has stopped.
+      pause`;
 
       await fs.writeFile(path.join(serverPath, 'start.bat'), startScript);
       logger.info(`Start script created for server: ${serverName} in cluster ${clusterName}`);

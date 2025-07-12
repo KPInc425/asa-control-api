@@ -242,7 +242,7 @@ const setupSocketIO = () => {
           return;
         }
         
-        const logStream = arkLogsService.default.createLogStream(serverName, logFileName, {
+        const logStream = await arkLogsService.default.createLogStream(serverName, logFileName, {
           tail: 100,
           follow: true
         });

@@ -60,9 +60,9 @@ if ($Backup) {
             }
         }
         
-        Write-Host "✓ Backup created at: $backupPath" -ForegroundColor Green
+        Write-Host "OK: Backup created at: $backupPath" -ForegroundColor Green
     } catch {
-        Write-Host "⚠ Warning: Failed to create backup: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "WARNING: Failed to create backup: $($_.Exception.Message)" -ForegroundColor Yellow
     }
     Write-Host ""
 }
@@ -75,12 +75,12 @@ if ($RestartService) {
         if ($service -and $service.Status -eq "Running") {
             Stop-Service -Name "ASA-API" -Force
             Start-Sleep -Seconds 3
-            Write-Host "✓ Service stopped successfully" -ForegroundColor Green
+            Write-Host "OK: Service stopped successfully" -ForegroundColor Green
         } else {
             Write-Host "Service not running or not found" -ForegroundColor Gray
         }
     } catch {
-        Write-Host "⚠ Warning: Could not stop service: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "WARNING: Could not stop service: $($_.Exception.Message)" -ForegroundColor Yellow
     }
     Write-Host ""
 }
@@ -101,7 +101,7 @@ foreach ($item in $itemsToCopy) {
             Copy-Item -Path $item.FullName -Destination $ServicePath -Recurse -Force
             $copyCount++
         } catch {
-            Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "ERROR: Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
             $errorCount++
         }
     } else {
@@ -110,16 +110,16 @@ foreach ($item in $itemsToCopy) {
             Copy-Item -Path $item.FullName -Destination $ServicePath -Force
             $copyCount++
         } catch {
-            Write-Host "✗ Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "ERROR: Failed to copy $($item.Name): $($_.Exception.Message)" -ForegroundColor Red
             $errorCount++
         }
     }
 }
 
 Write-Host ""
-Write-Host "✓ Successfully copied $copyCount items" -ForegroundColor Green
+Write-Host "OK: Successfully copied $copyCount items" -ForegroundColor Green
 if ($errorCount -gt 0) {
-    Write-Host "⚠ Failed to copy $errorCount items" -ForegroundColor Yellow
+    Write-Host "WARNING: Failed to copy $errorCount items" -ForegroundColor Yellow
 }
 
 # Verify key files were copied
@@ -130,9 +130,9 @@ $missingFiles = @()
 
 foreach ($file in $requiredFiles) {
     if (Test-Path "$ServicePath\$file") {
-        Write-Host "✓ $file" -ForegroundColor Green
+        Write-Host "OK: $file" -ForegroundColor Green
     } else {
-        Write-Host "✗ $file missing!" -ForegroundColor Red
+        Write-Host "ERROR: $file missing!" -ForegroundColor Red
         $missingFiles += $file
     }
 }
@@ -152,9 +152,9 @@ if ($InstallDependencies) {
     Push-Location $ServicePath
     try {
         npm install --production
-        Write-Host "✓ Dependencies installed successfully" -ForegroundColor Green
+        Write-Host "OK: Dependencies installed successfully" -ForegroundColor Green
     } catch {
-        Write-Host "✗ Failed to install dependencies: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "ERROR: Failed to install dependencies: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "Please run 'npm install' manually in $ServicePath" -ForegroundColor Yellow
     }
     Pop-Location
@@ -170,12 +170,12 @@ if ($RestartService) {
         
         $service = Get-Service -Name "ASA-API"
         if ($service.Status -eq "Running") {
-            Write-Host "✓ Service started successfully" -ForegroundColor Green
+            Write-Host "OK: Service started successfully" -ForegroundColor Green
         } else {
-            Write-Host "⚠ Service may not have started properly. Status: $($service.Status)" -ForegroundColor Yellow
+            Write-Host "WARNING: Service may not have started properly. Status: $($service.Status)" -ForegroundColor Yellow
         }
     } catch {
-        Write-Host "✗ Failed to start service: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "ERROR: Failed to start service: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "Please start the service manually: Start-Service ASA-API" -ForegroundColor Yellow
     }
 }

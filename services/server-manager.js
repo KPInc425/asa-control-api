@@ -181,6 +181,16 @@ export class NativeServerManager extends ServerManager {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
       
+      // Regenerate start.bat with latest mods and config before starting
+      console.log(`Regenerating start.bat for server ${name} with latest configuration...`);
+      try {
+        await this.regenerateServerStartScript(name);
+        console.log(`Successfully regenerated start.bat for server ${name}`);
+      } catch (regenerateError) {
+        console.warn(`Failed to regenerate start.bat for server ${name}:`, regenerateError.message);
+        // Continue with existing start.bat if regeneration fails
+      }
+      
       // Get server configuration
       const serverInfo = await this.getClusterServerInfo(name);
       if (!serverInfo) {
@@ -1007,6 +1017,110 @@ export class NativeServerManager extends ServerManager {
       }
     }
     return { success: true, message: `Cluster ${clusterName} start attempted.`, results };
+  }
+
+  /**
+   * Regenerate start.bat for a specific server with latest mods and config
+   */
+  async regenerateServerStartScript(serverName) {
+    try {
+      const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+      
+      // Find which cluster contains this server
+      const clusterDirs = await fs.readdir(clustersPath);
+      
+      for (const clusterName of clusterDirs) {
+        const clusterPath = path.join(clustersPath, clusterName);
+        const clusterConfigPath = path.join(clusterPath, 'cluster.json');
+        
+        try {
+          const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+          const clusterConfig = JSON.parse(clusterConfigContent);
+          
+          // Find the server in this cluster
+          const serverConfig = clusterConfig.servers?.find(s => s.name === serverName);
+          if (serverConfig) {
+            // Get mod configuration for this server
+            const finalMods = await this.getFinalModListForServer(serverName);
+            
+            // Update server config with new mods
+            serverConfig.mods = finalMods;
+            
+            // Update cluster config file
+            await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
+            
+            // Regenerate start.bat file using the provisioner
+            const serverPath = path.join(clusterPath, serverName);
+            
+            // Import the provisioner dynamically to avoid circular dependencies
+            const { default: provisioner } = await import('./server-provisioner.js');
+            await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
+            
+            logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterName}`);
+            return;
+          }
+        } catch (error) {
+          // Continue to next cluster if this one fails
+          logger.warn(`Failed to process cluster ${clusterName}:`, error.message);
+        }
+      }
+      
+      logger.warn(`Server ${serverName} not found in any cluster`);
+    } catch (error) {
+      logger.error(`Failed to regenerate start script for ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get final mod list for a server (shared + server-specific)
+   */
+  async getFinalModListForServer(serverName) {
+    try {
+      // Get shared mods
+      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+      let sharedMods = [];
+      
+      try {
+        const sharedModsData = await fs.readFile(sharedModsPath, 'utf8');
+        const sharedModsConfig = JSON.parse(sharedModsData);
+        sharedMods = sharedModsConfig.modList || [];
+      } catch (error) {
+        // Shared mods file doesn't exist, use empty array
+      }
+      
+      // Get server-specific mods
+      const serverModsPath = path.join(config.server.native.basePath, 'server-mods', `${serverName}.json`);
+      let serverMods = [];
+      let excludeSharedMods = false;
+      
+      try {
+        const serverModsData = await fs.readFile(serverModsPath, 'utf8');
+        const serverModsConfig = JSON.parse(serverModsData);
+        serverMods = serverModsConfig.additionalMods || [];
+        excludeSharedMods = serverModsConfig.excludeSharedMods || false;
+      } catch (error) {
+        // Server mods file doesn't exist, use defaults
+        const isClubArkServer = serverName.toLowerCase().includes('club') || 
+                               serverName.toLowerCase().includes('bobs');
+        if (isClubArkServer) {
+          serverMods = [1005639]; // Club ARK mod
+          excludeSharedMods = true;
+        }
+      }
+      
+      // Combine mods based on configuration
+      if (excludeSharedMods) {
+        return serverMods;
+      } else {
+        // Combine shared and server-specific mods, removing duplicates
+        const allMods = [...sharedMods, ...serverMods];
+        return [...new Set(allMods)];
+      }
+    } catch (error) {
+      logger.error(`Failed to get final mod list for ${serverName}:`, error);
+      return [];
+    }
   }
   async stopCluster(clusterName) {
     const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
