@@ -110,6 +110,21 @@ fastify.get('/health', async (request, reply) => {
   };
 });
 
+// Debug endpoint to test authentication
+fastify.get('/api/debug/auth', async (request, reply) => {
+  const authHeader = request.headers.authorization;
+  const token = authHeader?.replace('Bearer ', '');
+  
+  return {
+    success: true,
+    hasAuthHeader: !!authHeader,
+    hasToken: !!token,
+    tokenLength: token?.length || 0,
+    tokenPreview: token ? `${token.substring(0, 20)}...` : null,
+    headers: Object.keys(request.headers)
+  };
+});
+
 // Metrics endpoint
 if (config.metrics.enabled) {
   fastify.get('/metrics', metricsHandler);
@@ -159,10 +174,16 @@ const setupSocketIO = () => {
     const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
     if (!token) {
       logger.warn('Socket.IO authentication failed: No token provided');
+      logger.info('Available auth data:', {
+        authToken: !!socket.handshake.auth.token,
+        authHeader: !!socket.handshake.headers.authorization,
+        allHeaders: Object.keys(socket.handshake.headers)
+      });
       return next(new Error('Authentication required'));
     }
     
     logger.info(`Socket.IO token length: ${token.length}`);
+    logger.info(`Socket.IO token preview: ${token.substring(0, 20)}...`);
     
     import('./services/user-management.js').then(({ default: userManagementService }) => {
       try {

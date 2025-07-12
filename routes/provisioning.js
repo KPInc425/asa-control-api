@@ -880,8 +880,8 @@ export default async function provisioningRoutes(fastify) {
       } else {
         if (type === 'all' || type === 'api') {
           try {
-            // Try multiple API log file names - prioritize the files you actually have
-            const apiLogFiles = ['combined.log', 'error.log', 'nssm-out.log'];
+            // API logs - focus on HTTP requests and API-specific logs
+            const apiLogFiles = ['combined.log', 'error.log'];
             let apiLogContent = '';
             let foundFileName = '';
             
@@ -899,8 +899,15 @@ export default async function provisioningRoutes(fastify) {
             if (!apiLogContent) {
               logs.api = `No API log files found in ${logDir}. Tried: ${apiLogFiles.join(', ')}`;
             } else {
-              // Reverse the order so most recent logs are at the top
-              const linesArray = apiLogContent.split('\n');
+              // Filter for API-specific logs (HTTP requests, auth, etc.)
+              const linesArray = apiLogContent.split('\n').filter(line => {
+                try {
+                  const logEntry = JSON.parse(line);
+                  return logEntry.req || logEntry.msg?.includes('request') || logEntry.msg?.includes('auth');
+                } catch {
+                  return false;
+                }
+              });
               logs.api = `Log file: ${foundFileName}\n\n` + linesArray.slice(-lines).reverse().join('\n');
             }
           } catch (error) {
@@ -908,9 +915,9 @@ export default async function provisioningRoutes(fastify) {
           }
         }
         
-        if (type === 'all' || type === 'service') {
+        if (type === 'all' || type === 'server') {
           try {
-            // Try multiple service log file names - NSSM service logs
+            // Service logs - focus on server management and process info
             const serviceLogFiles = ['nssm-out.log', 'nssm-err.log'];
             let serviceLogContent = '';
             let foundFileName = '';
@@ -927,14 +934,25 @@ export default async function provisioningRoutes(fastify) {
             }
             
             if (!serviceLogContent) {
-              logs.service = `No service log files found in ${logDir}. Tried: ${serviceLogFiles.join(', ')}`;
+              logs.server = `No service log files found in ${logDir}. Tried: ${serviceLogFiles.join(', ')}`;
             } else {
-              // Reverse the order so most recent logs are at the top
-              const linesArray = serviceLogContent.split('\n');
-              logs.service = `Log file: ${foundFileName}\n\n` + linesArray.slice(-lines).reverse().join('\n');
+              // Filter for server management logs (process info, server status, etc.)
+              const linesArray = serviceLogContent.split('\n').filter(line => {
+                try {
+                  const logEntry = JSON.parse(line);
+                  return logEntry.msg?.includes('Found running server') || 
+                         logEntry.msg?.includes('Command line') || 
+                         logEntry.msg?.includes('process') ||
+                         logEntry.msg?.includes('server') ||
+                         logEntry.msg?.includes('Docker not running');
+                } catch {
+                  return false;
+                }
+              });
+              logs.server = `Log file: ${foundFileName}\n\n` + linesArray.slice(-lines).reverse().join('\n');
             }
           } catch (error) {
-            logs.service = `Error reading service logs: ${error.message}`;
+            logs.server = `Error reading service logs: ${error.message}`;
           }
         }
         
