@@ -144,12 +144,40 @@ if ($service) {
     # Use NSSM to remove the service properly
     try {
         & $nssmPath remove ASA-API confirm 2>$null
-        Write-Host "Existing service removed successfully" -ForegroundColor Green
+        Write-Host "Service removal command executed" -ForegroundColor Green
     } catch {
         Write-Host "Failed to remove service with NSSM, trying sc.exe..." -ForegroundColor Yellow
         sc.exe delete ASA-API 2>$null
     }
-    Start-Sleep -Seconds 2
+    
+    # Wait for service to be fully removed
+    Write-Host "Waiting for service removal to complete..." -ForegroundColor Cyan
+    $maxWait = 30
+    $waitCount = 0
+    do {
+        Start-Sleep -Seconds 2
+        $waitCount += 2
+        $service = Get-Service -Name "ASA-API" -ErrorAction SilentlyContinue
+        if ($service) {
+            Write-Host "Service still exists, waiting... ($waitCount/$maxWait seconds)" -ForegroundColor Yellow
+        }
+    } while ($service -and $waitCount -lt $maxWait)
+    
+    if ($service) {
+        Write-Host "Warning: Service may still be marked for deletion. Trying to force removal..." -ForegroundColor Yellow
+        # Try to force restart the service manager
+        try {
+            Restart-Service -Name "DcomLaunch" -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 5
+        } catch {
+            # Ignore errors, just try to continue
+        }
+    } else {
+        Write-Host "Service removed successfully" -ForegroundColor Green
+    }
+    
+    # Additional wait to ensure deletion is complete
+    Start-Sleep -Seconds 3
 }
 
 # Install service using NSSM
@@ -159,15 +187,36 @@ Write-Host "Installing service using NSSM..." -ForegroundColor Cyan
 $nodePath = (Get-Command node.exe).Source
 Write-Host "Node.js path: $nodePath" -ForegroundColor Gray
 
-# Install the service
-try {
-    $result = & $nssmPath install ASA-API $nodePath "server.js"
-    $exitCode = $LASTEXITCODE
-} catch {
-    Write-Host "Error executing NSSM: $($_.Exception.Message)" -ForegroundColor Red
-    $exitCode = 1
-}
-if ($exitCode -eq 0) {
+# Install the service with retry logic
+$maxRetries = 3
+$retryCount = 0
+$installSuccess = $false
+
+do {
+    $retryCount++
+    Write-Host "Installation attempt $retryCount of $maxRetries..." -ForegroundColor Cyan
+    
+    try {
+        $result = & $nssmPath install ASA-API $nodePath "server.js"
+        $exitCode = $LASTEXITCODE
+    } catch {
+        Write-Host "Error executing NSSM: $($_.Exception.Message)" -ForegroundColor Red
+        $exitCode = 1
+    }
+    
+    if ($exitCode -eq 0) {
+        $installSuccess = $true
+        Write-Host "Service installed successfully on attempt $retryCount!" -ForegroundColor Green
+    } else {
+        Write-Host "Installation failed on attempt $retryCount. Error: $result" -ForegroundColor Yellow
+        if ($retryCount -lt $maxRetries) {
+            Write-Host "Waiting 5 seconds before retry..." -ForegroundColor Cyan
+            Start-Sleep -Seconds 5
+        }
+    }
+} while (-not $installSuccess -and $retryCount -lt $maxRetries)
+
+if ($installSuccess) {
     Write-Host "Service installed successfully!" -ForegroundColor Green
     
     # Configure the service
@@ -265,8 +314,9 @@ if ($exitCode -eq 0) {
     Write-Host "NSSM is much more reliable than custom service wrappers!" -ForegroundColor Green
     
 } else {
-    Write-Host "Failed to install service!" -ForegroundColor Red
-    Write-Host "Error: $result" -ForegroundColor Red
+    Write-Host "Failed to install service after $maxRetries attempts!" -ForegroundColor Red
+    Write-Host "This may be due to the service still being marked for deletion." -ForegroundColor Yellow
+    Write-Host "Try running this script again in a few minutes, or restart the computer." -ForegroundColor Yellow
 }
 
 Write-Host ""
