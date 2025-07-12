@@ -556,17 +556,25 @@ const start = async () => {
       cors: {
         origin: process.env.CORS_ORIGIN 
           ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
-          : ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173'],
+          : ['https://ark.ilgaming.xyz', 'http://localhost:4010', 'http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000'],
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
       },
       transports: ['websocket', 'polling'],
       allowEIO3: true,
       pingTimeout: 60000,
-      pingInterval: 25000
+      pingInterval: 25000,
+      connectTimeout: 45000,
+      maxHttpBufferSize: 1e8
     });
     
     logger.info('Socket.IO server created with CORS origins:', io.engine.opts.cors.origin);
+    logger.info('Socket.IO server configuration:', {
+      transports: io.engine.opts.transports,
+      pingTimeout: io.engine.opts.pingTimeout,
+      pingInterval: io.engine.opts.pingInterval,
+      connectTimeout: io.engine.opts.connectTimeout
+    });
 
     // Make Socket.IO instance available to routes and globally
     fastify.io = io;

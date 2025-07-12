@@ -16,10 +16,23 @@ class ArkLogsService {
    */
   async getAvailableLogs(serverName) {
     try {
+      logger.info(`Getting available log files for server: ${serverName}`);
+      
       // First, try to get server info to find the correct path
       let serverInfo = null;
       try {
-        serverInfo = await this.serverManager.getClusterServerInfo(serverName);
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout getting server info')), 10000)
+        );
+        
+        const serverInfoPromise = this.serverManager.getClusterServerInfo(serverName);
+        serverInfo = await Promise.race([serverInfoPromise, timeoutPromise]);
+        
+        logger.info(`Server info retrieved for ${serverName}:`, {
+          hasServerPath: !!serverInfo?.serverPath,
+          serverPath: serverInfo?.serverPath
+        });
       } catch (error) {
         logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
       }
@@ -32,6 +45,8 @@ class ArkLogsService {
         serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
       }
 
+      logger.info(`Using server path for logs: ${serverPath}`);
+
       // Look for logs in the Saved directory structure
       const possibleLogDirs = [
         path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
@@ -43,7 +58,10 @@ class ArkLogsService {
       
       for (const logDir of possibleLogDirs) {
         try {
+          logger.info(`Checking log directory: ${logDir}`);
           const files = await fs.readdir(logDir);
+          logger.info(`Found ${files.length} files in ${logDir}`);
+          
           for (const file of files) {
             if (file.endsWith('.log') || 
                 file.endsWith('.txt') ||
@@ -60,14 +78,17 @@ class ArkLogsService {
                 path: filePath,
                 size: size
               });
+              logger.info(`Added log file: ${file} (${size} bytes)`);
             }
           }
         } catch (error) {
+          logger.warn(`Directory not accessible: ${logDir}`, error.message);
           // Directory doesn't exist or can't be read
           continue;
         }
       }
       
+      logger.info(`Total log files found for ${serverName}: ${logFiles.length}`);
       return logFiles.sort((a, b) => b.size - a.size); // Sort by size, largest first
     } catch (error) {
       logger.error(`Failed to get available logs for server ${serverName}:`, error);
