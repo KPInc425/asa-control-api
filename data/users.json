@@ -1,9 +1,9 @@
 [
   {
-    "id": "09adfb7b-47a2-4631-b648-5cad91ae34b0",
+    "id": "b8291f3c-4c0b-4ca5-a457-1bf0dc229b4d",
     "username": "admin",
     "email": "admin@example.com",
-    "password": "$2a$12$w9y36OmaA9in0c22qNJbEuvfR41EfF4j32vtC0LcjE/lWlPKznNku",
+    "password": "$2a$12$ip1w15NyaheKBb311a8cAe/P4MoLJRdxIMIJpHrQ5xkoSn88gjpiC",
     "role": "admin",
     "permissions": [
       "read",
@@ -23,7 +23,7 @@
       "emailVerified": true,
       "twoFactorEnabled": false,
       "twoFactorSecret": null,
-      "lastPasswordChange": "2025-07-12T02:35:17.713Z",
+      "lastPasswordChange": "2025-07-12T02:41:03.708Z",
       "passwordHistory": [],
       "failedLoginAttempts": 0,
       "lockedUntil": null,
@@ -31,10 +31,10 @@
       "loginHistory": []
     },
     "metadata": {
-      "createdAt": "2025-07-12T02:35:17.713Z",
-      "updatedAt": "2025-07-12T02:35:17.713Z",
+      "createdAt": "2025-07-12T02:41:03.708Z",
+      "updatedAt": "2025-07-12T02:41:03.708Z",
       "createdBy": "system",
-      "lastActivity": "2025-07-12T02:35:17.713Z"
+      "lastActivity": "2025-07-12T02:41:03.708Z"
     }
   }
 ]
