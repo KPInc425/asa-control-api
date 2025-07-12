@@ -13,7 +13,7 @@ import { metricsMiddleware } from './middleware/metrics.js';
 import containerRoutes from './routes/containers.js';
 import rconRoutes from './routes/rcon.js';
 import configRoutes from './routes/configs.js';
-import authRoutes from './routes/auth.js';
+import enhancedAuthRoutes from './routes/enhanced-auth.js';
 import logsRoutes from './routes/logs.js';
 import environmentRoutes from './routes/environment.js';
 import nativeServerRoutes from './routes/native-servers.js';
@@ -119,7 +119,7 @@ if (config.metrics.enabled) {
 await fastify.register(containerRoutes);
 await fastify.register(rconRoutes);
 await fastify.register(configRoutes);
-await fastify.register(authRoutes);
+await fastify.register(enhancedAuthRoutes);
 await fastify.register(logsRoutes);
 await fastify.register(environmentRoutes);
 await fastify.register(nativeServerRoutes);
@@ -151,17 +151,22 @@ const setupSocketIO = () => {
     if (!token) {
       return next(new Error('Authentication required'));
     }
-    import('./services/auth.js').then(({ default: authService }) => {
+    import('./services/user-management.js').then(({ default: userManagementService }) => {
       try {
-        const decoded = authService.verifyToken(token);
-        socket.user = decoded;
-        next();
+        const result = userManagementService.verifyToken(token);
+        if (result.success) {
+          socket.user = result.user;
+          next();
+        } else {
+          logger.warn('Socket.IO authentication failed:', result.message);
+          next(new Error('Invalid token'));
+        }
       } catch (error) {
         logger.warn('Socket.IO authentication failed:', error.message);
         next(new Error('Invalid token'));
       }
     }).catch(error => {
-      logger.error('Error importing auth service:', error);
+      logger.error('Error importing user management service:', error);
       next(new Error('Authentication service error'));
     });
   });

@@ -1,4 +1,5 @@
 import authService from '../services/auth.js';
+import userManagementService from '../services/user-management.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -27,21 +28,35 @@ export async function authenticate(request, reply) {
     logger.info(`Token length: ${token.length} characters`);
     logger.info(`Token preview: ${token.substring(0, 20)}...`);
     
-    const result = await authService.getCurrentUser(token);
-    logger.info(`Auth service result:`, JSON.stringify(result, null, 2));
+    // Verify the token with the user management service
+    const tokenVerification = userManagementService.verifyToken(token);
+    logger.info(`Token verification result:`, JSON.stringify(tokenVerification, null, 2));
     
-    if (!result.success) {
-      logger.warn(`Authentication failed: ${result.message}`);
+    if (!tokenVerification.success) {
+      logger.warn(`Token verification failed: ${tokenVerification.message}`);
       logger.info('=== AUTHENTICATION DEBUG END ===');
       return reply.status(401).send({
         success: false,
-        message: result.message
+        message: tokenVerification.message
       });
     }
 
-    // Attach user to request
-    request.user = result.user;
-    logger.info(`Authentication successful for user: ${result.user.username} (role: ${result.user.role})`);
+    // Get the full user data from the user management service
+    const user = userManagementService.getUserByUsername(tokenVerification.user.username);
+    logger.info(`User lookup result:`, user ? `Found user: ${user.username}` : 'User not found');
+    
+    if (!user) {
+      logger.warn(`User not found in user management service: ${tokenVerification.user.username}`);
+      logger.info('=== AUTHENTICATION DEBUG END ===');
+      return reply.status(401).send({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Attach the full user object to request
+    request.user = user;
+    logger.info(`Authentication successful for user: ${user.username} (role: ${user.role})`);
     logger.info('=== AUTHENTICATION DEBUG END ===');
     
   } catch (error) {
@@ -75,7 +90,7 @@ export function requirePermission(permission) {
       logger.info(`User authenticated: ${request.user.username} (role: ${request.user.role})`);
       logger.info(`User permissions: ${JSON.stringify(request.user.permissions)}`);
 
-      if (!authService.hasPermission(request.user, permission)) {
+      if (!userManagementService.hasPermission(request.user, permission)) {
         logger.warn(`Permission denied: User ${request.user.username} lacks permission ${permission}`);
         logger.info('=== REQUIRE PERMISSION DEBUG END (PERMISSION DENIED) ===');
         return reply.status(403).send({
@@ -163,10 +178,13 @@ export async function optionalAuth(request, reply) {
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      const result = await authService.getCurrentUser(token);
+      const tokenVerification = userManagementService.verifyToken(token);
       
-      if (result.success) {
-        request.user = result.user;
+      if (tokenVerification.success) {
+        const user = userManagementService.getUserByUsername(tokenVerification.user.username);
+        if (user) {
+          request.user = user;
+        }
       }
     }
   } catch (error) {
