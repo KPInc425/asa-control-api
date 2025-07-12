@@ -1,4 +1,4 @@
-# Install ASA API Service using NSSM
+﻿# Install ASA API Service using NSSM
 # NSSM (Non-Sucking Service Manager) is much more reliable for Windows services
 
 # Check if running as Administrator
@@ -225,4 +225,4 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host ""
-Read-Host "Press Enter to exit" 
+Read-Host "Press Enter to exit"
