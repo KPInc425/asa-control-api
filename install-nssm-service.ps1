@@ -41,16 +41,7 @@ Write-Host "Stopping any existing Node.js processes..." -ForegroundColor Cyan
 Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
-# Remove existing service if it exists
-$service = Get-Service -Name "ASA-API" -ErrorAction SilentlyContinue
-if ($service) {
-    Write-Host "Removing existing service..." -ForegroundColor Cyan
-    if ($service.Status -eq "Running") {
-        Stop-Service -Name "ASA-API" -Force
-        Start-Sleep -Seconds 3
-    }
-    sc.exe delete ASA-API | Out-Null
-}
+# Note: Service removal will happen after NSSM is available
 
 # Create directories
 Write-Host "Setting up directories..." -ForegroundColor Cyan
@@ -140,6 +131,25 @@ if (!$nssmPath) {
         Read-Host "Press Enter to exit"
         exit 1
     }
+}
+
+# Remove existing service if it exists (now that NSSM is available)
+$service = Get-Service -Name "ASA-API" -ErrorAction SilentlyContinue
+if ($service) {
+    Write-Host "Removing existing service..." -ForegroundColor Cyan
+    if ($service.Status -eq "Running") {
+        Stop-Service -Name "ASA-API" -Force
+        Start-Sleep -Seconds 3
+    }
+    # Use NSSM to remove the service properly
+    try {
+        & $nssmPath remove ASA-API confirm 2>$null
+        Write-Host "Existing service removed successfully" -ForegroundColor Green
+    } catch {
+        Write-Host "Failed to remove service with NSSM, trying sc.exe..." -ForegroundColor Yellow
+        sc.exe delete ASA-API 2>$null
+    }
+    Start-Sleep -Seconds 2
 }
 
 # Install service using NSSM
