@@ -354,37 +354,62 @@ export default async function provisioningRoutes(fastify) {
     (async () => {
       try {
         addJobProgress(job.id, 'Starting cluster creation...');
-        io.emit('cluster-progress', { jobId: job.id, message: 'Starting cluster creation...' });
-        // Wrap provisioner.createCluster to emit progress
-        const progressCb = (msg) => {
-          addJobProgress(job.id, msg);
+        
+        // Emit progress if Socket.IO is available
+        if (io) {
           io.emit('job-progress', { 
             jobId: job.id, 
             status: 'running',
-            progress: 0, // Will be calculated based on steps
-            message: msg 
+            progress: 0,
+            message: 'Starting cluster creation...' 
           });
+        }
+        
+        // Wrap provisioner.createCluster to emit progress
+        const progressCb = (msg) => {
+          addJobProgress(job.id, msg);
+          if (io) {
+            io.emit('job-progress', { 
+              jobId: job.id, 
+              status: 'running',
+              progress: 0, // Will be calculated based on steps
+              message: msg 
+            });
+          }
         };
+        
         // Patch provisioner to emit progress
         provisioner.emitProgress = progressCb;
+        
+        logger.info(`Starting cluster creation for job ${job.id}: ${clusterConfig.name}`);
         const result = await provisioner.createCluster(clusterConfig, clusterConfig.foreground || false);
+        
         updateJob(job.id, { status: 'completed', result });
-        io.emit('job-progress', { 
-          jobId: job.id, 
-          status: 'completed',
-          progress: 100,
-          message: 'Cluster created successfully!',
-          result 
-        });
+        
+        if (io) {
+          io.emit('job-progress', { 
+            jobId: job.id, 
+            status: 'completed',
+            progress: 100,
+            message: 'Cluster created successfully!',
+            result 
+          });
+        }
+        
+        logger.info(`Cluster creation completed for job ${job.id}: ${clusterConfig.name}`);
       } catch (err) {
+        logger.error(`Cluster creation failed for job ${job.id}:`, err);
         updateJob(job.id, { status: 'failed', error: err.message });
-        io.emit('job-progress', { 
-          jobId: job.id, 
-          status: 'failed',
-          progress: 0,
-          message: `Cluster creation failed: ${err.message}`,
-          error: err.message 
-        });
+        
+        if (io) {
+          io.emit('job-progress', { 
+            jobId: job.id, 
+            status: 'failed',
+            progress: 0,
+            message: `Cluster creation failed: ${err.message}`,
+            error: err.message 
+          });
+        }
       }
     })();
   });

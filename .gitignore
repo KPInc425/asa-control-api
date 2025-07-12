@@ -117,6 +117,15 @@ asa-configs/
 *.lock
 .update.lock
 
+# Runtime data files (user data, sessions, etc.)
+data/
+data/users.json
+data/sessions.json
+
+# ASA runtime configuration files
+.asa-run-mode
+.asa-root-path
+
 # Monitoring data
 prometheus_data/
 grafana_storage/

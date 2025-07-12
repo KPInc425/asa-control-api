@@ -1916,6 +1916,7 @@ ConfigOverridePath=./configs`;
   }
 
   emitProgress(message) {
+    logger.info(`Progress: ${message}`);
     if (typeof this.emitProgress === 'function') {
       this.emitProgress(message);
     }

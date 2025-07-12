@@ -125,6 +125,9 @@ await fastify.register(environmentRoutes);
 await fastify.register(nativeServerRoutes);
 await fastify.register(provisioningRoutes);
 
+// Make Socket.IO instance available to routes after it's created
+fastify.decorate('io', null);
+
 // Initialize static server
 const staticServer = new StaticServer();
 
@@ -526,6 +529,9 @@ const start = async () => {
         credentials: true
       }
     });
+
+    // Make Socket.IO instance available to routes
+    fastify.io = io;
 
     // Setup Socket.IO event handlers
     setupSocketIO();

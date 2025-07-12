@@ -70,25 +70,21 @@ function Create-FirewallRule {
 Write-Host "Creating firewall rules..." -ForegroundColor Yellow
 Write-Host ""
 
-# 1. Allow ASA API service program
-$success1 = Create-FirewallRule -Name "$SERVICE_NAME-Program" -Description "$SERVICE_DESCRIPTION - Allow program" -Direction "In" -Program $NODE_PATH
+# 1. Allow ASA API port (most important)
+$success1 = Create-FirewallRule -Name "$SERVICE_NAME-Port" -Description "$SERVICE_DESCRIPTION - Allow port $API_PORT" -Direction "In" -Protocol "TCP" -LocalPort $API_PORT
 
-# 2. Allow ASA API port
-$success2 = Create-FirewallRule -Name "$SERVICE_NAME-Port" -Description "$SERVICE_DESCRIPTION - Allow port $API_PORT" -Direction "In" -Protocol "TCP" -LocalPort $API_PORT
-
-# 3. Allow ASA API service for all profiles
-$success3 = Create-FirewallRule -Name "$SERVICE_NAME-Service" -Description "$SERVICE_DESCRIPTION - Allow service" -Direction "In" -Program $PROGRAM_PATH
+# 2. Allow Node.js program
+$success2 = Create-FirewallRule -Name "$SERVICE_NAME-Program" -Description "$SERVICE_DESCRIPTION - Allow Node.js program" -Direction "In" -Program $NODE_PATH
 
 Write-Host ""
 Write-Host "=== Firewall Configuration Summary ===" -ForegroundColor Green
 
-if ($success1 -and $success2 -and $success3) {
+if ($success1 -and $success2) {
     Write-Host "✓ All firewall rules created successfully!" -ForegroundColor Green
     Write-Host ""
     Write-Host "Firewall rules created:" -ForegroundColor Yellow
-    Write-Host "  - $SERVICE_NAME-Program: Allows Node.js program" -ForegroundColor White
     Write-Host "  - $SERVICE_NAME-Port: Allows TCP port $API_PORT" -ForegroundColor White
-    Write-Host "  - $SERVICE_NAME-Service: Allows ASA API service" -ForegroundColor White
+    Write-Host "  - $SERVICE_NAME-Program: Allows Node.js program" -ForegroundColor White
     Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
     Write-Host "1. Restart the ASA API service" -ForegroundColor White
