@@ -7,7 +7,7 @@ import logger from '../utils/logger.js';
 import config from '../config/index.js';
 import { requirePermission } from '../middleware/auth.js';
 import { ServerProvisioner } from '../services/server-provisioner.js';
-import { createJob, updateJob, addJobProgress, getJob } from '../services/job-manager.js';
+import { createJob, updateJob, addJobProgress, getJob, getAllJobs } from '../services/job-manager.js';
 
 const execAsync = promisify(exec);
 
@@ -345,7 +345,15 @@ export default async function provisioningRoutes(fastify) {
   }, async (request, reply) => {
     const io = fastify.io;
     const clusterConfig = request.body;
+    
+    logger.info('Creating cluster with config:', { 
+      name: clusterConfig.name, 
+      serverCount: clusterConfig.serverCount,
+      basePort: clusterConfig.basePort 
+    });
+    
     const job = createJob('create-cluster', { clusterName: clusterConfig.name });
+    logger.info(`Created job ${job.id} for cluster creation`);
 
     // Respond immediately with job ID
     reply.send({ success: true, jobId: job.id });
@@ -412,6 +420,14 @@ export default async function provisioningRoutes(fastify) {
         }
       }
     })();
+  });
+
+  // List all jobs
+  fastify.get('/api/provisioning/jobs', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    const jobs = getAllJobs();
+    reply.send({ success: true, jobs });
   });
 
   // Job status endpoint
