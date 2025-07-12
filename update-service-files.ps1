@@ -51,11 +51,12 @@ if ($Backup) {
         New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
         
         # Copy current files to backup
-        Get-ChildItem -Path $ServicePath -Exclude "node_modules", "logs", "backup-*" | ForEach-Object {
-            if ($_.PSIsContainer) {
-                Copy-Item -Path $_.FullName -Destination $backupPath -Recurse -Force
+        $backupItems = Get-ChildItem -Path $ServicePath -Exclude "node_modules", "logs", "backup-*"
+        foreach ($item in $backupItems) {
+            if ($item.PSIsContainer) {
+                Copy-Item -Path $item.FullName -Destination $backupPath -Recurse -Force
             } else {
-                Copy-Item -Path $_.FullName -Destination $backupPath -Force
+                Copy-Item -Path $item.FullName -Destination $backupPath -Force
             }
         }
         
