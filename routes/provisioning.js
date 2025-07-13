@@ -1552,6 +1552,7 @@ async function regenerateAllClusterStartScripts() {
         logger.info(`Regenerated start scripts for cluster ${clusterName}`);
       } catch (error) {
         logger.warn(`Failed to regenerate start scripts for cluster ${clusterName}:`, error.message);
+        logger.error(`Full error details for cluster ${clusterName}:`, error);
       }
     }
   } catch (error) {

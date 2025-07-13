@@ -1039,8 +1039,34 @@ if %ERRORLEVEL% NEQ 0 (
   async createStartScriptInCluster(clusterName, serverPath, serverConfig) {
     try {
       const serverName = serverConfig.name;
+      logger.info(`Creating start script for server: ${serverName} in cluster: ${clusterName}`);
+      logger.info(`Server path: ${serverPath}`);
+      logger.info(`Server config mods: ${JSON.stringify(serverConfig.mods)}`);
+      
+      // Check if server directory exists
+      try {
+        await fs.access(serverPath);
+        logger.info(`Server directory exists: ${serverPath}`);
+      } catch (error) {
+        logger.error(`Server directory does not exist: ${serverPath}`);
+        throw new Error(`Server directory does not exist: ${serverPath}`);
+      }
+      
       const binariesPath = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64');
-      const clusterDataPath = path.join(this.clustersPath, clusterName, 'clusterdata');
+      
+      // Check if binaries directory exists
+      try {
+        await fs.access(binariesPath);
+        logger.info(`Binaries directory exists: ${binariesPath}`);
+      } catch (error) {
+        logger.error(`Binaries directory does not exist: ${binariesPath}`);
+        throw new Error(`Binaries directory does not exist: ${binariesPath}`);
+      }
+      
+      // Use the actual base path from the environment or config
+      const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || path.join(basePath, 'clusters');
+      const clusterDataPath = path.join(clustersPath, clusterName, 'clusterdata');
       
       // Create clusterdata directory for shared cluster data
       await fs.mkdir(clusterDataPath, { recursive: true });
@@ -1077,8 +1103,10 @@ REM Start the ASA server with proper parameters
 echo Server ${serverName} has stopped.
 pause`;
 
-      await fs.writeFile(path.join(serverPath, 'start.bat'), startScript);
-      logger.info(`Start script created for server: ${serverName} in cluster ${clusterName}`);
+      const startScriptPath = path.join(serverPath, 'start.bat');
+      await fs.writeFile(startScriptPath, startScript);
+      logger.info(`Start script created for server: ${serverName} in cluster ${clusterName} at: ${startScriptPath}`);
+      logger.info(`Start script content length: ${startScript.length} characters`);
       this.emitProgress?.(`Start script created for server: ${serverName}`);
     } catch (error) {
       logger.error(`Failed to create start script for ${serverConfig.name} in cluster ${clusterName}:`, error);
