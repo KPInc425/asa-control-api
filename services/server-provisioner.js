@@ -1067,13 +1067,13 @@ if %ERRORLEVEL% NEQ 0 (
       const queryString = queryParams.join('?');
 
       const startScript = `@echo off
-      echo Starting ${serverName}...
+echo Starting ${serverName}...
 
-      REM Start the ASA server with proper parameters
+REM Start the ASA server with proper parameters
       "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?${queryString}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName} -NoBattleEye
 
-      echo Server ${serverName} has stopped.
-      pause`;
+echo Server ${serverName} has stopped.
+pause`;
 
       await fs.writeFile(path.join(serverPath, 'start.bat'), startScript);
       logger.info(`Start script created for server: ${serverName} in cluster ${clusterName}`);

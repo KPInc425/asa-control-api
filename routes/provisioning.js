@@ -899,16 +899,8 @@ export default async function provisioningRoutes(fastify) {
             if (!apiLogContent) {
               logs.api = `No API log files found in ${logDir}. Tried: ${apiLogFiles.join(', ')}`;
             } else {
-              // Show all API logs, but filter out non-JSON lines
-              const linesArray = apiLogContent.split('\n').filter(line => {
-                if (!line.trim()) return false;
-                try {
-                  JSON.parse(line);
-                  return true; // Include all valid JSON lines
-                } catch {
-                  return false; // Exclude non-JSON lines
-                }
-              });
+              // Show all API logs, including non-JSON lines for debugging
+              const linesArray = apiLogContent.split('\n').filter(line => line.trim());
               logs.api = `Log file: ${foundFileName}\n\n` + linesArray.slice(-lines).reverse().join('\n');
             }
           } catch (error) {
