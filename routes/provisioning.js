@@ -652,7 +652,7 @@ export default async function provisioningRoutes(fastify) {
       logger.info('Shared mods configuration updated');
       
       // Regenerate start.bat files for all cluster servers
-      await regenerateAllClusterStartScripts();
+      await regenerateAllClusterStartScripts(provisioner);
       
       return {
         success: true,
@@ -775,7 +775,7 @@ export default async function provisioningRoutes(fastify) {
       logger.info(`Server mods configuration updated for ${serverName}`);
       
       // Regenerate start.bat for this specific server
-      await regenerateServerStartScript(serverName);
+      await regenerateServerStartScript(serverName, provisioner);
       
       return {
         success: true,
@@ -1072,7 +1072,7 @@ export default async function provisioningRoutes(fastify) {
       logger.info('Global config files updated');
       
       // Regenerate start scripts for all servers to apply new configs
-      await regenerateAllClusterStartScripts();
+      await regenerateAllClusterStartScripts(provisioner);
       
       return {
         success: true,
@@ -1165,7 +1165,7 @@ export default async function provisioningRoutes(fastify) {
     preHandler: requirePermission('write')
   }, async (request, reply) => {
     try {
-      await regenerateAllClusterStartScripts();
+      await regenerateAllClusterStartScripts(provisioner);
       
       return {
         success: true,
@@ -1423,7 +1423,7 @@ async function getInstallationStatus() {
 } 
 
 // Helper function to regenerate start.bat for a specific server
-async function regenerateServerStartScript(serverName) {
+async function regenerateServerStartScript(serverName, provisioner) {
   try {
     // Use the actual base path from the environment or config
     const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
@@ -1491,7 +1491,7 @@ async function regenerateServerStartScript(serverName) {
 }
 
 // Helper function to regenerate all cluster start scripts
-async function regenerateAllClusterStartScripts() {
+async function regenerateAllClusterStartScripts(provisioner) {
   try {
     // Use the actual base path from the environment or config
     const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
