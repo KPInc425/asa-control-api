@@ -899,13 +899,14 @@ export default async function provisioningRoutes(fastify) {
             if (!apiLogContent) {
               logs.api = `No API log files found in ${logDir}. Tried: ${apiLogFiles.join(', ')}`;
             } else {
-              // Filter for API-specific logs (HTTP requests, auth, etc.)
+              // Show all API logs, but filter out non-JSON lines
               const linesArray = apiLogContent.split('\n').filter(line => {
+                if (!line.trim()) return false;
                 try {
-                  const logEntry = JSON.parse(line);
-                  return logEntry.req || logEntry.msg?.includes('request') || logEntry.msg?.includes('auth');
+                  JSON.parse(line);
+                  return true; // Include all valid JSON lines
                 } catch {
-                  return false;
+                  return false; // Exclude non-JSON lines
                 }
               });
               logs.api = `Log file: ${foundFileName}\n\n` + linesArray.slice(-lines).reverse().join('\n');
@@ -936,17 +937,14 @@ export default async function provisioningRoutes(fastify) {
             if (!serviceLogContent) {
               logs.server = `No service log files found in ${logDir}. Tried: ${serviceLogFiles.join(', ')}`;
             } else {
-              // Filter for server management logs (process info, server status, etc.)
+              // Show all service logs, but filter out non-JSON lines
               const linesArray = serviceLogContent.split('\n').filter(line => {
+                if (!line.trim()) return false;
                 try {
-                  const logEntry = JSON.parse(line);
-                  return logEntry.msg?.includes('Found running server') || 
-                         logEntry.msg?.includes('Command line') || 
-                         logEntry.msg?.includes('process') ||
-                         logEntry.msg?.includes('server') ||
-                         logEntry.msg?.includes('Docker not running');
+                  JSON.parse(line);
+                  return true; // Include all valid JSON lines
                 } catch {
-                  return false;
+                  return false; // Exclude non-JSON lines
                 }
               });
               logs.server = `Log file: ${foundFileName}\n\n` + linesArray.slice(-lines).reverse().join('\n');
