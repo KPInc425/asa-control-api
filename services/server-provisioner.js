@@ -2094,9 +2094,19 @@ ConfigOverridePath=./configs`;
 
   emitProgress(message) {
     logger.info(`Progress: ${message}`);
-    if (typeof this.emitProgress === 'function') {
-      this.emitProgress(message);
+    // If a progress callback was set, call it (but avoid infinite recursion)
+    if (this._progressCallback && typeof this._progressCallback === 'function') {
+      try {
+        this._progressCallback(message);
+      } catch (error) {
+        logger.warn('Progress callback failed:', error.message);
+      }
     }
+  }
+
+  // Method to set progress callback without overriding the emitProgress method
+  setProgressCallback(callback) {
+    this._progressCallback = callback;
   }
 }
 

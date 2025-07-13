@@ -513,8 +513,8 @@ export default async function provisioningRoutes(fastify) {
           }
         };
         
-        // Patch provisioner to emit progress
-        provisioner.emitProgress = progressCb;
+        // Set progress callback
+        provisioner.setProgressCallback(progressCb);
         
         logger.info(`Starting cluster creation for job ${job.id}: ${clusterConfig.name}`);
         const result = await provisioner.createCluster(clusterConfig, clusterConfig.foreground || false);
