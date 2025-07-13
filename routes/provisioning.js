@@ -594,7 +594,8 @@ export default async function provisioningRoutes(fastify) {
     preHandler: requirePermission('read')
   }, async (request, reply) => {
     try {
-      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+      const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+      const sharedModsPath = path.join(basePath, 'shared-mods.json');
       
       try {
         const sharedModsData = await fs.readFile(sharedModsPath, 'utf8');
@@ -638,7 +639,8 @@ export default async function provisioningRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { modList } = request.body;
-      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+      const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+      const sharedModsPath = path.join(basePath, 'shared-mods.json');
       
       const sharedModsData = {
         modList: modList || [],
@@ -680,7 +682,8 @@ export default async function provisioningRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { serverName } = request.params;
-      const serverModsPath = path.join(config.server.native.basePath, 'server-mods', `${serverName}.json`);
+      const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+      const serverModsPath = path.join(basePath, 'server-mods', `${serverName}.json`);
       
       try {
         const serverModsData = await fs.readFile(serverModsPath, 'utf8');
@@ -754,7 +757,8 @@ export default async function provisioningRoutes(fastify) {
       const { serverName } = request.params;
       const { additionalMods, excludeSharedMods } = request.body;
       
-      const serverModsDir = path.join(config.server.native.basePath, 'server-mods');
+      const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+      const serverModsDir = path.join(basePath, 'server-mods');
       const serverModsPath = path.join(serverModsDir, `${serverName}.json`);
       
       // Ensure directory exists
@@ -791,8 +795,9 @@ export default async function provisioningRoutes(fastify) {
     preHandler: requirePermission('read')
   }, async (request, reply) => {
     try {
-      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
-      const serverModsDir = path.join(config.server.native.basePath, 'server-mods');
+      const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+      const sharedModsPath = path.join(basePath, 'shared-mods.json');
+      const serverModsDir = path.join(basePath, 'server-mods');
       
       let sharedMods = [];
       let serverMods = {};
@@ -1420,7 +1425,11 @@ async function getInstallationStatus() {
 // Helper function to regenerate start.bat for a specific server
 async function regenerateServerStartScript(serverName) {
   try {
-    const clustersPath = config.server.native.clustersPath || path.join(config.server.native.basePath, 'clusters');
+    // Use the actual base path from the environment or config
+    const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+    const clustersPath = process.env.NATIVE_CLUSTERS_PATH || path.join(basePath, 'clusters');
+    
+    logger.info(`Regenerating start script for server ${serverName} in clusters path: ${clustersPath}`);
     
     // Find which cluster contains this server
     const clusterDirs = await fs.readdir(clustersPath);
@@ -1445,8 +1454,25 @@ async function regenerateServerStartScript(serverName) {
           // Update cluster config file
           await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
           
-          // Regenerate start.bat file
+          // Update server-config.json file
           const serverPath = path.join(clusterPath, serverName);
+          const serverConfigPath = path.join(serverPath, 'server-config.json');
+          
+          try {
+            const existingServerConfig = await fs.readFile(serverConfigPath, 'utf8');
+            const serverConfigData = JSON.parse(existingServerConfig);
+            
+            // Update mods in server-config.json
+            serverConfigData.mods = finalMods;
+            serverConfigData.updatedAt = new Date().toISOString();
+            
+            await fs.writeFile(serverConfigPath, JSON.stringify(serverConfigData, null, 2));
+            logger.info(`Updated server-config.json for ${serverName} with mods: ${finalMods.join(', ')}`);
+          } catch (configError) {
+            logger.warn(`Could not update server-config.json for ${serverName}:`, configError.message);
+          }
+          
+          // Regenerate start.bat file
           await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
           
           logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterName}`);
@@ -1467,10 +1493,19 @@ async function regenerateServerStartScript(serverName) {
 // Helper function to regenerate all cluster start scripts
 async function regenerateAllClusterStartScripts() {
   try {
-    const clustersPath = config.server.native.clustersPath || path.join(config.server.native.basePath, 'clusters');
+    // Use the actual base path from the environment or config
+    const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+    const clustersPath = process.env.NATIVE_CLUSTERS_PATH || path.join(basePath, 'clusters');
     
-    if (!(await fs.access(clustersPath).catch(() => false))) {
-      logger.info('No clusters directory found, skipping start script regeneration');
+    logger.info(`Checking for clusters directory at: ${clustersPath}`);
+    logger.info(`Base path: ${basePath}`);
+    logger.info(`Environment NATIVE_BASE_PATH: ${process.env.NATIVE_BASE_PATH}`);
+    
+    try {
+      await fs.access(clustersPath);
+      logger.info(`Clusters directory found at: ${clustersPath}`);
+    } catch (error) {
+      logger.info(`No clusters directory found at: ${clustersPath}, skipping start script regeneration`);
       return;
     }
     
@@ -1490,6 +1525,24 @@ async function regenerateAllClusterStartScripts() {
           serverConfig.mods = finalMods;
           
           const serverPath = path.join(clusterPath, serverConfig.name);
+          
+          // Update server-config.json file
+          const serverConfigPath = path.join(serverPath, 'server-config.json');
+          
+          try {
+            const existingServerConfig = await fs.readFile(serverConfigPath, 'utf8');
+            const serverConfigData = JSON.parse(existingServerConfig);
+            
+            // Update mods in server-config.json
+            serverConfigData.mods = finalMods;
+            serverConfigData.updatedAt = new Date().toISOString();
+            
+            await fs.writeFile(serverConfigPath, JSON.stringify(serverConfigData, null, 2));
+            logger.info(`Updated server-config.json for ${serverConfig.name} with mods: ${finalMods.join(', ')}`);
+          } catch (configError) {
+            logger.warn(`Could not update server-config.json for ${serverConfig.name}:`, configError.message);
+          }
+          
           await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
         }
         
@@ -1509,8 +1562,11 @@ async function regenerateAllClusterStartScripts() {
 // Helper function to get final mod list for a server (shared + server-specific)
 async function getFinalModListForServer(serverName) {
   try {
+    // Use the actual base path from the environment or config
+    const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+    
     // Get shared mods
-    const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
+    const sharedModsPath = path.join(basePath, 'shared-mods.json');
     let sharedMods = [];
     
     try {
@@ -1522,7 +1578,7 @@ async function getFinalModListForServer(serverName) {
     }
     
     // Get server-specific mods
-    const serverModsPath = path.join(config.server.native.basePath, 'server-mods', `${serverName}.json`);
+    const serverModsPath = path.join(basePath, 'server-mods', `${serverName}.json`);
     let serverMods = [];
     let excludeSharedMods = false;
     

@@ -577,7 +577,8 @@ export class ServerProvisioner {
         binariesPath: path.join(serverPath, 'binaries'),
         configsPath: configsPath,
         savesPath: path.join(serverPath, 'saves'),
-        logsPath: path.join(serverPath, 'logs')
+        logsPath: path.join(serverPath, 'logs'),
+        mods: serverConfig.mods || []
       };
       
       await fs.writeFile(
@@ -1016,7 +1017,8 @@ if %ERRORLEVEL% NEQ 0 (
         savesPath: path.join(serverPath, 'ShooterGame', 'Saved', 'SaveGames'),
         logsPath: path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
         gameUserSettings: serverConfig.gameUserSettings,
-        gameIni: serverConfig.gameIni
+        gameIni: serverConfig.gameIni,
+        mods: serverConfig.mods || []
       };
       
       await fs.writeFile(

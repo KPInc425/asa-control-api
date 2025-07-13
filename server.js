@@ -286,10 +286,25 @@ const setupSocketIO = () => {
         });
         
         logStream.on('data', (chunk) => {
-          socket.emit('ark-log-data', {
-            data: chunk.toString('utf8'),
-            timestamp: new Date().toISOString()
-          });
+          const logData = chunk.toString('utf8');
+          // Try to parse as JSON log entry
+          try {
+            const logEntry = JSON.parse(logData);
+            socket.emit('ark-log-data', {
+              timestamp: logEntry.timestamp || new Date().toISOString(),
+              level: logEntry.level?.toString() || 'info',
+              message: logEntry.message || logEntry.msg || logData,
+              container: serverName
+            });
+          } catch {
+            // Fall back to plain text
+            socket.emit('ark-log-data', {
+              timestamp: new Date().toISOString(),
+              level: 'info',
+              message: logData,
+              container: serverName
+            });
+          }
         });
         
         logStream.on('end', () => {
@@ -586,7 +601,8 @@ const start = async () => {
       pingTimeout: 60000,
       pingInterval: 25000,
       connectTimeout: 45000,
-      maxHttpBufferSize: 1e8
+      maxHttpBufferSize: 1e8,
+      path: '/socket.io/'
     });
     
     logger.info('Socket.IO server created with CORS origins:', io.engine.opts.cors.origin);
