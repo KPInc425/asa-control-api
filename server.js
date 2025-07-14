@@ -1,7 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
-import websocket from '@fastify/websocket';
 import { Server as SocketIOServer } from 'socket.io';
 import config from './config/index.js';
 import logger from './utils/logger.js';
@@ -78,7 +77,7 @@ await fastify.register(rateLimit, {
   }
 });
 
-await fastify.register(websocket);
+// Removed websocket plugin to avoid conflicts with Socket.IO
 
 // Global error handler
 fastify.setErrorHandler(function (error, request, reply) {
@@ -452,110 +451,7 @@ const setupSocketIO = () => {
   });
 };
 
-// WebSocket endpoint for real-time logs
-fastify.get('/api/logs/:container', { websocket: true }, (connection, req) => {
-  const { container } = req.params;
-  
-  logger.info(`WebSocket connection established for container: ${container}`);
-  
-  // Import docker service here to avoid circular dependencies
-  import('./services/docker.js').then(({ default: dockerService }) => {
-    const containerObj = dockerService.docker.getContainer(container);
-    
-    containerObj.logs({
-      stdout: true,
-      stderr: true,
-      tail: 100,
-      follow: true
-    }).then(logStream => {
-      logStream.on('data', (chunk) => {
-        connection.socket.send(JSON.stringify({
-          type: 'log',
-          data: chunk.toString('utf8'),
-          timestamp: new Date().toISOString()
-        }));
-      });
-      
-      logStream.on('end', () => {
-        connection.socket.send(JSON.stringify({
-          type: 'end',
-          timestamp: new Date().toISOString()
-        }));
-      });
-      
-      logStream.on('error', (error) => {
-        logger.error(`Log stream error for container ${container}:`, error);
-        connection.socket.send(JSON.stringify({
-          type: 'error',
-          error: error.message,
-          timestamp: new Date().toISOString()
-        }));
-      });
-      
-      // Handle WebSocket close
-      connection.socket.on('close', () => {
-        logger.info(`WebSocket connection closed for container: ${container}`);
-        logStream.destroy();
-      });
-    }).catch(error => {
-      logger.error(`Failed to get logs for container ${container}:`, error);
-      connection.socket.send(JSON.stringify({
-        type: 'error',
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }));
-    });
-  });
-});
-
-// WebSocket endpoint for real-time container events
-fastify.get('/api/events', { websocket: true }, (connection, req) => {
-  logger.info('WebSocket connection established for container events');
-  
-  // Import docker service here to avoid circular dependencies
-  import('./services/docker.js').then(({ default: dockerService }) => {
-    const eventStream = dockerService.docker.getEvents({
-      filters: {
-        type: ['container']
-      }
-    });
-    
-    eventStream.on('data', (chunk) => {
-      try {
-        const event = JSON.parse(chunk.toString());
-        connection.socket.send(JSON.stringify({
-          type: 'event',
-          data: event,
-          timestamp: new Date().toISOString()
-        }));
-      } catch (error) {
-        logger.warn('Failed to parse Docker event:', error);
-      }
-    });
-    
-    eventStream.on('end', () => {
-      connection.socket.send(JSON.stringify({
-        type: 'end',
-        timestamp: new Date().toISOString()
-      }));
-    });
-    
-    eventStream.on('error', (error) => {
-      logger.error('Docker event stream error:', error);
-      connection.socket.send(JSON.stringify({
-        type: 'error',
-        error: error.message,
-        timestamp: new Date().toISOString()
-      }));
-    });
-    
-    // Handle WebSocket close
-    connection.socket.on('close', () => {
-      logger.info('WebSocket connection closed for container events');
-      eventStream.destroy();
-    });
-  });
-});
+// WebSocket endpoints removed - using Socket.IO instead for real-time communication
 
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
