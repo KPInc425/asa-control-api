@@ -390,7 +390,7 @@ export class ServerProvisioner {
       await fs.writeFile(scriptPath, updateScript);
       
       const command = `"${this.steamCmdExe}" +runscript "${scriptPath}"`;
-      await execAsync(command);
+      await execAsync(command, { timeout: 900000 }); // 15 minute timeout
       
       // Clean up script
       await fs.unlink(scriptPath);
@@ -839,7 +839,7 @@ pause`;
         // Run the .bat file in foreground
         await this.execForeground(`cmd /c "${batPath}"`, {
           cwd: path.dirname(batPath),
-          timeout: 300000 // 5 minute timeout
+          timeout: 900000 // 15 minute timeout (increased from 5 minutes)
         });
         
         // Clean up .bat file
@@ -878,7 +878,7 @@ if %ERRORLEVEL% NEQ 0 (
         try {
           const { stdout, stderr } = await execAsync(`cmd /c "${batPath}"`, {
             cwd: path.dirname(batPath),
-            timeout: 300000 // 5 minute timeout
+            timeout: 900000 // 15 minute timeout (increased from 5 minutes)
           });
           
           if (stderr) {
@@ -907,6 +907,10 @@ if %ERRORLEVEL% NEQ 0 (
           if (exists) {
             logger.info(`ASA server executable found despite error, continuing: ${arkServerExe}`);
           } else {
+            // If it's a timeout error, provide a more helpful message
+            if (execError.code === 'ETIMEDOUT' || execError.message.includes('timeout')) {
+              throw new Error(`SteamCMD update timed out for ${serverName}. The update may still be running in the background. Please check the server files or try again later.`);
+            }
             throw execError;
           }
         } finally {
@@ -2271,7 +2275,7 @@ ConfigOverridePath=./configs`;
    */
   async updateServerWithConfig(serverName, options = {}) {
     try {
-      const { force = false, updateConfig = true } = options;
+      const { force = false, updateConfig = true, background = false } = options;
       
       // Check if update is needed (unless forced)
       if (!force) {
@@ -2285,9 +2289,56 @@ ConfigOverridePath=./configs`;
         }
       }
 
-      logger.info(`Updating server: ${serverName}`);
+      logger.info(`Updating server: ${serverName} (background: ${background})`);
       this.emitProgress?.(`Starting update for server: ${serverName}`);
 
+      if (background) {
+        // Start background update
+        this.updateServerInBackground(serverName, { force, updateConfig });
+        return {
+          success: true,
+          message: `Update started for server: ${serverName}. Progress will be tracked in the background.`,
+          background: true
+        };
+      } else {
+        // Perform the actual update synchronously
+        const result = await this.updateServerBinaries(serverName);
+        
+        // Update the last update timestamp if successful
+        if (result.success && updateConfig) {
+          try {
+            await this.updateServerUpdateConfig(serverName, {
+              lastUpdate: new Date().toISOString()
+            });
+            logger.info(`Updated last update timestamp for ${serverName}`);
+          } catch (configError) {
+            logger.warn(`Failed to update timestamp for ${serverName}:`, configError.message);
+          }
+        }
+
+        this.emitProgress?.(`Update completed for server: ${serverName}`);
+        return {
+          ...result,
+          serverName,
+          updatedAt: new Date().toISOString()
+        };
+      }
+    } catch (error) {
+      logger.error(`Failed to update server ${serverName}:`, error);
+      this.emitProgress?.(`Update failed for server: ${serverName} - ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update server in background (non-blocking)
+   */
+  async updateServerInBackground(serverName, options = {}) {
+    const { force = false, updateConfig = true } = options;
+    
+    try {
+      this.emitProgress?.(`Starting background update for server: ${serverName}`);
+      
       // Perform the actual update
       const result = await this.updateServerBinaries(serverName);
       
@@ -2303,16 +2354,11 @@ ConfigOverridePath=./configs`;
         }
       }
 
-      this.emitProgress?.(`Update completed for server: ${serverName}`);
-      return {
-        ...result,
-        serverName,
-        updatedAt: new Date().toISOString()
-      };
+      this.emitProgress?.(`Background update completed for server: ${serverName}`);
+      logger.info(`Background update completed for server: ${serverName}`);
     } catch (error) {
-      logger.error(`Failed to update server ${serverName}:`, error);
-      this.emitProgress?.(`Update failed for server: ${serverName} - ${error.message}`);
-      throw error;
+      logger.error(`Background update failed for server ${serverName}:`, error);
+      this.emitProgress?.(`Background update failed for server: ${serverName} - ${error.message}`);
     }
   }
 

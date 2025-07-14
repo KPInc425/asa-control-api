@@ -1484,7 +1484,7 @@ export default async function provisioningRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { serverName } = request.params;
-      const { force = false, updateConfig = true } = request.body;
+      const { force = false, updateConfig = true, background = false } = request.body;
       
       if (!serverName) {
         return reply.status(400).send({
@@ -1493,7 +1493,7 @@ export default async function provisioningRoutes(fastify) {
         });
       }
 
-      const result = await provisioner.updateServerWithConfig(serverName, { force, updateConfig });
+      const result = await provisioner.updateServerWithConfig(serverName, { force, updateConfig, background });
       
       return {
         success: true,
@@ -1502,9 +1502,20 @@ export default async function provisioningRoutes(fastify) {
       };
     } catch (error) {
       logger.error('Failed to update server with config:', error);
+      
+      // Provide more specific error messages for timeout issues
+      let errorMessage = 'Failed to update server';
+      if (error.message.includes('timeout')) {
+        errorMessage = 'Update timed out. SteamCMD updates can take a long time. The update may still be running in the background.';
+      } else if (error.message.includes('ETIMEDOUT')) {
+        errorMessage = 'Update timed out. Please check if the update is still running in the background or try again later.';
+      } else {
+        errorMessage = error.message;
+      }
+      
       return reply.status(500).send({
         success: false,
-        message: 'Failed to update server'
+        message: errorMessage
       });
     }
   });
