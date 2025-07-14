@@ -1165,17 +1165,39 @@ export default async function provisioningRoutes(fastify) {
     preHandler: requirePermission('write')
   }, async (request, reply) => {
     try {
-      await regenerateAllClusterStartScripts(provisioner);
+      const results = await regenerateAllClusterStartScripts(provisioner);
+      
+      // Check if there were any failures
+      const failedServers = results.filter(r => !r.success);
+      const successfulServers = results.filter(r => r.success);
+      
+      if (failedServers.length > 0) {
+        const errorMessage = `Start script regeneration completed with errors. ${successfulServers.length} servers updated successfully, ${failedServers.length} failed.`;
+        return reply.status(207).send({
+          success: false,
+          message: errorMessage,
+          details: {
+            successful: successfulServers,
+            failed: failedServers,
+            totalProcessed: results.length
+          }
+        });
+      }
       
       return {
         success: true,
-        message: 'All start scripts have been regenerated with current mod configurations'
+        message: `All start scripts have been regenerated successfully for ${results.length} servers`,
+        details: {
+          successful: successfulServers,
+          totalProcessed: results.length
+        }
       };
     } catch (error) {
       logger.error('Failed to regenerate start scripts:', error);
       return reply.status(500).send({
         success: false,
-        message: 'Failed to regenerate start scripts'
+        message: `Failed to regenerate start scripts: ${error.message}`,
+        error: error.message
       });
     }
   });
@@ -1298,6 +1320,264 @@ export default async function provisioningRoutes(fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to get system requirements'
+      });
+    }
+  });
+
+  // Get start script content for a server
+  fastify.get('/api/provisioning/start-script/:serverName', {
+    preHandler: requirePermission('read'),
+    schema: {
+      params: {
+        type: 'object',
+        required: ['serverName'],
+        properties: {
+          serverName: { type: 'string' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || path.join(basePath, 'clusters');
+      
+      // Find which cluster contains this server
+      const clusterDirs = await fs.readdir(clustersPath);
+      let startScriptPath = null;
+      let clusterName = null;
+      
+      for (const cluster of clusterDirs) {
+        const clusterPath = path.join(clustersPath, cluster);
+        const serverPath = path.join(clusterPath, serverName);
+        const scriptPath = path.join(serverPath, 'start.bat');
+        
+        try {
+          await fs.access(scriptPath);
+          startScriptPath = scriptPath;
+          clusterName = cluster;
+          break;
+        } catch {
+          // Continue to next cluster
+        }
+      }
+      
+      if (!startScriptPath) {
+        return reply.status(404).send({
+          success: false,
+          message: `Start script not found for server: ${serverName}`
+        });
+      }
+      
+      // Read the start script content
+      const scriptContent = await fs.readFile(startScriptPath, 'utf8');
+      
+      return {
+        success: true,
+        serverName,
+        clusterName,
+        scriptPath: startScriptPath,
+        content: scriptContent,
+        lastModified: (await fs.stat(startScriptPath)).mtime.toISOString()
+      };
+    } catch (error) {
+      logger.error('Failed to get start script:', error);
+      return reply.status(500).send({
+        success: false,
+        message: `Failed to get start script: ${error.message}`
+      });
+    }
+  });
+
+  // Get server update configuration
+  fastify.get('/api/provisioning/servers/:serverName/update-config', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      
+      if (!serverName) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server name is required'
+        });
+      }
+
+      const config = await provisioner.getServerUpdateConfig(serverName);
+      
+      return {
+        success: true,
+        data: config
+      };
+    } catch (error) {
+      logger.error('Failed to get server update config:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get server update configuration'
+      });
+    }
+  });
+
+  // Update server update configuration
+  fastify.put('/api/provisioning/servers/:serverName/update-config', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const updateConfig = request.body;
+      
+      if (!serverName) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server name is required'
+        });
+      }
+
+      const result = await provisioner.updateServerUpdateConfig(serverName, updateConfig);
+      
+      return {
+        success: true,
+        message: 'Update configuration updated successfully',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to update server update config:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update server update configuration'
+      });
+    }
+  });
+
+  // Check server update status
+  fastify.get('/api/provisioning/servers/:serverName/update-status', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      
+      if (!serverName) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server name is required'
+        });
+      }
+
+      const status = await provisioner.checkServerUpdateStatus(serverName);
+      
+      return {
+        success: true,
+        data: status
+      };
+    } catch (error) {
+      logger.error('Failed to check server update status:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to check server update status'
+      });
+    }
+  });
+
+  // Update server with configuration
+  fastify.post('/api/provisioning/servers/:serverName/update-with-config', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { force = false, updateConfig = true } = request.body;
+      
+      if (!serverName) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server name is required'
+        });
+      }
+
+      const result = await provisioner.updateServerWithConfig(serverName, { force, updateConfig });
+      
+      return {
+        success: true,
+        message: result.message,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to update server with config:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update server'
+      });
+    }
+  });
+
+  // Update all servers with configuration
+  fastify.post('/api/provisioning/update-all-servers-with-config', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { force = false, updateConfig = true, skipDisabled = true } = request.body;
+      
+      const result = await provisioner.updateAllServersWithConfig({ 
+        force, 
+        updateConfig, 
+        skipDisabled 
+      });
+      
+      return {
+        success: true,
+        message: result.message,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to update all servers with config:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update all servers'
+      });
+    }
+  });
+
+  // Get update status for all servers
+  fastify.get('/api/provisioning/update-status-all', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const clusters = await provisioner.listClusters();
+      const results = [];
+      
+      for (const cluster of clusters) {
+        for (const server of cluster.config.servers || []) {
+          try {
+            const status = await provisioner.checkServerUpdateStatus(server.name);
+            const config = await provisioner.getServerUpdateConfig(server.name);
+            
+            results.push({
+              serverName: server.name,
+              clusterName: cluster.name,
+              status,
+              config
+            });
+          } catch (error) {
+            logger.warn(`Failed to get update status for ${server.name}:`, error.message);
+            results.push({
+              serverName: server.name,
+              clusterName: cluster.name,
+              status: { needsUpdate: false, reason: 'Error checking status' },
+              config: null,
+              error: error.message
+            });
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        data: results
+      };
+    } catch (error) {
+      logger.error('Failed to get update status for all servers:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get update status for all servers'
       });
     }
   });
@@ -1492,6 +1772,8 @@ async function regenerateServerStartScript(serverName, provisioner) {
 
 // Helper function to regenerate all cluster start scripts
 async function regenerateAllClusterStartScripts(provisioner) {
+  const results = [];
+  
   try {
     // Use the actual base path from the environment or config
     const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
@@ -1506,7 +1788,7 @@ async function regenerateAllClusterStartScripts(provisioner) {
       logger.info(`Clusters directory found at: ${clustersPath}`);
     } catch (error) {
       logger.info(`No clusters directory found at: ${clustersPath}, skipping start script regeneration`);
-      return;
+      return results;
     }
     
     const clusterDirs = await fs.readdir(clustersPath);
@@ -1521,43 +1803,81 @@ async function regenerateAllClusterStartScripts(provisioner) {
         
         // Update each server's mods and regenerate start.bat
         for (const serverConfig of clusterConfig.servers || []) {
-          const finalMods = await getFinalModListForServer(serverConfig.name);
-          serverConfig.mods = finalMods;
-          
-          const serverPath = path.join(clusterPath, serverConfig.name);
-          
-          // Update server-config.json file
-          const serverConfigPath = path.join(serverPath, 'server-config.json');
+          const serverResult = {
+            serverName: serverConfig.name,
+            clusterName: clusterName,
+            success: false,
+            message: '',
+            error: null
+          };
           
           try {
-            const existingServerConfig = await fs.readFile(serverConfigPath, 'utf8');
-            const serverConfigData = JSON.parse(existingServerConfig);
+            const finalMods = await getFinalModListForServer(serverConfig.name);
+            serverConfig.mods = finalMods;
             
-            // Update mods in server-config.json
-            serverConfigData.mods = finalMods;
-            serverConfigData.updatedAt = new Date().toISOString();
+            const serverPath = path.join(clusterPath, serverConfig.name);
             
-            await fs.writeFile(serverConfigPath, JSON.stringify(serverConfigData, null, 2));
-            logger.info(`Updated server-config.json for ${serverConfig.name} with mods: ${finalMods.join(', ')}`);
-          } catch (configError) {
-            logger.warn(`Could not update server-config.json for ${serverConfig.name}:`, configError.message);
+            // Update server-config.json file
+            const serverConfigPath = path.join(serverPath, 'server-config.json');
+            
+            try {
+              const existingServerConfig = await fs.readFile(serverConfigPath, 'utf8');
+              const serverConfigData = JSON.parse(existingServerConfig);
+              
+              // Update mods in server-config.json
+              serverConfigData.mods = finalMods;
+              serverConfigData.updatedAt = new Date().toISOString();
+              
+              await fs.writeFile(serverConfigPath, JSON.stringify(serverConfigData, null, 2));
+              logger.info(`Updated server-config.json for ${serverConfig.name} with mods: ${finalMods.join(', ')}`);
+            } catch (configError) {
+              logger.warn(`Could not update server-config.json for ${serverConfig.name}:`, configError.message);
+            }
+            
+            await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
+            
+            serverResult.success = true;
+            serverResult.message = `Start script regenerated successfully with mods: ${finalMods.join(', ')}`;
+            logger.info(`Regenerated start script for server ${serverConfig.name} in cluster ${clusterName}`);
+          } catch (serverError) {
+            serverResult.error = serverError.message;
+            serverResult.message = `Failed to regenerate start script: ${serverError.message}`;
+            logger.error(`Failed to regenerate start script for server ${serverConfig.name}:`, serverError);
           }
           
-          await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
+          results.push(serverResult);
         }
         
         // Update cluster config file
         await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
         
-        logger.info(`Regenerated start scripts for cluster ${clusterName}`);
+        logger.info(`Completed processing cluster ${clusterName}`);
       } catch (error) {
-        logger.warn(`Failed to regenerate start scripts for cluster ${clusterName}:`, error.message);
+        logger.warn(`Failed to process cluster ${clusterName}:`, error.message);
         logger.error(`Full error details for cluster ${clusterName}:`, error);
+        
+        // Add error result for the cluster
+        results.push({
+          serverName: `Cluster: ${clusterName}`,
+          clusterName: clusterName,
+          success: false,
+          message: `Failed to process cluster: ${error.message}`,
+          error: error.message
+        });
       }
     }
   } catch (error) {
     logger.error('Failed to regenerate all cluster start scripts:', error);
+    results.push({
+      serverName: 'System',
+      clusterName: 'N/A',
+      success: false,
+      message: `System error: ${error.message}`,
+      error: error.message
+    });
   }
+  
+  return results;
 }
 
 // Helper function to get final mod list for a server (shared + server-specific)

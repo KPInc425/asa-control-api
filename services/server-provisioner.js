@@ -2108,6 +2108,303 @@ ConfigOverridePath=./configs`;
   setProgressCallback(callback) {
     this._progressCallback = callback;
   }
+
+  /**
+   * Get update configuration for a server
+   */
+  async getServerUpdateConfig(serverName) {
+    try {
+      // Check if it's a cluster server
+      const clusters = await this.listClusters();
+      for (const cluster of clusters) {
+        const server = cluster.config.servers?.find(s => s.name === serverName);
+        if (server) {
+          return {
+            serverName,
+            clusterName: cluster.name,
+            updateOnStart: cluster.config.updateOnStart !== false, // Default to true
+            lastUpdate: server.lastUpdate || null,
+            updateEnabled: cluster.config.updateEnabled !== false, // Default to true
+            autoUpdate: cluster.config.autoUpdate || false,
+            updateInterval: cluster.config.updateInterval || 24, // hours
+            updateSchedule: cluster.config.updateSchedule || null
+          };
+        }
+      }
+
+      // Check standalone servers
+      const servers = await this.listServers();
+      const server = servers.find(s => s.name === serverName);
+      if (server) {
+        return {
+          serverName,
+          clusterName: null,
+          updateOnStart: server.updateOnStart !== false,
+          lastUpdate: server.lastUpdate || null,
+          updateEnabled: server.updateEnabled !== false,
+          autoUpdate: server.autoUpdate || false,
+          updateInterval: server.updateInterval || 24,
+          updateSchedule: server.updateSchedule || null
+        };
+      }
+
+      throw new Error(`Server ${serverName} not found`);
+    } catch (error) {
+      logger.error(`Failed to get update config for ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update server configuration with update settings
+   */
+  async updateServerUpdateConfig(serverName, updateConfig) {
+    try {
+      // Check if it's a cluster server
+      const clusters = await this.listClusters();
+      for (const cluster of clusters) {
+        const serverIndex = cluster.config.servers?.findIndex(s => s.name === serverName);
+        if (serverIndex !== -1 && serverIndex !== undefined) {
+          // Update cluster config
+          const clusterPath = path.join(this.clustersPath, cluster.name);
+          const clusterConfigPath = path.join(clusterPath, 'cluster.json');
+          
+          // Update cluster-level settings
+          if (updateConfig.updateOnStart !== undefined) {
+            cluster.config.updateOnStart = updateConfig.updateOnStart;
+          }
+          if (updateConfig.updateEnabled !== undefined) {
+            cluster.config.updateEnabled = updateConfig.updateEnabled;
+          }
+          if (updateConfig.autoUpdate !== undefined) {
+            cluster.config.autoUpdate = updateConfig.autoUpdate;
+          }
+          if (updateConfig.updateInterval !== undefined) {
+            cluster.config.updateInterval = updateConfig.updateInterval;
+          }
+          if (updateConfig.updateSchedule !== undefined) {
+            cluster.config.updateSchedule = updateConfig.updateSchedule;
+          }
+
+          // Update server-level settings
+          cluster.config.servers[serverIndex] = {
+            ...cluster.config.servers[serverIndex],
+            lastUpdate: updateConfig.lastUpdate || cluster.config.servers[serverIndex].lastUpdate,
+            updateOnStart: updateConfig.updateOnStart !== undefined ? updateConfig.updateOnStart : cluster.config.servers[serverIndex].updateOnStart
+          };
+
+          await fs.writeFile(clusterConfigPath, JSON.stringify(cluster.config, null, 2));
+          logger.info(`Updated update config for server ${serverName} in cluster ${cluster.name}`);
+          return { success: true, message: 'Update configuration updated successfully' };
+        }
+      }
+
+      // For standalone servers, we'd need to implement this if needed
+      throw new Error(`Server ${serverName} not found in any cluster`);
+    } catch (error) {
+      logger.error(`Failed to update config for ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if server needs update
+   */
+  async checkServerUpdateStatus(serverName) {
+    try {
+      const updateConfig = await this.getServerUpdateConfig(serverName);
+      
+      // Check if auto-update is enabled and enough time has passed
+      if (updateConfig.autoUpdate && updateConfig.lastUpdate) {
+        const lastUpdate = new Date(updateConfig.lastUpdate);
+        const now = new Date();
+        const hoursSinceUpdate = (now - lastUpdate) / (1000 * 60 * 60);
+        
+        if (hoursSinceUpdate >= updateConfig.updateInterval) {
+          return {
+            needsUpdate: true,
+            reason: `Auto-update due (${hoursSinceUpdate.toFixed(1)} hours since last update)`,
+            lastUpdate: updateConfig.lastUpdate,
+            updateInterval: updateConfig.updateInterval
+          };
+        }
+      }
+
+      // Check if update is enabled and on-start update is configured
+      if (updateConfig.updateEnabled && updateConfig.updateOnStart) {
+        return {
+          needsUpdate: true,
+          reason: 'Update on start enabled',
+          lastUpdate: updateConfig.lastUpdate,
+          updateOnStart: true
+        };
+      }
+
+      return {
+        needsUpdate: false,
+        reason: 'No update needed',
+        lastUpdate: updateConfig.lastUpdate,
+        updateEnabled: updateConfig.updateEnabled
+      };
+    } catch (error) {
+      logger.error(`Failed to check update status for ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update server with progress tracking and configuration update
+   */
+  async updateServerWithConfig(serverName, options = {}) {
+    try {
+      const { force = false, updateConfig = true } = options;
+      
+      // Check if update is needed (unless forced)
+      if (!force) {
+        const updateStatus = await this.checkServerUpdateStatus(serverName);
+        if (!updateStatus.needsUpdate) {
+          return {
+            success: true,
+            message: `Server ${serverName} does not need update: ${updateStatus.reason}`,
+            skipped: true
+          };
+        }
+      }
+
+      logger.info(`Updating server: ${serverName}`);
+      this.emitProgress?.(`Starting update for server: ${serverName}`);
+
+      // Perform the actual update
+      const result = await this.updateServerBinaries(serverName);
+      
+      // Update the last update timestamp if successful
+      if (result.success && updateConfig) {
+        try {
+          await this.updateServerUpdateConfig(serverName, {
+            lastUpdate: new Date().toISOString()
+          });
+          logger.info(`Updated last update timestamp for ${serverName}`);
+        } catch (configError) {
+          logger.warn(`Failed to update timestamp for ${serverName}:`, configError.message);
+        }
+      }
+
+      this.emitProgress?.(`Update completed for server: ${serverName}`);
+      return {
+        ...result,
+        serverName,
+        updatedAt: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error(`Failed to update server ${serverName}:`, error);
+      this.emitProgress?.(`Update failed for server: ${serverName} - ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update all servers with configuration and progress tracking
+   */
+  async updateAllServersWithConfig(options = {}) {
+    try {
+      const { force = false, updateConfig = true, skipDisabled = true } = options;
+      
+      logger.info('Starting update for all servers...');
+      this.emitProgress?.('Starting update process for all servers...');
+
+      const clusters = await this.listClusters();
+      const results = [];
+      let totalServers = 0;
+      let updatedServers = 0;
+      let skippedServers = 0;
+      let failedServers = 0;
+
+      // Count total servers first
+      for (const cluster of clusters) {
+        totalServers += cluster.config.servers?.length || 0;
+      }
+
+      // Update each server
+      for (const cluster of clusters) {
+        for (const server of cluster.config.servers || []) {
+          try {
+            const serverResult = {
+              serverName: server.name,
+              clusterName: cluster.name,
+              success: false,
+              message: '',
+              error: null,
+              skipped: false
+            };
+
+            // Check if updates are disabled for this cluster
+            if (skipDisabled && cluster.config.updateEnabled === false) {
+              serverResult.skipped = true;
+              serverResult.message = 'Updates disabled for cluster';
+              skippedServers++;
+              results.push(serverResult);
+              continue;
+            }
+
+            this.emitProgress?.(`Updating server ${server.name} (${updatedServers + 1}/${totalServers})...`);
+
+            const updateResult = await this.updateServerWithConfig(server.name, {
+              force,
+              updateConfig
+            });
+
+            if (updateResult.skipped) {
+              serverResult.skipped = true;
+              serverResult.message = updateResult.message;
+              skippedServers++;
+            } else if (updateResult.success) {
+              serverResult.success = true;
+              serverResult.message = 'Update completed successfully';
+              updatedServers++;
+            } else {
+              serverResult.error = updateResult.message;
+              failedServers++;
+            }
+
+            results.push(serverResult);
+
+          } catch (error) {
+            logger.error(`Failed to update server ${server.name}:`, error);
+            results.push({
+              serverName: server.name,
+              clusterName: cluster.name,
+              success: false,
+              message: 'Update failed',
+              error: error.message,
+              skipped: false
+            });
+            failedServers++;
+          }
+        }
+      }
+
+      const summary = {
+        totalServers,
+        updatedServers,
+        skippedServers,
+        failedServers,
+        success: failedServers === 0
+      };
+
+      this.emitProgress?.(`Update process completed. Updated: ${updatedServers}, Skipped: ${skippedServers}, Failed: ${failedServers}`);
+
+      return {
+        success: summary.success,
+        message: `Update process completed. Updated: ${updatedServers}, Skipped: ${skippedServers}, Failed: ${failedServers}`,
+        results,
+        summary
+      };
+    } catch (error) {
+      logger.error('Failed to update all servers:', error);
+      this.emitProgress?.(`Update process failed: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 export default ServerProvisioner; 
