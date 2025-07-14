@@ -1613,6 +1613,68 @@ export default async function provisioningRoutes(fastify) {
       });
     }
   });
+
+  // Fix port configurations for existing clusters
+  fastify.post('/api/provisioning/fix-port-configurations', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const result = await provisioner.fixClusterPortConfigurations();
+      
+      return {
+        success: true,
+        message: 'Port configurations fixed successfully',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to fix port configurations:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to fix port configurations'
+      });
+    }
+  });
+
+  // Update server settings
+  fastify.post('/api/provisioning/servers/:serverName/update-settings', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { settings, regenerateConfigs = true, regenerateScripts = true } = request.body;
+      
+      if (!serverName) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server name is required'
+        });
+      }
+      
+      if (!settings) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Server settings are required'
+        });
+      }
+
+      const result = await provisioner.updateServerSettings(serverName, settings, {
+        regenerateConfigs,
+        regenerateScripts
+      });
+      
+      return {
+        success: true,
+        message: result.message,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to update server settings:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update server settings'
+      });
+    }
+  });
 }
 
 // Helper functions

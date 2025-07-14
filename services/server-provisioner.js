@@ -414,7 +414,7 @@ export class ServerProvisioner {
     }
     
     if (portAllocationMode === 'even') {
-      // Even ports: 30000, 30002, 30004, etc.
+      // Even mode: Game ports increment by 2, Query/RCON use standard ASA offsets
       // Find the highest game port used, starting from basePort
       let maxGamePort = basePort - 2; // Start 2 less than base to ensure we start at basePort
       for (const server of existingServers) {
@@ -431,7 +431,8 @@ export class ServerProvisioner {
         candidate += 1;
       }
       
-      // Ensure candidate, candidate+1, candidate+2 are all unused
+      // Ensure candidate and its ASA offsets are all unused
+      // ASA uses: Game Port, Query Port (Game Port + 1), RCON Port (Game Port + 2)
       while (
         usedPorts.has(candidate) ||
         usedPorts.has(candidate + 1) ||
@@ -441,8 +442,8 @@ export class ServerProvisioner {
       }
       
       return candidate;
-        } else {
-      // Sequential ports: 7777, 7778, 7779, etc.
+    } else {
+      // Sequential mode: Game ports increment by 1, Query/RCON use standard ASA offsets
       // Find the highest game port used, starting from basePort
       let maxGamePort = basePort - 1; // Start 1 less than base to ensure we start at basePort
       for (const server of existingServers) {
@@ -454,11 +455,12 @@ export class ServerProvisioner {
       // Start from basePort if no servers exist, otherwise use next sequential port
       let candidate = maxGamePort < basePort ? basePort : maxGamePort + 1;
       
-      // Ensure candidate, candidate+19338, candidate+24553 are all unused
+      // Ensure candidate and its ASA offsets are all unused
+      // ASA uses: Game Port, Query Port (Game Port + 1), RCON Port (Game Port + 2)
       while (
         usedPorts.has(candidate) ||
-        usedPorts.has(candidate + 19338) ||
-        usedPorts.has(candidate + 24553)
+        usedPorts.has(candidate + 1) ||
+        usedPorts.has(candidate + 2)
       ) {
         candidate += 1;
       }
@@ -737,10 +739,10 @@ pause`;
           portAllocationMode: clusterConfig.portAllocationMode || 'sequential',
           portIncrement: (clusterConfig.portAllocationMode || 'sequential') === 'even' ? 2 : 1,
           queryPortBase: (clusterConfig.portAllocationMode || 'sequential') === 'even' ? 
-            (clusterConfig.basePort || 7777) + 1 : (clusterConfig.basePort || 7777) + 19338,
+            (clusterConfig.basePort || 7777) + 1 : (clusterConfig.basePort || 7777) + 1,
           queryPortIncrement: (clusterConfig.portAllocationMode || 'sequential') === 'even' ? 2 : 1,
           rconPortBase: (clusterConfig.portAllocationMode || 'sequential') === 'even' ? 
-            (clusterConfig.basePort || 7777) + 2 : (clusterConfig.basePort || 7777) + 24553,
+            (clusterConfig.basePort || 7777) + 2 : (clusterConfig.basePort || 7777) + 2,
           rconPortIncrement: (clusterConfig.portAllocationMode || 'sequential') === 'even' ? 2 : 1
         }
       };
@@ -2576,6 +2578,258 @@ ConfigOverridePath=./configs`;
       return { success: true, results };
     } catch (error) {
       logger.error('Failed to regenerate stop scripts:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Fix port configurations for existing clusters to resolve conflicts
+   */
+  async fixClusterPortConfigurations() {
+    try {
+      logger.info('Fixing port configurations for existing clusters...');
+      const results = [];
+      
+      const clusters = await this.listClusters();
+      for (const cluster of clusters) {
+        try {
+          const clusterPath = path.join(this.clustersPath, cluster.name);
+          const clusterConfigPath = path.join(clusterPath, 'cluster.json');
+          
+          // Get current configuration
+          const currentConfig = cluster.config;
+          const servers = currentConfig.servers || [];
+          
+          // Fix port configurations for each server
+          let basePort = currentConfig.basePort || 30000;
+          const portAllocationMode = currentConfig.portAllocationMode || 'sequential';
+          
+          for (let i = 0; i < servers.length; i++) {
+            const server = servers[i];
+            
+            // Calculate correct ports based on ASA standards
+            if (portAllocationMode === 'even') {
+              // Even mode: Game ports increment by 2
+              server.port = basePort + (i * 2);
+              server.queryPort = server.port + 1;
+              server.rconPort = server.port + 2;
+            } else {
+              // Sequential mode: Game ports increment by 1
+              server.port = basePort + i;
+              server.queryPort = server.port + 1;
+              server.rconPort = server.port + 2;
+            }
+            
+            // Update server config file if it exists
+            const serverConfigPath = path.join(clusterPath, server.name, 'server-config.json');
+            try {
+              const serverConfigContent = await fs.readFile(serverConfigPath, 'utf8');
+              const serverConfig = JSON.parse(serverConfigContent);
+              
+              // Update ports in server config
+              serverConfig.gamePort = server.port;
+              serverConfig.queryPort = server.queryPort;
+              serverConfig.rconPort = server.rconPort;
+              
+              await fs.writeFile(serverConfigPath, JSON.stringify(serverConfig, null, 2));
+              logger.info(`Updated server config for ${server.name}: Port=${server.port}, Query=${server.queryPort}, RCON=${server.rconPort}`);
+            } catch (error) {
+              logger.warn(`Could not update server config for ${server.name}:`, error.message);
+            }
+          }
+          
+          // Update cluster configuration
+          currentConfig.portConfiguration = {
+            basePort: basePort,
+            portAllocationMode: portAllocationMode,
+            portIncrement: portAllocationMode === 'even' ? 2 : 1,
+            queryPortBase: basePort + 1,
+            queryPortIncrement: portAllocationMode === 'even' ? 2 : 1,
+            rconPortBase: basePort + 2,
+            rconPortIncrement: portAllocationMode === 'even' ? 2 : 1
+          };
+          
+          await fs.writeFile(clusterConfigPath, JSON.stringify(currentConfig, null, 2));
+          
+          results.push({
+            cluster: cluster.name,
+            success: true,
+            message: `Fixed port configuration for ${servers.length} servers`,
+            servers: servers.map(s => ({
+              name: s.name,
+              port: s.port,
+              queryPort: s.queryPort,
+              rconPort: s.rconPort
+            }))
+          });
+          
+          logger.info(`Fixed port configuration for cluster ${cluster.name}`);
+        } catch (error) {
+          logger.error(`Failed to fix port configuration for cluster ${cluster.name}:`, error);
+          results.push({
+            cluster: cluster.name,
+            success: false,
+            error: error.message
+          });
+        }
+      }
+      
+      logger.info(`Port configuration fix completed. ${results.filter(r => r.success).length}/${results.length} clusters fixed`);
+      return { success: true, results };
+    } catch (error) {
+      logger.error('Failed to fix port configurations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update server settings and regenerate configuration files
+   */
+  async updateServerSettings(serverName, newSettings, options = {}) {
+    try {
+      const { regenerateConfigs = true, regenerateScripts = true } = options;
+      
+      logger.info(`Updating server settings for: ${serverName}`);
+      this.emitProgress?.(`Updating server settings for: ${serverName}`);
+      
+      // Find the server in clusters or standalone servers
+      let serverPath = null;
+      let isClusterServer = false;
+      let clusterName = null;
+      
+      // Check if it's a cluster server
+      const clusters = await this.listClusters();
+      for (const cluster of clusters) {
+        const server = cluster.config.servers?.find(s => s.name === serverName);
+        if (server) {
+          serverPath = path.join(this.clustersPath, cluster.name, serverName);
+          isClusterServer = true;
+          clusterName = cluster.name;
+          break;
+        }
+      }
+      
+      // If not found in clusters, check standalone servers
+      if (!serverPath) {
+        serverPath = path.join(this.serversPath, serverName);
+        const exists = await fs.access(serverPath).then(() => true).catch(() => false);
+        if (!exists) {
+          throw new Error(`Server ${serverName} not found`);
+        }
+      }
+      
+      // Update server configuration file
+      const serverConfigPath = path.join(serverPath, 'server-config.json');
+      let serverConfig = {};
+      
+      try {
+        const configContent = await fs.readFile(serverConfigPath, 'utf8');
+        serverConfig = JSON.parse(configContent);
+      } catch (error) {
+        logger.warn(`Could not read existing server config for ${serverName}, creating new one`);
+      }
+      
+      // Update server configuration with new settings
+      const updatedConfig = {
+        ...serverConfig,
+        name: newSettings.name,
+        map: newSettings.map,
+        gamePort: newSettings.gamePort,
+        queryPort: newSettings.queryPort,
+        rconPort: newSettings.rconPort,
+        maxPlayers: newSettings.maxPlayers,
+        adminPassword: newSettings.adminPassword,
+        serverPassword: newSettings.serverPassword,
+        rconPassword: newSettings.rconPassword,
+        clusterId: newSettings.clusterId,
+        clusterPassword: newSettings.clusterPassword,
+        harvestMultiplier: newSettings.harvestMultiplier,
+        xpMultiplier: newSettings.xpMultiplier,
+        tamingMultiplier: newSettings.tamingMultiplier,
+        sessionName: newSettings.sessionName,
+        updated: new Date().toISOString()
+      };
+      
+      // Save updated server configuration
+      await fs.writeFile(serverConfigPath, JSON.stringify(updatedConfig, null, 2));
+      logger.info(`Updated server configuration for ${serverName}`);
+      this.emitProgress?.(`Updated server configuration for ${serverName}`);
+      
+      // Regenerate configuration files if requested
+      if (regenerateConfigs) {
+        this.emitProgress?.(`Regenerating configuration files for ${serverName}`);
+        
+        // Create Game.ini
+        const gameIni = this.generateGameIni(updatedConfig);
+        const gameIniPath = path.join(serverPath, 'configs', 'Game.ini');
+        await fs.mkdir(path.dirname(gameIniPath), { recursive: true });
+        await fs.writeFile(gameIniPath, gameIni);
+        
+        // Create GameUserSettings.ini
+        const gameUserSettings = this.generateGameUserSettings(updatedConfig);
+        const gameUserSettingsPath = path.join(serverPath, 'configs', 'GameUserSettings.ini');
+        await fs.writeFile(gameUserSettingsPath, gameUserSettings);
+        
+        logger.info(`Regenerated configuration files for ${serverName}`);
+        this.emitProgress?.(`Regenerated configuration files for ${serverName}`);
+      }
+      
+      // Regenerate scripts if requested
+      if (regenerateScripts) {
+        this.emitProgress?.(`Regenerating startup and stop scripts for ${serverName}`);
+        
+        if (isClusterServer && clusterName) {
+          // Regenerate cluster server scripts
+          await this.createStartScriptInCluster(clusterName, serverPath, updatedConfig);
+          await this.createStopScriptInCluster(clusterName, serverPath, newSettings.name);
+        } else {
+          // Regenerate standalone server scripts
+          await this.createStartScript(serverPath, updatedConfig);
+          await this.createStopScript(serverPath, newSettings.name);
+        }
+        
+        logger.info(`Regenerated scripts for ${serverName}`);
+        this.emitProgress?.(`Regenerated scripts for ${serverName}`);
+      }
+      
+      // Update cluster configuration if this is a cluster server
+      if (isClusterServer && clusterName) {
+        const clusterPath = path.join(this.clustersPath, clusterName);
+        const clusterConfigPath = path.join(clusterPath, 'cluster.json');
+        
+        try {
+          const clusterContent = await fs.readFile(clusterConfigPath, 'utf8');
+          const clusterConfig = JSON.parse(clusterContent);
+          
+          // Update the server in the cluster configuration
+          const serverIndex = clusterConfig.servers?.findIndex(s => s.name === serverName);
+          if (serverIndex !== -1 && serverIndex !== undefined) {
+            clusterConfig.servers[serverIndex] = {
+              ...clusterConfig.servers[serverIndex],
+              ...newSettings
+            };
+            
+            await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
+            logger.info(`Updated cluster configuration for ${serverName}`);
+          }
+        } catch (error) {
+          logger.warn(`Could not update cluster configuration for ${serverName}:`, error.message);
+        }
+      }
+      
+      logger.info(`Server settings updated successfully for: ${serverName}`);
+      this.emitProgress?.(`Server settings updated successfully for: ${serverName}`);
+      
+      return {
+        success: true,
+        message: `Server settings updated successfully for ${serverName}`,
+        serverPath,
+        isClusterServer,
+        clusterName
+      };
+    } catch (error) {
+      logger.error(`Failed to update server settings for ${serverName}:`, error);
+      this.emitProgress?.(`Failed to update server settings for ${serverName}: ${error.message}`);
       throw error;
     }
   }
