@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { createReadStream } from 'fs';
+import { createReadStream, watch } from 'fs';
+import { EventEmitter } from 'events';
 import logger from '../utils/logger.js';
 import config from '../config/index.js';
 import { createServerManager } from './server-manager.js';
@@ -124,7 +125,7 @@ class ArkLogsService {
   }
 
   /**
-   * Create a read stream for a specific log file
+   * Create a read stream for a specific log file with real-time following
    */
   async createLogStream(serverName, logFileName, options = {}) {
     const { tail = 100, follow = true } = options;
@@ -169,19 +170,66 @@ class ArkLogsService {
     
     logger.info(`Creating log stream for ${serverName}/${logFileName} at ${logPath}`);
     
+    // Create an EventEmitter to simulate a stream interface
+    const stream = new EventEmitter();
+    
     try {
-      // Get file size if we need to tail
-      let startPosition = 0;
-      if (follow) {
-        const fileSize = await this.getFileSize(logPath);
-        startPosition = Math.max(0, fileSize - (tail * 1000));
+      // Read initial content (tail)
+      const content = await fs.readFile(logPath, 'utf8');
+      const lines = content.split('\n');
+      const tailLines = lines.slice(-tail);
+      
+      // Emit initial content
+      for (const line of tailLines) {
+        if (line.trim()) {
+          stream.emit('data', Buffer.from(line + '\n', 'utf8'));
+        }
       }
       
-      // Create a read stream
-      const stream = createReadStream(logPath, {
-        encoding: 'utf8',
-        start: startPosition
-      });
+      if (follow) {
+        // Set up file watching for real-time updates
+        const watcher = watch(logPath, { persistent: true }, async (eventType, filename) => {
+          if (eventType === 'change') {
+            try {
+              // Read the file again to get new content
+              const newContent = await fs.readFile(logPath, 'utf8');
+              const newLines = newContent.split('\n');
+              
+              // Only emit lines that are newer than what we've already seen
+              const newLinesOnly = newLines.slice(lines.length);
+              
+              for (const line of newLinesOnly) {
+                if (line.trim()) {
+                  stream.emit('data', Buffer.from(line + '\n', 'utf8'));
+                }
+              }
+              
+              // Update our line count
+              lines.length = newLines.length;
+            } catch (error) {
+              logger.error(`Error reading updated log file ${logPath}:`, error);
+            }
+          }
+        });
+        
+        // Store the watcher so it can be cleaned up
+        stream.watcher = watcher;
+        
+        // Handle watcher errors
+        watcher.on('error', (error) => {
+          logger.error(`File watcher error for ${logPath}:`, error);
+          stream.emit('error', error);
+        });
+      }
+      
+      // Add destroy method for cleanup
+      stream.destroy = () => {
+        if (stream.watcher) {
+          stream.watcher.close();
+          stream.watcher = null;
+        }
+        stream.removeAllListeners();
+      };
       
       return stream;
     } catch (error) {
