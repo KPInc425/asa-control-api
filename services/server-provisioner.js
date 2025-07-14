@@ -1194,8 +1194,22 @@ pause`;
   async updateServerBinaries(serverName) {
     try {
       logger.info(`Updating ASA binaries for server: ${serverName}`);
+      // First check if it's a cluster server
+      const clusters = await this.listClusters();
+      for (const cluster of clusters) {
+        const server = cluster.config.servers?.find(s => s.name === serverName);
+        if (server) {
+          // It's a cluster server, use the cluster-specific update method
+          logger.info(`Server ${serverName} is a cluster server, using cluster update method`);
+          await this.installASABinariesForServerInCluster(cluster.name, serverName, false);
+          logger.info(`ASA binaries updated for cluster server: ${serverName}`);
+          return { success: true };
+        }
+      }
+      // If not found in clusters, try as standalone server
+      logger.info(`Server ${serverName} not found in clusters, trying as standalone server`);
       await this.installASABinariesForServer(serverName);
-      logger.info(`ASA binaries updated for server: ${serverName}`);
+      logger.info(`ASA binaries updated for standalone server: ${serverName}`);
       return { success: true };
     } catch (error) {
       logger.error(`Failed to update ASA binaries for server ${serverName}:`, error);
