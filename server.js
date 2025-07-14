@@ -2,7 +2,6 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
-import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import config from './config/index.js';
 import logger from './utils/logger.js';
@@ -584,10 +583,16 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Start server
 const start = async () => {
   try {
-    // Create HTTP server first
-    const server = createServer();
+    // Start Fastify server first
+    await fastify.listen({
+      port: config.server.port,
+      host: config.server.host
+    });
     
-    // Attach Socket.IO to the HTTP server before Fastify starts
+    // Get the underlying HTTP server from Fastify
+    const server = fastify.server;
+    
+    // Attach Socket.IO to the Fastify HTTP server
     io = new SocketIOServer(server, {
       cors: {
         origin: process.env.CORS_ORIGIN 
@@ -619,13 +624,6 @@ const start = async () => {
 
     // Setup Socket.IO event handlers
     setupSocketIO();
-    
-    // Start Fastify server with the existing HTTP server
-    await fastify.listen({
-      port: config.server.port,
-      host: config.server.host,
-      server: server
-    });
     
     logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
     logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);
