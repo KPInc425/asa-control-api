@@ -1202,6 +1202,27 @@ export default async function provisioningRoutes(fastify) {
     }
   });
 
+  // Regenerate all stop scripts with targeted approach
+  fastify.post('/api/provisioning/regenerate-stop-scripts', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const result = await provisioner.regenerateAllStopScripts();
+      
+      return {
+        success: true,
+        message: 'Stop scripts regenerated successfully',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to regenerate stop scripts:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to regenerate stop scripts'
+      });
+    }
+  });
+
   // Delete cluster
   fastify.delete('/api/provisioning/clusters/:clusterName', {
     preHandler: requirePermission('write')

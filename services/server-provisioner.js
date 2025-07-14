@@ -651,19 +651,44 @@ pause`;
    */
   async createStopScript(serverPath, serverName) {
     try {
+      // Create PowerShell script for stopping the server
+      const psScript = `# Stop script for ${serverName}
+$processes = Get-Process -Name 'ArkAscendedServer' -ErrorAction SilentlyContinue
+$found = $false
+
+foreach ($proc in $processes) {
+    try {
+        $cmdLine = (Get-WmiObject -Class Win32_Process -Filter "ProcessId = $($proc.Id)").CommandLine
+        if ($cmdLine -like "*SessionName=${serverName}*" -or $cmdLine -like "*${serverName}*") {
+            Write-Host "Stopping process $($proc.Id) for server ${serverName}"
+            Stop-Process -Id $proc.Id -Force
+            Write-Host "${serverName} stopped successfully"
+            $found = $true
+            break
+        }
+    } catch {
+        continue
+    }
+}
+
+if (-not $found) {
+    Write-Host "No running process found for server ${serverName}"
+}`;
+
+      // Create batch file that calls the PowerShell script
       const stopScript = `@echo off
 echo Stopping ${serverName}...
 
-REM Find and kill the server process
-for /f "tokens=2" %%i in ('tasklist /fi "imagename eq ArkAscendedServer.exe" /fo table /nh ^| find "ArkAscendedServer.exe"') do (
-    echo Stopping process %%i
-    taskkill /pid %%i /f
-)
+REM Call PowerShell script to stop the server
+powershell -ExecutionPolicy Bypass -File "%~dp0stop_${serverName}.ps1"
 
-echo ${serverName} stopped.
+echo Stop script completed for ${serverName}.
 pause`;
 
+      // Write both files
+      await fs.writeFile(path.join(serverPath, `stop_${serverName}.ps1`), psScript);
       await fs.writeFile(path.join(serverPath, 'stop.bat'), stopScript);
+      
       logger.info(`Stop script created for server: ${serverName}`);
     } catch (error) {
       logger.error(`Failed to create stop script for ${serverName}:`, error);
@@ -1124,19 +1149,44 @@ pause`;
    */
   async createStopScriptInCluster(clusterName, serverPath, serverName) {
     try {
+      // Create PowerShell script for stopping the server
+      const psScript = `# Stop script for ${serverName}
+$processes = Get-Process -Name 'ArkAscendedServer' -ErrorAction SilentlyContinue
+$found = $false
+
+foreach ($proc in $processes) {
+    try {
+        $cmdLine = (Get-WmiObject -Class Win32_Process -Filter "ProcessId = $($proc.Id)").CommandLine
+        if ($cmdLine -like "*SessionName=${serverName}*" -or $cmdLine -like "*${serverName}*") {
+            Write-Host "Stopping process $($proc.Id) for server ${serverName}"
+            Stop-Process -Id $proc.Id -Force
+            Write-Host "${serverName} stopped successfully"
+            $found = $true
+            break
+        }
+    } catch {
+        continue
+    }
+}
+
+if (-not $found) {
+    Write-Host "No running process found for server ${serverName}"
+}`;
+
+      // Create batch file that calls the PowerShell script
       const stopScript = `@echo off
 echo Stopping ${serverName} in cluster ${clusterName}...
 
-REM Find and kill the server process
-for /f "tokens=2" %%i in ('tasklist /fi "imagename eq ArkAscendedServer.exe" /fo table /nh ^| find "ArkAscendedServer.exe"') do (
-    echo Stopping process %%i
-    taskkill /pid %%i /f
-)
+REM Call PowerShell script to stop the server
+powershell -ExecutionPolicy Bypass -File "%~dp0stop_${serverName}.ps1"
 
-echo ${serverName} stopped.
+echo Stop script completed for ${serverName}.
 pause`;
 
+      // Write both files
+      await fs.writeFile(path.join(serverPath, `stop_${serverName}.ps1`), psScript);
       await fs.writeFile(path.join(serverPath, 'stop.bat'), stopScript);
+      
       logger.info(`Stop script created for server: ${serverName} in cluster ${clusterName}`);
     } catch (error) {
       logger.error(`Failed to create stop script for ${serverName} in cluster ${clusterName}:`, error);
@@ -2462,6 +2512,70 @@ ConfigOverridePath=./configs`;
     } catch (error) {
       logger.error('Failed to update all servers:', error);
       this.emitProgress?.(`Update process failed: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Regenerate all stop scripts with the new targeted approach
+   */
+  async regenerateAllStopScripts() {
+    try {
+      logger.info('Regenerating all stop scripts with targeted approach...');
+      const results = [];
+      
+      // Regenerate stop scripts for cluster servers
+      const clusters = await this.listClusters();
+      for (const cluster of clusters) {
+        for (const server of cluster.config.servers || []) {
+          try {
+            const serverPath = path.join(this.clustersPath, cluster.name, server.name);
+            await this.createStopScriptInCluster(cluster.name, serverPath, server.name);
+            results.push({ 
+              server: server.name, 
+              cluster: cluster.name, 
+              success: true, 
+              message: 'Stop script regenerated' 
+            });
+          } catch (error) {
+            logger.error(`Failed to regenerate stop script for ${server.name}:`, error);
+            results.push({ 
+              server: server.name, 
+              cluster: cluster.name, 
+              success: false, 
+              error: error.message 
+            });
+          }
+        }
+      }
+      
+      // Regenerate stop scripts for standalone servers
+      const servers = await this.listServers();
+      for (const server of servers) {
+        try {
+          const serverPath = path.join(this.serversPath, server.name);
+          await this.createStopScript(serverPath, server.name);
+          results.push({ 
+            server: server.name, 
+            cluster: null, 
+            success: true, 
+            message: 'Stop script regenerated' 
+          });
+        } catch (error) {
+          logger.error(`Failed to regenerate stop script for ${server.name}:`, error);
+          results.push({ 
+            server: server.name, 
+            cluster: null, 
+            success: false, 
+            error: error.message 
+          });
+        }
+      }
+      
+      logger.info(`Stop script regeneration completed. ${results.filter(r => r.success).length}/${results.length} successful`);
+      return { success: true, results };
+    } catch (error) {
+      logger.error('Failed to regenerate stop scripts:', error);
       throw error;
     }
   }
