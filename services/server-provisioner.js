@@ -408,7 +408,7 @@ export class ServerProvisioner {
     // Gather all used ports
     const usedPorts = new Set();
     for (const server of existingServers) {
-      if (server.port) usedPorts.add(server.port);
+      if (server.gamePort) usedPorts.add(server.gamePort);
       if (server.queryPort) usedPorts.add(server.queryPort);
       if (server.rconPort) usedPorts.add(server.rconPort);
     }
@@ -418,8 +418,8 @@ export class ServerProvisioner {
       // Find the highest game port used, starting from basePort
       let maxGamePort = basePort - 2; // Start 2 less than base to ensure we start at basePort
       for (const server of existingServers) {
-        if (server.port && server.port >= basePort && server.port > maxGamePort) {
-          maxGamePort = server.port;
+        if (server.gamePort && server.gamePort >= basePort && server.gamePort > maxGamePort) {
+          maxGamePort = server.gamePort;
         }
       }
       
@@ -443,12 +443,12 @@ export class ServerProvisioner {
       
       return candidate;
     } else {
-      // Sequential mode: Game ports increment by 1, Query/RCON use standard ASA offsets
+      // Sequential mode: Game ports increment by 1
       // Find the highest game port used, starting from basePort
       let maxGamePort = basePort - 1; // Start 1 less than base to ensure we start at basePort
       for (const server of existingServers) {
-        if (server.port && server.port >= basePort && server.port > maxGamePort) {
-          maxGamePort = server.port;
+        if (server.gamePort && server.gamePort >= basePort && server.gamePort > maxGamePort) {
+          maxGamePort = server.gamePort;
         }
       }
       
@@ -1033,7 +1033,7 @@ if %ERRORLEVEL% NEQ 0 (
       const serverConfigFile = {
         name: serverConfig.name,
         map: serverConfig.map || 'TheIsland',
-        gamePort: serverConfig.port || serverConfig.gamePort || 7777,
+        gamePort: serverConfig.gamePort || 7777,
         queryPort: serverConfig.queryPort || 27015,
         rconPort: serverConfig.rconPort || 32330,
         maxPlayers: serverConfig.maxPlayers || 70,
@@ -1112,7 +1112,7 @@ if %ERRORLEVEL% NEQ 0 (
       // Build the query string for the server parameters
       let queryParams = [
         `SessionName=${serverName}`,
-        `Port=${serverConfig.port || serverConfig.gamePort}`,
+        `Port=${serverConfig.gamePort}`,
         `QueryPort=${serverConfig.queryPort}`,
         `RCONPort=${serverConfig.rconPort}`,
         `RCONEnabled=True`,
@@ -2610,14 +2610,14 @@ ConfigOverridePath=./configs`;
             // Calculate correct ports based on ASA standards
             if (portAllocationMode === 'even') {
               // Even mode: Game ports increment by 2
-              server.port = basePort + (i * 2);
-              server.queryPort = server.port + 1;
-              server.rconPort = server.port + 2;
+              server.gamePort = basePort + (i * 2);
+              server.queryPort = server.gamePort + 1;
+              server.rconPort = server.gamePort + 2;
             } else {
               // Sequential mode: Game ports increment by 1
-              server.port = basePort + i;
-              server.queryPort = server.port + 1;
-              server.rconPort = server.port + 2;
+              server.gamePort = basePort + i;
+              server.queryPort = server.gamePort + 1;
+              server.rconPort = server.gamePort + 2;
             }
             
             // Update server config file if it exists
@@ -2627,12 +2627,12 @@ ConfigOverridePath=./configs`;
               const serverConfig = JSON.parse(serverConfigContent);
               
               // Update ports in server config
-              serverConfig.gamePort = server.port;
+              serverConfig.gamePort = server.gamePort;
               serverConfig.queryPort = server.queryPort;
               serverConfig.rconPort = server.rconPort;
               
               await fs.writeFile(serverConfigPath, JSON.stringify(serverConfig, null, 2));
-              logger.info(`Updated server config for ${server.name}: Port=${server.port}, Query=${server.queryPort}, RCON=${server.rconPort}`);
+              logger.info(`Updated server config for ${server.name}: Port=${server.gamePort}, Query=${server.queryPort}, RCON=${server.rconPort}`);
             } catch (error) {
               logger.warn(`Could not update server config for ${server.name}:`, error.message);
             }
@@ -2657,7 +2657,7 @@ ConfigOverridePath=./configs`;
             message: `Fixed port configuration for ${servers.length} servers`,
             servers: servers.map(s => ({
               name: s.name,
-              port: s.port,
+              port: s.gamePort,
               queryPort: s.queryPort,
               rconPort: s.rconPort
             }))

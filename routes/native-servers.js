@@ -743,7 +743,7 @@ export default async function nativeServerRoutes(fastify, options) {
           type: server.type || 'native',
           status: server.status,
           map: server.map,
-          port: server.port,
+          port: server.gamePort,
           rconPort: server.rconPort,
           maxPlayers: server.maxPlayers,
           currentPlayers: server.currentPlayers || 0,

@@ -853,7 +853,7 @@ export class NativeServerManager extends ServerManager {
                 created: serverConfig.created || stat.birthtime.toISOString(),
                 type: 'native', // These are native servers
                 map: serverConfig.map || 'TheIsland',
-                gamePort: serverConfig.port || serverConfig.gamePort || 7777, // Use external port as gamePort
+                gamePort: serverConfig.gamePort || 7777, // Use gamePort consistently
                 queryPort: serverConfig.queryPort || 27015,
                 rconPort: serverConfig.rconPort || 32330,
                 maxPlayers: serverConfig.maxPlayers || 70,
@@ -892,7 +892,7 @@ export class NativeServerManager extends ServerManager {
                   type: 'native', // These are native servers, not cluster-server type
                   clusterName: clusterConfig.name || clusterDir,
                   map: server.map || 'TheIsland',
-                  gamePort: server.port || server.gamePort || 7777, // Use external port as gamePort
+                  gamePort: server.gamePort || 7777, // Use gamePort consistently
                   queryPort: server.queryPort || 27015,
                   rconPort: server.rconPort || 32330,
                   maxPlayers: server.maxPlayers || 70,
@@ -1085,7 +1085,7 @@ export class NativeServerManager extends ServerManager {
     
     // Basic server parameters - use the correct port values
     args.push('?listen');
-    args.push(`?Port=${server.gamePort || server.port || 7777}`);
+    args.push(`?Port=${server.gamePort || 7777}`);
     args.push(`?QueryPort=${server.queryPort || 27015}`);
     args.push(`?RCONPort=${server.rconPort || 32330}`);
     args.push(`?MaxPlayers=${server.maxPlayers || 70}`);
