@@ -1,0 +1,76 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Ask AI
+---description: Backend API development for ARK: Survival Ascended control system
+globs:
+  - "server.js"
+  - "routes/**/*.js"
+  - "services/**/*.js"
+  - "middleware/**/*.js"
+  - "metrics/**/*.js"
+  - "Dockerfile"
+  - "docker-compose.yml"
+alwaysApply: false
+---
+
+## 🧠 Project Context
+
+You are the backend agent responsible for building and maintaining a Fastify-based API that manages an ARK: Survival Ascended (ASA) Docker cluster. The backend is hosted on the same VM as the containers and exposes endpoints for orchestration, configuration, and monitoring.
+
+## 🧱 Responsibilities
+
+- Use **Fastify** for routing, middleware, and performance.
+- Use **dockerode** to control containers (start, stop, restart).
+- Use **rcon-client** or `child_process` to send RCON commands.
+- Use `fs/promises` to read/write config files like `GameUserSettings.ini`.
+- Use **Socket.IO** for real-time log streaming.
+- Use **JWT** for authentication and protect all sensitive routes.
+- Use **prom-client** to expose a `/metrics` endpoint for Prometheus.
+- Follow RESTful conventions and modularize logic into `routes/`, `services/`, and `middleware/`.
+
+## 🧪 Testing & Monitoring
+
+- Expose a `/metrics` endpoint for Prometheus to scrape.
+- Track metrics like:
+  - Number of running containers
+  - RCON ping latency
+  - Player count (if available)
+- Use `docker-compose.yml` to run Prometheus, Grafana, and cAdvisor alongside the API.
+
+## 🧰 Code Style & Conventions
+
+- Use `async/await` with proper error handling.
+- Use `try/catch` blocks and return structured error responses.
+- Use `Pino` (Fastify default) for HTTP logging and `Winston` for application logs.
+- Use `.env` for secrets and configuration paths.
+- Organize routes by domain (e.g., `/api/containers`, `/api/configs`, `/api/auth`).
+
+## 🧩 Example Endpoints
+
+- `GET /api/containers` → List all ASA containers
+- `POST /api/containers/:name/start` → Start a container
+- `POST /api/containers/:name/rcon` → Send RCON command
+- `GET /metrics` → Prometheus metrics endpoint
+
+## 🧱 File Structure
+
+/asa-control-api
+├── /routes/         # Fastify route handlers (e.g., containers, auth, configs)
+├── /services/       # Core logic for Docker, RCON, config management, auth
+├── /middleware/     # Custom middleware (auth checks, rate limiting, logging)
+├── /metrics/        # Prometheus metrics setup and collectors
+├── /logs/           # Application logs (optional, for Winston or custom logging)
+├── .env             # Environment variables (JWT secrets, paths, ports)
+├── Dockerfile       # Container definition for the backend API
+├── server.js        # Fastify app entry point
+└── package.json     # Project metadata and dependencies
+
+## ✅ Goals
+
+- Keep the backend modular, secure, and observable.
+- Ensure compatibility with Docker and Prometheus.
+- Provide a clean API surface for the frontend to consume.
+

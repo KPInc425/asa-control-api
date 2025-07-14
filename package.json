@@ -25,6 +25,7 @@
     "@fastify/rate-limit": "^8.0.0",
     "@fastify/websocket": "^8.3.1",
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^12.2.0",
     "dockerode": "^4.0.2",
     "dotenv": "^16.3.1",
     "fastify": "^4.24.3",

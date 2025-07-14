@@ -5,20 +5,79 @@ import fs from 'fs/promises';
 import path from 'path';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
+import { 
+  db as dbApi, 
+  createUser as dbCreateUser, 
+  getUserByUsername as dbGetUserByUsername,
+  getUserByEmail as dbGetUserByEmail,
+  getAllUsers as dbGetAllUsers,
+  updateUser as dbUpdateUser,
+  updateUserPassword as dbUpdateUserPassword,
+  deleteUser as dbDeleteUser,
+  // Session functions
+  createSession as dbCreateSession,
+  getSessionByToken as dbGetSessionByToken,
+  getSessionById as dbGetSessionById,
+  getSessionsByUserId as dbGetSessionsByUserId,
+  updateSessionActivity as dbUpdateSessionActivity,
+  deleteSession as dbDeleteSession,
+  deleteSessionByToken as dbDeleteSessionByToken,
+  cleanupExpiredSessions as dbCleanupExpiredSessions,
+  // Password reset token functions
+  createPasswordResetToken as dbCreatePasswordResetToken,
+  getPasswordResetToken as dbGetPasswordResetToken,
+  markPasswordResetTokenUsed as dbMarkPasswordResetTokenUsed,
+  cleanupExpiredPasswordResetTokens as dbCleanupExpiredPasswordResetTokens,
+  // Email verification token functions
+  createEmailVerificationToken as dbCreateEmailVerificationToken,
+  getEmailVerificationToken as dbGetEmailVerificationToken,
+  markEmailVerificationTokenUsed as dbMarkEmailVerificationTokenUsed,
+  cleanupExpiredEmailVerificationTokens as dbCleanupExpiredEmailVerificationTokens,
+  // Login attempt functions
+  recordLoginAttempt as dbRecordLoginAttempt,
+  getRecentFailedLoginAttempts as dbGetRecentFailedLoginAttempts,
+  cleanupOldLoginAttempts as dbCleanupOldLoginAttempts
+} from './database.js'; // Updated import path for SQLite DB layer
 
 class UserManagementService {
   constructor() {
     this.users = new Map();
-    this.passwordResetTokens = new Map();
-    this.emailVerificationTokens = new Map();
-    this.failedLoginAttempts = new Map();
-    this.userSessions = new Map();
-    this.usersFile = path.join(process.cwd(), 'data', 'users.json');
-    this.sessionsFile = path.join(process.cwd(), 'data', 'sessions.json');
+    // Remove in-memory Maps - now using SQLite
+    // this.passwordResetTokens = new Map();
+    // this.emailVerificationTokens = new Map();
+    // this.failedLoginAttempts = new Map();
+    // this.userSessions = new Map();
     
     this.initializeDataDirectory();
-    this.loadUsers();
+    this.loadUsersFromDb(); // Use DB instead of file
     this.initializeDefaultUsers();
+    
+    // Set up periodic cleanup tasks
+    this.setupCleanupTasks();
+  }
+
+  /**
+   * Set up periodic cleanup tasks for expired data
+   */
+  setupCleanupTasks() {
+    // Clean up expired sessions every hour
+    setInterval(() => {
+      dbCleanupExpiredSessions();
+      logger.debug('Cleaned up expired sessions');
+    }, 60 * 60 * 1000);
+
+    // Clean up expired tokens every 6 hours
+    setInterval(() => {
+      dbCleanupExpiredPasswordResetTokens();
+      dbCleanupExpiredEmailVerificationTokens();
+      logger.debug('Cleaned up expired tokens');
+    }, 6 * 60 * 60 * 1000);
+
+    // Clean up old login attempts every day
+    setInterval(() => {
+      dbCleanupOldLoginAttempts(30); // Keep 30 days
+      logger.debug('Cleaned up old login attempts');
+    }, 24 * 60 * 60 * 1000);
   }
 
   /**
@@ -26,56 +85,36 @@ class UserManagementService {
    */
   async initializeDataDirectory() {
     try {
-      const dataDir = path.dirname(this.usersFile);
+      const dataDir = path.join(process.cwd(), 'data');
       await fs.mkdir(dataDir, { recursive: true });
-      
-      // Create users file if it doesn't exist
-      try {
-        await fs.access(this.usersFile);
-      } catch {
-        await fs.writeFile(this.usersFile, JSON.stringify([], null, 2));
-      }
-      
-      // Create sessions file if it doesn't exist
-      try {
-        await fs.access(this.sessionsFile);
-      } catch {
-        await fs.writeFile(this.sessionsFile, JSON.stringify([], null, 2));
-      }
     } catch (error) {
       logger.error('Error initializing data directory:', error);
     }
   }
 
   /**
-   * Load users from file
+   * Load users from SQLite DB
    */
-  async loadUsers() {
+  async loadUsersFromDb() {
     try {
-      const data = await fs.readFile(this.usersFile, 'utf8');
-      const users = JSON.parse(data);
-      
+      // Get all users from DB and populate the in-memory map
+      // (You may want to remove the in-memory map later for full DB-driven logic)
+      const users = dbGetAllUsers();
       this.users.clear();
       users.forEach(user => {
-        this.users.set(user.username, user);
+        // Parse JSON fields
+        const parsedUser = {
+          ...user,
+          permissions: JSON.parse(user.permissions || '[]'),
+          profile: JSON.parse(user.profile || '{}'),
+          security: JSON.parse(user.security || '{}'),
+          metadata: JSON.parse(user.metadata || '{}')
+        };
+        this.users.set(user.username, parsedUser);
       });
-      
-      logger.info(`Loaded ${users.length} users from file`);
+      logger.info(`Loaded ${users.length} users from SQLite DB`);
     } catch (error) {
-      logger.error('Error loading users:', error);
-    }
-  }
-
-  /**
-   * Save users to file
-   */
-  async saveUsers() {
-    try {
-      const users = Array.from(this.users.values());
-      await fs.writeFile(this.usersFile, JSON.stringify(users, null, 2));
-      logger.info(`Saved ${users.length} users to file`);
-    } catch (error) {
-      logger.error('Error saving users:', error);
+      logger.error('Error loading users from DB:', error);
     }
   }
 
@@ -83,51 +122,72 @@ class UserManagementService {
    * Initialize default users if none exist
    */
   async initializeDefaultUsers() {
-    if (this.users.size === 0) {
+    const userCount = dbGetAllUsers().length;
+    if (userCount === 0) {
       logger.info('No users found, creating default admin user');
       
       const defaultPassword = process.env.DEFAULT_ADMIN_PASSWORD || 'admin123';
       const hashedPassword = await bcrypt.hash(defaultPassword, 12);
       
-      const adminUser = {
-        id: crypto.randomUUID(),
-        username: 'admin',
-        email: 'admin@example.com',
-        password: hashedPassword,
-        role: 'admin',
-        permissions: ['read', 'write', 'admin', 'user_management'],
-        profile: {
-          firstName: 'Admin',
-          lastName: 'User',
-          displayName: 'Administrator',
-          avatar: null,
-          timezone: 'UTC',
-          language: 'en'
-        },
-        security: {
-          emailVerified: true,
-          twoFactorEnabled: false,
-          twoFactorSecret: null,
-          lastPasswordChange: new Date().toISOString(),
-          passwordHistory: [],
-          failedLoginAttempts: 0,
-          lockedUntil: null,
-          lastLogin: null,
-          loginHistory: []
-        },
-        metadata: {
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          createdBy: 'system',
-          lastActivity: new Date().toISOString()
-        }
+      const permissions = ['read', 'write', 'admin', 'user_management'];
+      const profile = {
+        firstName: 'Admin',
+        lastName: 'User',
+        displayName: 'Administrator',
+        avatar: null,
+        timezone: 'UTC',
+        language: 'en'
+      };
+      const security = {
+        emailVerified: true,
+        twoFactorEnabled: false,
+        twoFactorSecret: null,
+        lastPasswordChange: new Date().toISOString(),
+        passwordHistory: [],
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLogin: null,
+        loginHistory: []
+      };
+      const metadata = {
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy: 'system',
+        lastActivity: new Date().toISOString()
       };
 
-      this.users.set('admin', adminUser);
-      await this.saveUsers();
-      
-      logger.warn('Default admin user created with password: admin123');
-      logger.warn('Please change the default password immediately!');
+      // Create admin user in database
+      const dbResult = dbCreateUser(
+        'admin',
+        'admin@example.com',
+        hashedPassword,
+        'admin',
+        JSON.stringify(permissions),
+        JSON.stringify(profile),
+        JSON.stringify(security),
+        JSON.stringify(metadata)
+      );
+
+      if (dbResult.changes) {
+        // Add to in-memory map
+        const adminUser = {
+          id: dbResult.lastInsertRowid,
+          username: 'admin',
+          email: 'admin@example.com',
+          password_hash: hashedPassword,
+          role: 'admin',
+          permissions,
+          profile,
+          security,
+          metadata
+        };
+        this.users.set('admin', adminUser);
+        
+        logger.warn('Default admin user created with password: admin123');
+        logger.warn('Please change the default password immediately!');
+      } else {
+        logger.error('Failed to create default admin user');
+      }
     }
   }
 
@@ -136,12 +196,22 @@ class UserManagementService {
    */
   async authenticateUser(username, password, ipAddress = null, userAgent = null) {
     try {
-      const user = this.users.get(username);
+      // Query database directly for user
+      const dbUser = dbGetUserByUsername(username);
       
-      if (!user) {
+      if (!dbUser) {
         await this.recordFailedLogin(username, ipAddress);
         return { success: false, message: 'Invalid credentials' };
       }
+
+      // Parse JSON fields
+      const user = {
+        ...dbUser,
+        permissions: JSON.parse(dbUser.permissions || '[]'),
+        profile: JSON.parse(dbUser.profile || '{}'),
+        security: JSON.parse(dbUser.security || '{}'),
+        metadata: JSON.parse(dbUser.metadata || '{}')
+      };
 
       // Check if account is locked
       if (user.security.lockedUntil && new Date() < new Date(user.security.lockedUntil)) {
@@ -161,12 +231,15 @@ class UserManagementService {
         };
       }
 
-      const isValidPassword = await bcrypt.compare(password, user.password);
+      const isValidPassword = await bcrypt.compare(password, user.password_hash);
       
       if (!isValidPassword) {
         await this.recordFailedLogin(username, ipAddress);
         return { success: false, message: 'Invalid credentials' };
       }
+
+      // Record successful login attempt
+      dbRecordLoginAttempt(username, ipAddress, true);
 
       // Reset failed login attempts on successful login
       user.security.failedLoginAttempts = 0;
@@ -189,12 +262,19 @@ class UserManagementService {
       user.metadata.lastActivity = new Date().toISOString();
       user.metadata.updatedAt = new Date().toISOString();
 
-      await this.saveUsers();
+      // Update user in database
+      dbUpdateUser(user.id, {
+        security: JSON.stringify(user.security),
+        metadata: JSON.stringify(user.metadata)
+      });
+      
+      // Update in-memory map
+      this.users.set(username, user);
 
       // Generate JWT token
       const token = this.generateToken(user);
       
-      // Store session
+      // Store session in database
       await this.createSession(user.id, token, ipAddress, userAgent);
       
       logger.info(`User ${username} authenticated successfully from ${ipAddress}`);
@@ -214,8 +294,19 @@ class UserManagementService {
    * Record failed login attempt
    */
   async recordFailedLogin(username, ipAddress) {
-    const user = this.users.get(username);
-    if (user) {
+    // Record failed login attempt in database
+    dbRecordLoginAttempt(username, ipAddress, false);
+    
+    const dbUser = dbGetUserByUsername(username);
+    if (dbUser) {
+      const user = {
+        ...dbUser,
+        permissions: JSON.parse(dbUser.permissions || '[]'),
+        profile: JSON.parse(dbUser.profile || '{}'),
+        security: JSON.parse(dbUser.security || '{}'),
+        metadata: JSON.parse(dbUser.metadata || '{}')
+      };
+      
       user.security.failedLoginAttempts += 1;
       
       // Lock account after 5 failed attempts for 15 minutes
@@ -231,7 +322,13 @@ class UserManagementService {
         success: false
       });
 
-      await this.saveUsers();
+      // Update user in database
+      dbUpdateUser(user.id, {
+        security: JSON.stringify(user.security)
+      });
+      
+      // Update in-memory map
+      this.users.set(username, user);
     }
   }
 
@@ -279,36 +376,27 @@ class UserManagementService {
   }
 
   /**
-   * Create user session
+   * Create user session in database
    */
   async createSession(userId, token, ipAddress, userAgent) {
+    const sessionId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours
+    
     const session = {
-      id: crypto.randomUUID(),
+      id: sessionId,
       userId,
       token,
       ipAddress,
       userAgent,
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
+      expiresAt
     };
 
-    this.userSessions.set(session.id, session);
-    await this.saveSessions();
+    // Store session in database
+    dbCreateSession(sessionId, userId, token, ipAddress, userAgent, expiresAt);
     
     return session;
-  }
-
-  /**
-   * Save sessions to file
-   */
-  async saveSessions() {
-    try {
-      const sessions = Array.from(this.userSessions.values());
-      await fs.writeFile(this.sessionsFile, JSON.stringify(sessions, null, 2));
-    } catch (error) {
-      logger.error('Error saving sessions:', error);
-    }
   }
 
   /**
@@ -340,23 +428,20 @@ class UserManagementService {
   async createUser(userData, createdBy = 'admin') {
     try {
       const { username, email, password, role = 'viewer', profile = {} } = userData;
-      
       // Validate required fields
       if (!username || !email || !password) {
         return { success: false, message: 'Username, email, and password are required' };
       }
-
-      // Check if user already exists
-      if (this.users.has(username)) {
+      // Check if user already exists in database
+      const existingUserByUsername = dbGetUserByUsername(username);
+      if (existingUserByUsername) {
         return { success: false, message: 'Username already exists' };
       }
-
-      // Check if email already exists
-      const existingUser = Array.from(this.users.values()).find(u => u.email === email);
-      if (existingUser) {
+      // Check if email already exists in database
+      const existingUserByEmail = dbGetUserByEmail(email);
+      if (existingUserByEmail) {
         return { success: false, message: 'Email already exists' };
       }
-
       // Validate password strength
       const passwordValidation = this.validatePassword(password);
       if (!passwordValidation.valid) {
@@ -366,7 +451,6 @@ class UserManagementService {
           errors: passwordValidation.errors
         };
       }
-
       // Validate email format
       const emailValidation = this.validateEmail(email);
       if (!emailValidation.valid) {
@@ -376,56 +460,66 @@ class UserManagementService {
           errors: emailValidation.errors
         };
       }
-
       const hashedPassword = await bcrypt.hash(password, 12);
       const permissions = this.getPermissionsForRole(role);
       
+      // Prepare user data for database
+      const security = {
+        emailVerified: false,
+        twoFactorEnabled: false,
+        twoFactorSecret: null,
+        lastPasswordChange: new Date().toISOString(),
+        passwordHistory: [hashedPassword],
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLogin: null,
+        loginHistory: []
+      };
+      
+      const metadata = {
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy,
+        lastActivity: new Date().toISOString()
+      };
+      
+      // Insert into SQLite DB
+      const dbResult = dbCreateUser(
+        username, 
+        email, 
+        hashedPassword, 
+        role, 
+        JSON.stringify(permissions), 
+        JSON.stringify(profile), 
+        JSON.stringify(security), 
+        JSON.stringify(metadata)
+      );
+      
+      if (!dbResult.changes) {
+        return { success: false, message: 'Failed to create user in DB' };
+      }
+      
+      // Create user object for in-memory map
       const newUser = {
-        id: crypto.randomUUID(),
+        id: dbResult.lastInsertRowid,
         username,
         email,
-        password: hashedPassword,
+        password_hash: hashedPassword,
         role,
         permissions,
-        profile: {
-          firstName: profile.firstName || '',
-          lastName: profile.lastName || '',
-          displayName: profile.displayName || username,
-          avatar: profile.avatar || null,
-          timezone: profile.timezone || 'UTC',
-          language: profile.language || 'en',
-          ...profile
-        },
-        security: {
-          emailVerified: false,
-          twoFactorEnabled: false,
-          twoFactorSecret: null,
-          lastPasswordChange: new Date().toISOString(),
-          passwordHistory: [hashedPassword],
-          failedLoginAttempts: 0,
-          lockedUntil: null,
-          lastLogin: null,
-          loginHistory: []
-        },
-        metadata: {
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          createdBy,
-          lastActivity: new Date().toISOString()
-        }
+        profile,
+        security,
+        metadata
       };
-
+      
+      // Update the in-memory map
       this.users.set(username, newUser);
-      await this.saveUsers();
-      
       // Send email verification (in production, implement email service)
-      await this.sendEmailVerification(newUser);
-      
+      await this.sendEmailVerification(this.users.get(username));
       logger.info(`New user created: ${username} with role ${role}`);
-      
       return {
         success: true,
-        user: this.sanitizeUser(newUser)
+        user: this.sanitizeUser(this.users.get(username))
       };
     } catch (error) {
       logger.error('Error creating user:', error);
@@ -488,7 +582,7 @@ class UserManagementService {
         }
 
         // Update password
-        user.password = hashedNewPassword;
+        user.password_hash = hashedNewPassword;
         user.security.lastPasswordChange = new Date().toISOString();
         user.security.passwordHistory.push(hashedNewPassword);
         
@@ -533,7 +627,15 @@ class UserManagementService {
       user.metadata.updatedAt = new Date().toISOString();
       user.metadata.lastActivity = new Date().toISOString();
 
-      await this.saveUsers();
+      // Update user in database
+      dbUpdateUser(user.id, {
+        username: user.username,
+        email: user.email,
+        password_hash: user.password_hash,
+        profile: JSON.stringify(user.profile),
+        security: JSON.stringify(user.security),
+        metadata: JSON.stringify(user.metadata)
+      });
       
       logger.info(`User profile updated: ${user.username} by ${updatedBy}`);
       
@@ -559,7 +661,7 @@ class UserManagementService {
       }
 
       // Verify current password
-      const isValidCurrentPassword = await bcrypt.compare(currentPassword, user.password);
+      const isValidCurrentPassword = await bcrypt.compare(currentPassword, user.password_hash);
       if (!isValidCurrentPassword) {
         return { success: false, message: 'Current password is incorrect' };
       }
@@ -581,7 +683,7 @@ class UserManagementService {
       }
 
       // Update password
-      user.password = hashedNewPassword;
+      user.password_hash = hashedNewPassword;
       user.security.lastPasswordChange = new Date().toISOString();
       user.security.passwordHistory.push(hashedNewPassword);
       
@@ -594,11 +696,12 @@ class UserManagementService {
       user.security.failedLoginAttempts = 0;
       user.security.lockedUntil = null;
 
-      user.metadata.updatedAt = new Date().toISOString();
-      user.metadata.lastActivity = new Date().toISOString();
+      // Update user in database
+      dbUpdateUser(user.id, {
+        password_hash: user.password_hash,
+        security: JSON.stringify(user.security)
+      });
 
-      await this.saveUsers();
-      
       logger.info(`Password changed for user: ${username}`);
       
       return { success: true, message: 'Password changed successfully' };
@@ -613,30 +716,24 @@ class UserManagementService {
    */
   async initiatePasswordReset(email) {
     try {
-      const user = Array.from(this.users.values()).find(u => u.email === email);
+      const user = this.users.get(email) || Array.from(this.users.values()).find(u => u.email === email);
       
       if (!user) {
         // Don't reveal if email exists or not
         return { success: true, message: 'If the email exists, a reset link has been sent' };
       }
 
+      // Generate reset token
       const resetToken = crypto.randomBytes(32).toString('hex');
-      const resetExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
 
-      this.passwordResetTokens.set(resetToken, {
-        userId: user.id,
-        email: user.email,
-        expiresAt: resetExpiry.toISOString()
-      });
+      // Store reset token in database
+      dbCreatePasswordResetToken(user.id, resetToken, expiresAt);
 
       // In production, send email with reset link
-      logger.info(`Password reset initiated for ${email}. Token: ${resetToken}`);
+      logger.info(`Password reset initiated for ${email} with token: ${resetToken}`);
       
-      return { 
-        success: true, 
-        message: 'If the email exists, a reset link has been sent',
-        resetToken // Remove this in production, only for development
-      };
+      return { success: true, message: 'If the email exists, a reset link has been sent' };
     } catch (error) {
       logger.error('Error initiating password reset:', error);
       return { success: false, message: 'Failed to initiate password reset' };
@@ -644,25 +741,15 @@ class UserManagementService {
   }
 
   /**
-   * Reset password with token
+   * Reset password using token
    */
   async resetPassword(token, newPassword) {
     try {
-      const resetData = this.passwordResetTokens.get(token);
+      // Get reset token from database
+      const resetToken = dbGetPasswordResetToken(token);
       
-      if (!resetData) {
+      if (!resetToken) {
         return { success: false, message: 'Invalid or expired reset token' };
-      }
-
-      if (new Date() > new Date(resetData.expiresAt)) {
-        this.passwordResetTokens.delete(token);
-        return { success: false, message: 'Reset token has expired' };
-      }
-
-      const user = Array.from(this.users.values()).find(u => u.id === resetData.userId);
-      
-      if (!user) {
-        return { success: false, message: 'User not found' };
       }
 
       // Validate new password
@@ -675,22 +762,43 @@ class UserManagementService {
         };
       }
 
-      // Update password
+      // Get user
+      const user = this.users.get(resetToken.user_id) || 
+                   Array.from(this.users.values()).find(u => u.id === resetToken.user_id);
+      
+      if (!user) {
+        return { success: false, message: 'User not found' };
+      }
+
+      // Check if new password is in history
       const hashedNewPassword = await bcrypt.hash(newPassword, 12);
-      user.password = hashedNewPassword;
+      if (user.security.passwordHistory.includes(hashedNewPassword)) {
+        return { success: false, message: 'New password cannot be the same as recent passwords' };
+      }
+
+      // Update password
+      user.password_hash = hashedNewPassword;
       user.security.lastPasswordChange = new Date().toISOString();
       user.security.passwordHistory.push(hashedNewPassword);
+      
+      // Keep only last 5 passwords in history
+      if (user.security.passwordHistory.length > 5) {
+        user.security.passwordHistory = user.security.passwordHistory.slice(-5);
+      }
+
+      // Reset failed login attempts
       user.security.failedLoginAttempts = 0;
       user.security.lockedUntil = null;
 
-      user.metadata.updatedAt = new Date().toISOString();
-      user.metadata.lastActivity = new Date().toISOString();
+      // Update user in database
+      dbUpdateUser(user.id, {
+        password_hash: user.password_hash,
+        security: JSON.stringify(user.security)
+      });
 
-      // Remove used token
-      this.passwordResetTokens.delete(token);
+      // Mark reset token as used
+      dbMarkPasswordResetTokenUsed(token);
 
-      await this.saveUsers();
-      
       logger.info(`Password reset completed for user: ${user.username}`);
       
       return { success: true, message: 'Password reset successfully' };
@@ -705,17 +813,15 @@ class UserManagementService {
    */
   async sendEmailVerification(user) {
     try {
+      // Generate verification token
       const verificationToken = crypto.randomBytes(32).toString('hex');
-      const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours
 
-      this.emailVerificationTokens.set(verificationToken, {
-        userId: user.id,
-        email: user.email,
-        expiresAt: verificationExpiry.toISOString()
-      });
+      // Store verification token in database
+      dbCreateEmailVerificationToken(user.id, verificationToken, expiresAt);
 
       // In production, send email with verification link
-      logger.info(`Email verification sent to ${user.email}. Token: ${verificationToken}`);
+      logger.info(`Email verification sent for ${user.email} with token: ${verificationToken}`);
       
       return { success: true, message: 'Verification email sent' };
     } catch (error) {
@@ -725,35 +831,36 @@ class UserManagementService {
   }
 
   /**
-   * Verify email with token
+   * Verify email using token
    */
   async verifyEmail(token) {
     try {
-      const verificationData = this.emailVerificationTokens.get(token);
+      // Get verification token from database
+      const verificationToken = dbGetEmailVerificationToken(token);
       
-      if (!verificationData) {
+      if (!verificationToken) {
         return { success: false, message: 'Invalid or expired verification token' };
       }
 
-      if (new Date() > new Date(verificationData.expiresAt)) {
-        this.emailVerificationTokens.delete(token);
-        return { success: false, message: 'Verification token has expired' };
-      }
-
-      const user = Array.from(this.users.values()).find(u => u.id === verificationData.userId);
+      // Get user
+      const user = this.users.get(verificationToken.user_id) || 
+                   Array.from(this.users.values()).find(u => u.id === verificationToken.user_id);
       
       if (!user) {
         return { success: false, message: 'User not found' };
       }
 
+      // Mark email as verified
       user.security.emailVerified = true;
-      user.metadata.updatedAt = new Date().toISOString();
 
-      // Remove used token
-      this.emailVerificationTokens.delete(token);
+      // Update user in database
+      dbUpdateUser(user.id, {
+        security: JSON.stringify(user.security)
+      });
 
-      await this.saveUsers();
-      
+      // Mark verification token as used
+      dbMarkEmailVerificationTokenUsed(token);
+
       logger.info(`Email verified for user: ${user.username}`);
       
       return { success: true, message: 'Email verified successfully' };
@@ -873,8 +980,11 @@ class UserManagementService {
         }
       }
 
+      // Delete user from database (this will cascade delete sessions, tokens, etc.)
+      dbDeleteUser(username);
+      
+      // Remove from in-memory map
       this.users.delete(username);
-      await this.saveUsers();
       
       logger.info(`User deleted: ${username} by ${deletedBy}`);
       
@@ -890,12 +1000,8 @@ class UserManagementService {
    */
   async logoutUser(token) {
     try {
-      // Remove session
-      const session = Array.from(this.userSessions.values()).find(s => s.token === token);
-      if (session) {
-        this.userSessions.delete(session.id);
-        await this.saveSessions();
-      }
+      // Remove session from database
+      dbDeleteSessionByToken(token);
 
       return { success: true, message: 'Logged out successfully' };
     } catch (error) {

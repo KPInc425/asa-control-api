@@ -1,42 +1,14 @@
 // services/job-manager.js
 
-import fs from 'fs/promises';
-import path from 'path';
 import logger from '../utils/logger.js';
-
-const JOBS_FILE = path.join(process.cwd(), 'data', 'jobs.json');
-let jobs = {};
-
-// Load jobs from file on startup
-async function loadJobs() {
-  try {
-    const data = await fs.readFile(JOBS_FILE, 'utf8');
-    jobs = JSON.parse(data);
-    logger.info(`Loaded ${Object.keys(jobs).length} jobs from persistent storage`);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      // File doesn't exist, start with empty jobs
-      jobs = {};
-      logger.info('No existing jobs file found, starting with empty job store');
-    } else {
-      logger.error('Failed to load jobs from file:', error);
-      jobs = {};
-    }
-  }
-}
-
-// Save jobs to file
-async function saveJobs() {
-  try {
-    // Ensure data directory exists
-    const dataDir = path.dirname(JOBS_FILE);
-    await fs.mkdir(dataDir, { recursive: true });
-    
-    await fs.writeFile(JOBS_FILE, JSON.stringify(jobs, null, 2));
-  } catch (error) {
-    logger.error('Failed to save jobs to file:', error);
-  }
-}
+import { 
+  createJob as dbCreateJob,
+  getJob as dbGetJob,
+  getAllJobs as dbGetAllJobs,
+  updateJob as dbUpdateJob,
+  deleteJob as dbDeleteJob,
+  cleanupOldJobs as dbCleanupOldJobs
+} from './database.js';
 
 // Broadcast job updates to Socket.IO clients
 function broadcastJobUpdate(jobId, job) {
@@ -63,84 +35,108 @@ function broadcastJobUpdate(jobId, job) {
   }
 }
 
-// Initialize job storage
-await loadJobs();
-
 export function createJob(type, data) {
   const jobId = Math.random().toString(36).substr(2, 9);
-  jobs[jobId] = {
-    id: jobId,
-    type,
-    status: 'pending',
-    progress: [],
-    result: null,
-    error: null,
-    data,
-    created: Date.now(),
-    updated: Date.now(),
-  };
   
-  // Save to file immediately
-  saveJobs();
+  // Create job in database
+  dbCreateJob(jobId, type, JSON.stringify(data));
+  
+  // Get the created job
+  const job = dbGetJob(jobId);
   
   logger.info(`Created job ${jobId} of type ${type}`);
-  return jobs[jobId];
+  return job;
 }
 
 export function updateJob(jobId, update) {
-  if (jobs[jobId]) {
-    Object.assign(jobs[jobId], update, { updated: Date.now() });
+  const job = dbGetJob(jobId);
+  if (job) {
+    // Parse existing job data
+    const jobData = {
+      ...job,
+      progress: JSON.parse(job.progress || '[]'),
+      data: JSON.parse(job.data || '{}'),
+      result: job.result ? JSON.parse(job.result) : null
+    };
     
-    // Save to file immediately
-    saveJobs();
+    // Apply updates
+    Object.assign(jobData, update);
+    
+    // Update job in database
+    dbUpdateJob(jobId, {
+      status: jobData.status,
+      progress: JSON.stringify(jobData.progress),
+      result: jobData.result ? JSON.stringify(jobData.result) : null,
+      error: jobData.error
+    });
+    
+    // Get updated job
+    const updatedJob = dbGetJob(jobId);
     
     // Broadcast update to Socket.IO clients
-    broadcastJobUpdate(jobId, jobs[jobId]);
+    broadcastJobUpdate(jobId, updatedJob);
     
     logger.info(`Updated job ${jobId}: ${update.status || 'progress'}`);
+    
+    return updatedJob;
   }
 }
 
 export function addJobProgress(jobId, message) {
-  if (jobs[jobId]) {
-    jobs[jobId].progress.push({ timestamp: Date.now(), message });
-    jobs[jobId].updated = Date.now();
+  const job = dbGetJob(jobId);
+  if (job) {
+    // Parse existing progress
+    const progress = JSON.parse(job.progress || '[]');
     
-    // Save to file immediately
-    saveJobs();
+    // Add new progress entry
+    progress.push({ timestamp: Date.now(), message });
+    
+    // Update job in database
+    dbUpdateJob(jobId, {
+      progress: JSON.stringify(progress)
+    });
+    
+    // Get updated job
+    const updatedJob = dbGetJob(jobId);
     
     // Broadcast update to Socket.IO clients
-    broadcastJobUpdate(jobId, jobs[jobId]);
+    broadcastJobUpdate(jobId, updatedJob);
     
     logger.info(`Job ${jobId} progress: ${message}`);
+    
+    return updatedJob;
   }
 }
 
 export function getJob(jobId) {
-  return jobs[jobId];
+  const job = dbGetJob(jobId);
+  if (job) {
+    // Parse JSON fields
+    return {
+      ...job,
+      progress: JSON.parse(job.progress || '[]'),
+      data: JSON.parse(job.data || '{}'),
+      result: job.result ? JSON.parse(job.result) : null
+    };
+  }
+  return null;
 }
 
 export function getAllJobs() {
-  return Object.values(jobs);
+  const jobs = dbGetAllJobs();
+  return jobs.map(job => ({
+    ...job,
+    progress: JSON.parse(job.progress || '[]'),
+    data: JSON.parse(job.data || '{}'),
+    result: job.result ? JSON.parse(job.result) : null
+  }));
 }
 
 // Clean up old completed/failed jobs (older than 24 hours)
 export async function cleanupOldJobs() {
-  const cutoff = Date.now() - (24 * 60 * 60 * 1000); // 24 hours ago
-  const oldJobIds = Object.keys(jobs).filter(jobId => {
-    const job = jobs[jobId];
-    return (job.status === 'completed' || job.status === 'failed') && 
-           job.updated < cutoff;
-  });
-  
-  oldJobIds.forEach(jobId => {
-    delete jobs[jobId];
-    logger.info(`Cleaned up old job ${jobId}`);
-  });
-  
-  if (oldJobIds.length > 0) {
-    await saveJobs();
-  }
+  const result = dbCleanupOldJobs(24); // 24 hours
+  logger.info(`Cleaned up ${result.changes} old jobs`);
+  return result;
 }
 
 // Run cleanup every hour
