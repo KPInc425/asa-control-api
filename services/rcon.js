@@ -96,6 +96,17 @@ class RconService {
     const startTime = Date.now();
     const commandType = this.getCommandType(command);
     
+    // Validate required parameters
+    if (!host) {
+      throw new Error('RCON host is required');
+    }
+    if (!port) {
+      throw new Error('RCON port is required');
+    }
+    if (!command) {
+      throw new Error('RCON command is required');
+    }
+    
     try {
       const connection = new Rcon({
         host: host || 'localhost',
@@ -120,7 +131,17 @@ class RconService {
       recordRconCommandDuration(`native-${host}:${port}`, commandType, duration);
       
       logger.error(`RCON command failed for native server ${host}:${port}: ${command}`, error);
-      throw new Error(`RCON command failed: ${error.message}`);
+      
+      // Provide more specific error messages
+      if (error.message.includes('ECONNREFUSED')) {
+        throw new Error(`RCON connection refused. Server may not be running or RCON port ${port} is not accessible.`);
+      } else if (error.message.includes('timeout')) {
+        throw new Error(`RCON connection timeout. Server may not be responding.`);
+      } else if (error.message.includes('authentication')) {
+        throw new Error(`RCON authentication failed. Check RCON password.`);
+      } else {
+        throw new Error(`RCON command failed: ${error.message}`);
+      }
     }
   }
 

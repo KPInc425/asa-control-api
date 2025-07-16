@@ -761,10 +761,19 @@ export default async function nativeServerRoutes(fastify, options) {
         });
       }
 
+      // Check if server is running
+      const isRunning = await serverManager.isRunning(name);
+      if (!isRunning) {
+        return reply.status(400).send({
+          success: false,
+          message: `Server ${name} is not running. Cannot send RCON commands to a stopped server.`
+        });
+      }
+
       if (!server.rconPort) {
         return reply.status(400).send({
           success: false,
-          message: `No RCON port configured for server ${name}`
+          message: `No RCON port configured for server ${name}. Please check server configuration.`
         });
       }
 
