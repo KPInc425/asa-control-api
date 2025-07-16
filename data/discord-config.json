@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "token": "",
+  "applicationId": "",
+  "allowedChannels": [],
+  "allowedRoles": [],
+  "notifications": {
+    "serverStatus": true,
+    "playerJoin": true,
+    "playerLeave": true,
+    "serverStart": true,
+    "serverStop": true,
+    "errors": true
+  }
+}

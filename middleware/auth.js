@@ -87,6 +87,16 @@ export function requirePermission(permission) {
         return authResult;
       }
       
+      // Check if user was properly attached to request
+      if (!request.user) {
+        logger.error('User not attached to request after authentication');
+        logger.info('=== REQUIRE PERMISSION DEBUG END (NO USER) ===');
+        return reply.status(401).send({
+          success: false,
+          message: 'Authentication failed - user not found'
+        });
+      }
+      
       logger.info(`User authenticated: ${request.user.username} (role: ${request.user.role})`);
       logger.info(`User permissions: ${JSON.stringify(request.user.permissions)}`);
 
@@ -128,6 +138,16 @@ export function requireRole(role) {
         // If authenticate returned a response, it means authentication failed
         logger.info('=== REQUIRE ROLE DEBUG END (AUTH FAILED) ===');
         return authResult;
+      }
+      
+      // Check if user was properly attached to request
+      if (!request.user) {
+        logger.error('User not attached to request after authentication');
+        logger.info('=== REQUIRE ROLE DEBUG END (NO USER) ===');
+        return reply.status(401).send({
+          success: false,
+          message: 'Authentication failed - user not found'
+        });
       }
       
       logger.info(`User authenticated: ${request.user.username} (role: ${request.user.role})`);

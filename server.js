@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import { Server as SocketIOServer } from 'socket.io';
 import config from './config/index.js';
 import logger from './utils/logger.js';
@@ -15,8 +16,11 @@ import enhancedAuthRoutes from './routes/enhanced-auth.js';
 import logsRoutes from './routes/logs.js';
 import environmentRoutes from './routes/environment.js';
 import nativeServerRoutes from './routes/native-servers.js';
-import provisioningRoutes from './routes/provisioning.js';
+import saveFilesRoutes from './routes/save-files.js';
+import discordRoutes from './routes/discord.js';
+import autoShutdownRoutes from './routes/auto-shutdown.js';
 import StaticServer from './services/static-server.js';
+import provisioningRoutes from './routes/provisioning/index.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -26,7 +30,12 @@ const fastify = Fastify({
 });
 
 // Register plugins
-// Register plugins
+await fastify.register(multipart, {
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit
+    files: 1
+  }
+});
 
 // CORS configuration
 const corsOrigins = process.env.CORS_ORIGIN 
@@ -136,6 +145,9 @@ await fastify.register(enhancedAuthRoutes);
 await fastify.register(logsRoutes);
 await fastify.register(environmentRoutes);
 await fastify.register(nativeServerRoutes);
+await fastify.register(saveFilesRoutes);
+await fastify.register(discordRoutes);
+await fastify.register(autoShutdownRoutes);
 await fastify.register(provisioningRoutes);
 
 // Make Socket.IO instance available to routes after it's created
@@ -455,7 +467,11 @@ const setupSocketIO = () => {
 
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
-  logger.info(`Received ${signal}. Starting graceful shutdown...`);
+  logger.serviceEvent('info', `Received ${signal}. Starting graceful shutdown...`, {
+    event: 'shutdown',
+    signal: signal,
+    uptime: process.uptime()
+  });
   
   try {
     // Close RCON connections
@@ -465,10 +481,17 @@ const gracefulShutdown = async (signal) => {
     // Close Fastify server
     await fastify.close();
     
-    logger.info('Graceful shutdown completed');
+    logger.serviceEvent('info', 'Graceful shutdown completed', {
+      event: 'shutdown-complete',
+      signal: signal
+    });
     process.exit(0);
   } catch (error) {
-    logger.error('Error during graceful shutdown:', error);
+    logger.serviceEvent('error', 'Error during graceful shutdown', {
+      event: 'shutdown-error',
+      error: error.message,
+      signal: signal
+    });
     process.exit(1);
   }
 };
@@ -520,6 +543,15 @@ const start = async () => {
 
     // Setup Socket.IO event handlers
     setupSocketIO();
+    
+    logger.serviceEvent('info', `ASA Control API server started successfully`, {
+      event: 'startup-complete',
+      host: config.server.host,
+      port: config.server.port,
+      environment: config.server.nodeEnv,
+      metricsEnabled: config.metrics.enabled,
+      uptime: process.uptime()
+    });
     
     logger.info(`ASA Control API server listening on ${config.server.host}:${config.server.port}`);
     logger.info(`Socket.IO server ready on ${config.server.host}:${config.server.port}`);

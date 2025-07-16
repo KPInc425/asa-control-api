@@ -1,4 +1,4 @@
-import environmentService from '../services/environment.js';
+import { environmentService } from '../services/environment.js';
 import { requireRead, requireWrite, requireAdmin } from '../middleware/auth.js';
 import config from '../config/index.js';
 import path from 'path';

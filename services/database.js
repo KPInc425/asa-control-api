@@ -82,6 +82,47 @@ db.prepare(`CREATE TABLE IF NOT EXISTS login_attempts (
   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )`).run();
 
+// Create server configurations table
+db.prepare(`CREATE TABLE IF NOT EXISTS server_configs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  config_data TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`).run();
+
+// Create shared mods table
+db.prepare(`CREATE TABLE IF NOT EXISTS shared_mods (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mod_id TEXT UNIQUE NOT NULL,
+  mod_name TEXT,
+  enabled BOOLEAN DEFAULT TRUE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`).run();
+
+// Create server mods table
+db.prepare(`CREATE TABLE IF NOT EXISTS server_mods (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_name TEXT NOT NULL,
+  mod_id TEXT NOT NULL,
+  mod_name TEXT,
+  enabled BOOLEAN DEFAULT TRUE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(server_name, mod_id)
+)`).run();
+
+// Create configuration exclusions table
+db.prepare(`CREATE TABLE IF NOT EXISTS config_exclusions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_name TEXT NOT NULL,
+  config_file TEXT NOT NULL,
+  exclusion_pattern TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(server_name, config_file, exclusion_pattern)
+)`).run();
+
 // --- User CRUD functions ---
 
 /**
@@ -195,7 +236,7 @@ function createSession(id, userId, token, ipAddress = null, userAgent = null, ex
  * @param {string} token
  */
 function getSessionByToken(token) {
-  const stmt = db.prepare('SELECT * FROM sessions WHERE token = ? AND expires_at > datetime("now")');
+  const stmt = db.prepare('SELECT * FROM sessions WHERE token = ? AND expires_at > datetime(\'now\')');
   return stmt.get(token);
 }
 
@@ -248,7 +289,7 @@ function deleteSessionByToken(token) {
  * Clean up expired sessions
  */
 function cleanupExpiredSessions() {
-  const stmt = db.prepare('DELETE FROM sessions WHERE expires_at <= datetime("now")');
+  const stmt = db.prepare('DELETE FROM sessions WHERE expires_at <= datetime(\'now\')');
   return stmt.run();
 }
 
@@ -344,7 +385,7 @@ function createPasswordResetToken(userId, token, expiresAt) {
 function getPasswordResetToken(token) {
   const stmt = db.prepare(`
     SELECT * FROM password_reset_tokens 
-    WHERE token = ? AND expires_at > datetime('now') AND used = FALSE
+    WHERE token = ? AND expires_at > datetime('now') AND used = 0
   `);
   return stmt.get(token);
 }
@@ -354,7 +395,7 @@ function getPasswordResetToken(token) {
  * @param {string} token
  */
 function markPasswordResetTokenUsed(token) {
-  const stmt = db.prepare('UPDATE password_reset_tokens SET used = TRUE WHERE token = ?');
+  const stmt = db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE token = ?');
   return stmt.run(token);
 }
 
@@ -362,7 +403,7 @@ function markPasswordResetTokenUsed(token) {
  * Clean up expired password reset tokens
  */
 function cleanupExpiredPasswordResetTokens() {
-  const stmt = db.prepare('DELETE FROM password_reset_tokens WHERE expires_at <= datetime("now")');
+  const stmt = db.prepare('DELETE FROM password_reset_tokens WHERE expires_at <= datetime(\'now\')');
   return stmt.run();
 }
 
@@ -389,7 +430,7 @@ function createEmailVerificationToken(userId, token, expiresAt) {
 function getEmailVerificationToken(token) {
   const stmt = db.prepare(`
     SELECT * FROM email_verification_tokens 
-    WHERE token = ? AND expires_at > datetime('now') AND used = FALSE
+    WHERE token = ? AND expires_at > datetime('now') AND used = 0
   `);
   return stmt.get(token);
 }
@@ -399,7 +440,7 @@ function getEmailVerificationToken(token) {
  * @param {string} token
  */
 function markEmailVerificationTokenUsed(token) {
-  const stmt = db.prepare('UPDATE email_verification_tokens SET used = TRUE WHERE token = ?');
+  const stmt = db.prepare('UPDATE email_verification_tokens SET used = 1 WHERE token = ?');
   return stmt.run(token);
 }
 
@@ -407,7 +448,7 @@ function markEmailVerificationTokenUsed(token) {
  * Clean up expired email verification tokens
  */
 function cleanupExpiredEmailVerificationTokens() {
-  const stmt = db.prepare('DELETE FROM email_verification_tokens WHERE expires_at <= datetime("now")');
+  const stmt = db.prepare('DELETE FROM email_verification_tokens WHERE expires_at <= datetime(\'now\')');
   return stmt.run();
 }
 
@@ -424,7 +465,7 @@ function recordLoginAttempt(username, ipAddress = null, success = false) {
     INSERT INTO login_attempts (username, ip_address, success) 
     VALUES (?, ?, ?)
   `);
-  return stmt.run(username, ipAddress, success);
+  return stmt.run(username, ipAddress, success ? 1 : 0);
 }
 
 /**
@@ -435,7 +476,7 @@ function recordLoginAttempt(username, ipAddress = null, success = false) {
 function getRecentFailedLoginAttempts(username, hours = 1) {
   const stmt = db.prepare(`
     SELECT * FROM login_attempts 
-    WHERE username = ? AND success = FALSE 
+    WHERE username = ? AND success = 0 
     AND timestamp >= datetime('now', '-${hours} hours')
     ORDER BY timestamp DESC
   `);
@@ -452,6 +493,208 @@ function cleanupOldLoginAttempts(daysOld = 30) {
     WHERE timestamp <= datetime('now', '-${daysOld} days')
   `);
   return stmt.run();
+}
+
+// --- Server Configuration functions ---
+
+/**
+ * Create or update server configuration
+ * @param {string} name
+ * @param {string} configData
+ */
+function upsertServerConfig(name, configData) {
+  const stmt = db.prepare(`
+    INSERT INTO server_configs (name, config_data) 
+    VALUES (?, ?) 
+    ON CONFLICT(name) DO UPDATE SET 
+      config_data = excluded.config_data,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  return stmt.run(name, configData);
+}
+
+/**
+ * Get server configuration by name
+ * @param {string} name
+ */
+function getServerConfig(name) {
+  const stmt = db.prepare('SELECT * FROM server_configs WHERE name = ?');
+  return stmt.get(name);
+}
+
+/**
+ * Get all server configurations
+ */
+function getAllServerConfigs() {
+  const stmt = db.prepare('SELECT * FROM server_configs ORDER BY updated_at DESC');
+  return stmt.all();
+}
+
+/**
+ * Delete server configuration
+ * @param {string} name
+ */
+function deleteServerConfig(name) {
+  const stmt = db.prepare('DELETE FROM server_configs WHERE name = ?');
+  return stmt.run(name);
+}
+
+// --- Shared Mods functions ---
+
+/**
+ * Add or update shared mod
+ * @param {string} modId
+ * @param {string} [modName]
+ * @param {boolean} [enabled]
+ */
+function upsertSharedMod(modId, modName = null, enabled = true) {
+  const stmt = db.prepare(`
+    INSERT INTO shared_mods (mod_id, mod_name, enabled) 
+    VALUES (?, ?, ?) 
+    ON CONFLICT(mod_id) DO UPDATE SET 
+      mod_name = excluded.mod_name,
+      enabled = excluded.enabled,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  return stmt.run(modId, modName, enabled ? 1 : 0);
+}
+
+/**
+ * Get shared mod by ID
+ * @param {string} modId
+ */
+function getSharedMod(modId) {
+  const stmt = db.prepare('SELECT * FROM shared_mods WHERE mod_id = ?');
+  return stmt.get(modId);
+}
+
+/**
+ * Get all shared mods
+ */
+function getAllSharedMods() {
+  const stmt = db.prepare('SELECT * FROM shared_mods ORDER BY created_at DESC');
+  return stmt.all();
+}
+
+/**
+ * Delete shared mod
+ * @param {string} modId
+ */
+function deleteSharedMod(modId) {
+  const stmt = db.prepare('DELETE FROM shared_mods WHERE mod_id = ?');
+  return stmt.run(modId);
+}
+
+// --- Server Mods functions ---
+
+/**
+ * Add or update server mod
+ * @param {string} serverName
+ * @param {string} modId
+ * @param {string} [modName]
+ * @param {boolean} [enabled]
+ */
+function upsertServerMod(serverName, modId, modName = null, enabled = true) {
+  const stmt = db.prepare(`
+    INSERT INTO server_mods (server_name, mod_id, mod_name, enabled) 
+    VALUES (?, ?, ?, ?) 
+    ON CONFLICT(server_name, mod_id) DO UPDATE SET 
+      mod_name = excluded.mod_name,
+      enabled = excluded.enabled,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  return stmt.run(serverName, modId, modName, enabled ? 1 : 0);
+}
+
+/**
+ * Get mods for a server
+ * @param {string} serverName
+ */
+function getServerMods(serverName) {
+  const stmt = db.prepare('SELECT * FROM server_mods WHERE server_name = ? ORDER BY created_at DESC');
+  return stmt.all(serverName);
+}
+
+/**
+ * Delete server mod
+ * @param {string} serverName
+ * @param {string} modId
+ */
+function deleteServerMod(serverName, modId) {
+  const stmt = db.prepare('DELETE FROM server_mods WHERE server_name = ? AND mod_id = ?');
+  return stmt.run(serverName, modId);
+}
+
+/**
+ * Delete all mods for a server
+ * @param {string} serverName
+ */
+function deleteAllServerMods(serverName) {
+  const stmt = db.prepare('DELETE FROM server_mods WHERE server_name = ?');
+  return stmt.run(serverName);
+}
+
+// --- Configuration Exclusions functions ---
+
+/**
+ * Add configuration exclusion
+ * @param {string} serverName
+ * @param {string} configFile
+ * @param {string} exclusionPattern
+ */
+function addConfigExclusion(serverName, configFile, exclusionPattern) {
+  const stmt = db.prepare(`
+    INSERT INTO config_exclusions (server_name, config_file, exclusion_pattern) 
+    VALUES (?, ?, ?)
+  `);
+  return stmt.run(serverName, configFile, exclusionPattern);
+}
+
+/**
+ * Get exclusions for a server
+ * @param {string} serverName
+ */
+function getConfigExclusions(serverName) {
+  const stmt = db.prepare('SELECT * FROM config_exclusions WHERE server_name = ? ORDER BY created_at DESC');
+  return stmt.all(serverName);
+}
+
+/**
+ * Get exclusions for a server and config file
+ * @param {string} serverName
+ * @param {string} configFile
+ */
+function getConfigExclusionsForFile(serverName, configFile) {
+  const stmt = db.prepare('SELECT * FROM config_exclusions WHERE server_name = ? AND config_file = ? ORDER BY created_at DESC');
+  return stmt.all(serverName, configFile);
+}
+
+/**
+ * Delete configuration exclusion
+ * @param {string} serverName
+ * @param {string} configFile
+ * @param {string} exclusionPattern
+ */
+function deleteConfigExclusion(serverName, configFile, exclusionPattern) {
+  const stmt = db.prepare('DELETE FROM config_exclusions WHERE server_name = ? AND config_file = ? AND exclusion_pattern = ?');
+  return stmt.run(serverName, configFile, exclusionPattern);
+}
+
+/**
+ * Delete all exclusions for a server
+ * @param {string} serverName
+ */
+function deleteAllConfigExclusions(serverName) {
+  const stmt = db.prepare('DELETE FROM config_exclusions WHERE server_name = ?');
+  return stmt.run(serverName);
+}
+
+/**
+ * Get all server mods
+ */
+function getAllServerMods() {
+  const stmt = db.prepare('SELECT * FROM server_mods ORDER BY created_at DESC');
+  return stmt.all();
 }
 
 export {
@@ -495,4 +738,26 @@ export {
   recordLoginAttempt,
   getRecentFailedLoginAttempts,
   cleanupOldLoginAttempts,
+  // Server configuration functions
+  upsertServerConfig,
+  getServerConfig,
+  getAllServerConfigs,
+  deleteServerConfig,
+  // Shared mods functions
+  upsertSharedMod,
+  getSharedMod,
+  getAllSharedMods,
+  deleteSharedMod,
+  // Server mods functions
+  upsertServerMod,
+  getServerMods,
+  deleteServerMod,
+  deleteAllServerMods,
+  // Configuration exclusions functions
+  addConfigExclusion,
+  getConfigExclusions,
+  getConfigExclusionsForFile,
+  deleteConfigExclusion,
+  deleteAllConfigExclusions,
+  getAllServerMods,
 };

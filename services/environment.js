@@ -1,5 +1,6 @@
+import { fileURLToPath } from 'url';
 import { readFile, writeFile, access } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync as existsSyncFS } from 'fs';
 import { join, dirname } from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -8,11 +9,51 @@ import logger from '../utils/logger.js';
 
 const execAsync = promisify(exec);
 
+// Proper __dirname for ES modules (cross-platform)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 class EnvironmentService {
   constructor() {
-    this.envPath = join(process.cwd(), '.env');
-    this.dockerComposePath = join(process.cwd(), 'docker-compose.yml');
-    this.backupDir = join(process.cwd(), 'backups');
+    // Determine the base directory for the application
+    const baseDir = process.cwd();
+    
+    // Environment file path
+    this.envPath = join(baseDir, '.env');
+    
+    // Docker Compose file paths - try multiple locations
+    const possibleDockerComposePaths = [
+      join(baseDir, 'docker-compose.yml'),
+      join(baseDir, 'docker-compose.unified.yml'),
+      join(baseDir, 'docker', 'docker-compose.yml'),
+      join(baseDir, 'docker', 'docker-compose.unified.yml'),
+      join(baseDir, 'asa-docker-control-api', 'docker-compose.yml'),
+      join(baseDir, 'asa-docker-control-api', 'docker-compose.unified.yml'),
+      join(baseDir, 'asa-docker-control-api', 'docker', 'docker-compose.yml'),
+      join(baseDir, 'asa-docker-control-api', 'docker', 'docker-compose.unified.yml')
+    ];
+    
+    // Find the first existing docker-compose file
+    this.dockerComposePath = possibleDockerComposePaths.find(path => existsSyncFS(path));
+    
+    if (!this.dockerComposePath) {
+      logger.warn('No docker-compose.yml file found in any of the expected locations:');
+      possibleDockerComposePaths.forEach(path => {
+        logger.warn(`  - ${path}`);
+      });
+      // Use the first path as default for creation
+      this.dockerComposePath = possibleDockerComposePaths[0];
+    } else {
+      logger.info(`Using docker-compose file: ${this.dockerComposePath}`);
+    }
+    
+    // Backup directory
+    this.backupDir = join(baseDir, 'backups');
+    
+    // Ensure backup directory exists
+    this.createDirectory(this.backupDir).catch(err => {
+      logger.warn('Failed to create backup directory:', err);
+    });
   }
 
   /**
@@ -20,7 +61,7 @@ class EnvironmentService {
    */
   async readEnvironmentFile() {
     try {
-      if (!existsSync(this.envPath)) {
+      if (!existsSyncFS(this.envPath)) {
         throw new Error('.env file not found');
       }
 
@@ -103,16 +144,59 @@ class EnvironmentService {
    */
   async readDockerComposeFile() {
     try {
-      if (!existsSync(this.dockerComposePath)) {
-        throw new Error('docker-compose.yml file not found');
+      if (!existsSyncFS(this.dockerComposePath)) {
+        logger.warn(`Docker compose file not found at: ${this.dockerComposePath}`);
+        logger.info('Creating default docker-compose.yml file...');
+        
+        // Create a default docker-compose.yml file
+        const defaultContent = `version: '3.8'
+
+services:
+  # ASA Control API
+  asa-control-api:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # Add your ASA servers here
+  # Example:
+  # asa-server-theisland:
+  #   image: asa-server:latest
+  #   ports:
+  #     - "7777:7777/udp"
+  #     - "32330:32330"
+  #   environment:
+  #     - MAP_NAME=TheIsland
+  #     - SERVER_NAME=My ASA Server
+  #   volumes:
+  #     - ./servers/theisland:/ark
+  #   restart: unless-stopped
+`;
+        
+        await writeFile(this.dockerComposePath, defaultContent, 'utf8');
+        logger.info(`Created default docker-compose.yml at: ${this.dockerComposePath}`);
+
+        return {
+          success: true,
+          content: defaultContent,
+          path: this.dockerComposePath,
+          isDefault: true
+        };
       }
 
       const content = await readFile(this.dockerComposePath, 'utf8');
+      logger.info(`Successfully read docker-compose file from: ${this.dockerComposePath}`);
 
       return {
         success: true,
         content,
-        path: this.dockerComposePath
+        path: this.dockerComposePath,
+        isDefault: false
       };
     } catch (error) {
       logger.error('Error reading docker-compose.yml file:', error);
@@ -482,7 +566,7 @@ class EnvironmentService {
    */
   async createBackup(filePath, prefix) {
     try {
-      if (!existsSync(this.backupDir)) {
+      if (!existsSyncFS(this.backupDir)) {
         await this.createDirectory(this.backupDir);
       }
 
@@ -564,4 +648,5 @@ class EnvironmentService {
   }
 }
 
-export default new EnvironmentService(); 
+export const environmentService = new EnvironmentService();
+export default EnvironmentService; 

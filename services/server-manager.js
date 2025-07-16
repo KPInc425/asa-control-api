@@ -6,6 +6,13 @@ import { EventEmitter } from 'events';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import PowerShellHelper from './powershell-helper.js';
+import { 
+  upsertServerConfig, 
+  getServerConfig, 
+  getAllServerConfigs,
+  getAllSharedMods,
+  getServerMods
+} from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -139,6 +146,12 @@ export class DockerServerManager extends ServerManager {
         type: 'container'
       }));
     } catch (error) {
+      // Check if it's a Docker connection error
+      if (error.code === 'ENOENT' && error.message.includes('docker_engine')) {
+        logger.warn('Docker is not running or not accessible. Returning empty server list.');
+        return [];
+      }
+      
       logger.error('Failed to list Docker containers:', error);
       throw error;
     }
@@ -1028,21 +1041,9 @@ export class NativeServerManager extends ServerManager {
    * Add or update server configuration
    */
   async addServerConfig(name, config) {
-    this.serverConfigs.set(name, config);
-    
-    // Save to file
-    const configPath = path.join(process.cwd(), 'native-servers.json');
-    const allConfigs = {};
-    
-    try {
-      const existingContent = await fs.readFile(configPath, 'utf8');
-      Object.assign(allConfigs, JSON.parse(existingContent));
-    } catch (error) {
-      // File doesn't exist, start with empty config
-    }
-    
-    allConfigs[name] = config;
-    await fs.writeFile(configPath, JSON.stringify(allConfigs, null, 2));
+    // Save to SQLite database
+    await upsertServerConfig(name, JSON.stringify(config));
+    logger.info(`Server configuration saved to database: ${name}`);
   }
 
   /**
@@ -1194,46 +1195,31 @@ export class NativeServerManager extends ServerManager {
    */
   async getFinalModListForServer(serverName) {
     try {
-      // Get shared mods
-      const sharedModsPath = path.join(config.server.native.basePath, 'shared-mods.json');
-      let sharedMods = [];
+      // Get shared mods from database
+      const sharedModsData = getAllSharedMods();
+      const sharedMods = sharedModsData
+        .filter(mod => mod.enabled === 1)
+        .map(mod => mod.mod_id);
       
-      try {
-        const sharedModsData = await fs.readFile(sharedModsPath, 'utf8');
-        const sharedModsConfig = JSON.parse(sharedModsData);
-        sharedMods = sharedModsConfig.modList || [];
-      } catch (error) {
-        // Shared mods file doesn't exist, use empty array
+      // Get server-specific mods from database
+      const serverModsData = getServerMods(serverName);
+      const serverMods = serverModsData
+        .filter(mod => mod.enabled === 1)
+        .map(mod => mod.mod_id);
+      
+      // Check if server should exclude shared mods (legacy logic for Club ARK servers)
+      const isClubArkServer = serverName.toLowerCase().includes('club') || 
+                             serverName.toLowerCase().includes('bobs');
+      
+      if (isClubArkServer && serverMods.length === 0) {
+        // Legacy fallback for Club ARK servers
+        return [1005639]; // Club ARK mod
       }
       
-      // Get server-specific mods
-      const serverModsPath = path.join(config.server.native.basePath, 'server-mods', `${serverName}.json`);
-      let serverMods = [];
-      let excludeSharedMods = false;
+      // Combine shared and server-specific mods, removing duplicates
+      const allMods = [...sharedMods, ...serverMods];
+      return [...new Set(allMods)];
       
-      try {
-        const serverModsData = await fs.readFile(serverModsPath, 'utf8');
-        const serverModsConfig = JSON.parse(serverModsData);
-        serverMods = serverModsConfig.additionalMods || [];
-        excludeSharedMods = serverModsConfig.excludeSharedMods || false;
-      } catch (error) {
-        // Server mods file doesn't exist, use defaults
-        const isClubArkServer = serverName.toLowerCase().includes('club') || 
-                               serverName.toLowerCase().includes('bobs');
-        if (isClubArkServer) {
-          serverMods = [1005639]; // Club ARK mod
-          excludeSharedMods = true;
-        }
-      }
-      
-      // Combine mods based on configuration
-      if (excludeSharedMods) {
-        return serverMods;
-      } else {
-        // Combine shared and server-specific mods, removing duplicates
-        const allMods = [...sharedMods, ...serverMods];
-        return [...new Set(allMods)];
-      }
     } catch (error) {
       logger.error(`Failed to get final mod list for ${serverName}:`, error);
       return [];

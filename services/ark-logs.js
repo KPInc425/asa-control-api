@@ -202,8 +202,8 @@ class ArkLogsService {
                 if (line.trim()) {
                   stream.emit('data', Buffer.from(line + '\n', 'utf8'));
                 }
-              }
-              
+      }
+      
               // Update our line count
               lines.length = newLines.length;
             } catch (error) {
@@ -278,7 +278,8 @@ class ArkLogsService {
       }
 
       if (!logPath) {
-        throw new Error(`Log file ${logFileName} not found for server ${serverName}`);
+        logger.warn(`Log file ${logFileName} not found for server ${serverName}. Searched paths:`, possibleLogPaths);
+        return `Log file ${logFileName} not found for server ${serverName}.\n\nSearched locations:\n${possibleLogPaths.map(p => `  - ${p}`).join('\n')}\n\nThis is normal if the server hasn't started yet or if logs are stored elsewhere.`;
       }
 
       const content = await fs.readFile(logPath, 'utf8');
@@ -286,7 +287,7 @@ class ArkLogsService {
       return linesArray.slice(-lines).join('\n');
     } catch (error) {
       logger.error(`Failed to read recent logs for ${serverName}/${logFileName}:`, error);
-      return '';
+      return `Error reading log file: ${error.message}`;
     }
   }
 

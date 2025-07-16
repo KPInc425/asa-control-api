@@ -1,6 +1,7 @@
 import { NativeServerManager } from '../services/server-manager.js';
 import { requireRead, requireWrite, requirePermission } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
+import { getServerConfig, deleteServerConfig } from '../services/database.js';
 
 // Create native server manager instance (no Docker service)
 const serverManager = new NativeServerManager();
@@ -117,16 +118,10 @@ export default async function nativeServerRoutes(fastify, options) {
     try {
       const { name } = request.params;
       
-      // This would need to be implemented in the NativeServerManager
-      // For now, we'll read from the config file directly
-      const fs = await import('fs/promises');
-      const path = await import('path');
+      // Get server configuration from database
+      const serverConfig = getServerConfig(name);
       
-      const configPath = path.join(process.cwd(), 'native-servers.json');
-      const configContent = await fs.readFile(configPath, 'utf8');
-      const serverConfigs = JSON.parse(configContent);
-      
-      if (!serverConfigs[name]) {
+      if (!serverConfig) {
         return reply.status(404).send({
           success: false,
           message: `Server configuration not found: ${name}`
@@ -135,7 +130,7 @@ export default async function nativeServerRoutes(fastify, options) {
       
       return {
         success: true,
-        config: serverConfigs[name]
+        config: JSON.parse(serverConfig.config_data)
       };
     } catch (error) {
       fastify.log.error(`Error getting native server configuration for ${request.params.name}:`, error);
@@ -176,16 +171,8 @@ export default async function nativeServerRoutes(fastify, options) {
         await serverManager.stop(name);
       }
       
-      // Remove from configuration
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      
-      const configPath = path.join(process.cwd(), 'native-servers.json');
-      const configContent = await fs.readFile(configPath, 'utf8');
-      const serverConfigs = JSON.parse(configContent);
-      
-      delete serverConfigs[name];
-      await fs.writeFile(configPath, JSON.stringify(serverConfigs, null, 2));
+      // Remove from database
+      deleteServerConfig(name);
       
       logger.info(`Native server configuration deleted: ${name}`);
       return {
@@ -405,6 +392,112 @@ export default async function nativeServerRoutes(fastify, options) {
       return result;
     } catch (error) {
       fastify.log.error(`Error getting cluster server info for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Get live server details with player count and game time
+  fastify.get('/api/native-servers/:name/live-details', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            details: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      // Get basic server status
+      const isRunning = await serverManager.isRunning(name);
+      
+      if (!isRunning) {
+        return {
+          success: true,
+          details: {
+            name,
+            status: 'offline',
+            players: 0,
+            maxPlayers: 0,
+            day: 0,
+            gameTime: '00:00',
+            uptime: 0,
+            cpu: 0,
+            memory: 0
+          }
+        };
+      }
+      
+      // Get server stats
+      const stats = await serverManager.getStats(name);
+      
+      // Try to get player count and game info via RCON
+      let playerCount = 0;
+      let maxPlayers = 70;
+      let day = 0;
+      let gameTime = '00:00';
+      
+      try {
+        // Import RCON service
+        const rconService = (await import('../services/rcon.js')).default;
+        
+        // Get player list
+        const playerList = await rconService.getPlayerList(name);
+        playerCount = Array.isArray(playerList) ? playerList.length : 0;
+        
+        // Get server info for day/time
+        const serverInfo = await rconService.getServerInfo(name);
+        if (serverInfo && serverInfo.Day) {
+          day = parseInt(serverInfo.Day) || 0;
+        }
+        
+        // Calculate game time from day (rough approximation)
+        if (day > 0) {
+          const hours = Math.floor((day * 24) % 24);
+          const minutes = Math.floor((day * 24 * 60) % 60);
+          gameTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        }
+        
+      } catch (rconError) {
+        logger.warn(`RCON failed for ${name}, using fallback data:`, rconError.message);
+        // Use fallback values if RCON fails
+      }
+      
+      const details = {
+        name,
+        status: 'online',
+        players: playerCount,
+        maxPlayers,
+        day,
+        gameTime,
+        uptime: stats.uptime || 0,
+        cpu: stats.cpu || 0,
+        memory: stats.memory || 0,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      return {
+        success: true,
+        details
+      };
+    } catch (error) {
+      fastify.log.error(`Error getting live details for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message

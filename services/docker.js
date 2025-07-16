@@ -54,6 +54,12 @@ class DockerService {
 
       return containerDetails;
     } catch (error) {
+      // Check if it's a Docker connection error
+      if (error.code === 'ENOENT' && error.message.includes('docker_engine')) {
+        logger.warn('Docker is not running or not accessible. Returning empty container list.');
+        return [];
+      }
+      
       logger.error('Error listing containers:', error);
       throw new Error('Failed to list containers');
     }

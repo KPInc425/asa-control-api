@@ -541,12 +541,10 @@ class UserManagementService {
       // Handle username change
       if (updates.username && updates.username !== username) {
         const newUsername = updates.username;
-        
         // Check if new username already exists
         if (this.users.has(newUsername)) {
           return { success: false, message: 'Username already exists' };
         }
-
         // Validate username format
         if (!/^[a-zA-Z0-9_-]{3,20}$/.test(newUsername)) {
           return { 
@@ -554,12 +552,10 @@ class UserManagementService {
             message: 'Username must be 3-20 characters and contain only letters, numbers, underscores, and hyphens' 
           };
         }
-
         // Remove old user entry and add with new username
         this.users.delete(username);
         user.username = newUsername;
         this.users.set(newUsername, user);
-        
         logger.info(`Username changed from ${username} to ${newUsername}`);
       }
 
@@ -574,27 +570,22 @@ class UserManagementService {
             errors: passwordValidation.errors
           };
         }
-
         // Check if new password is in history
         const hashedNewPassword = await bcrypt.hash(updates.newPassword, 12);
         if (user.security.passwordHistory.includes(hashedNewPassword)) {
           return { success: false, message: 'New password cannot be the same as recent passwords' };
         }
-
         // Update password
         user.password_hash = hashedNewPassword;
         user.security.lastPasswordChange = new Date().toISOString();
         user.security.passwordHistory.push(hashedNewPassword);
-        
         // Keep only last 5 passwords in history
         if (user.security.passwordHistory.length > 5) {
           user.security.passwordHistory = user.security.passwordHistory.slice(-5);
         }
-
         // Reset failed login attempts
         user.security.failedLoginAttempts = 0;
         user.security.lockedUntil = null;
-
         logger.info(`Password updated for user: ${user.username}`);
       }
 
@@ -613,12 +604,11 @@ class UserManagementService {
             errors: emailValidation.errors
           };
         }
-
-        const existingUser = Array.from(this.users.values()).find(u => u.email === updates.email && u.username !== user.username);
-        if (existingUser) {
+        // Check for duplicate email in DB
+        const existingUserByEmail = dbGetUserByEmail(updates.email);
+        if (existingUserByEmail && existingUserByEmail.id !== user.id) {
           return { success: false, message: 'Email already exists' };
         }
-
         user.email = updates.email;
         user.security.emailVerified = false; // Require re-verification
         await this.sendEmailVerification(user);
@@ -627,18 +617,24 @@ class UserManagementService {
       user.metadata.updatedAt = new Date().toISOString();
       user.metadata.lastActivity = new Date().toISOString();
 
-      // Update user in database
-      dbUpdateUser(user.id, {
-        username: user.username,
-        email: user.email,
-        password_hash: user.password_hash,
-        profile: JSON.stringify(user.profile),
-        security: JSON.stringify(user.security),
-        metadata: JSON.stringify(user.metadata)
-      });
-      
+      // Update user in database (persist all updated fields)
+      try {
+        dbUpdateUser(user.id, {
+          username: user.username,
+          email: user.email,
+          password_hash: user.password_hash,
+          profile: JSON.stringify(user.profile),
+          security: JSON.stringify(user.security),
+          metadata: JSON.stringify(user.metadata)
+        });
+      } catch (err) {
+        if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+          return { success: false, message: 'Email or username already exists' };
+        }
+        logger.error('Error updating user in DB:', err);
+        return { success: false, message: 'Failed to update user profile' };
+      }
       logger.info(`User profile updated: ${user.username} by ${updatedBy}`);
-      
       return {
         success: true,
         user: this.sanitizeUser(user)
