@@ -276,7 +276,8 @@ export default async function environmentRoutes(fastify, options) {
             items: { type: 'string' }
           },
           additionalArgs: { type: 'string' },
-          dataPath: { type: 'string' }
+          dataPath: { type: 'string' },
+          disableBattleEye: { type: 'boolean' }
         }
       },
       response: {

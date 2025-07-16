@@ -1067,6 +1067,11 @@ export class NativeServerManager extends ServerManager {
       args.push(`?Mods=${config.mods.join(',')}`);
     }
 
+    // Add BattleEye flag if disabled
+    if (config.disableBattleEye) {
+      args.push('-NoBattleEye');
+    }
+
     // Add additional arguments
     if (config.additionalArgs) {
       args.push(...config.additionalArgs.split(' '));

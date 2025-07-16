@@ -49,7 +49,8 @@ export default async function nativeServerRoutes(fastify, options) {
               serverPassword: { type: 'string' },
               adminPassword: { type: 'string' },
               mods: { type: 'array', items: { type: 'string' } },
-              additionalArgs: { type: 'string' }
+              additionalArgs: { type: 'string' },
+              disableBattleEye: { type: 'boolean' }
             }
           }
         }

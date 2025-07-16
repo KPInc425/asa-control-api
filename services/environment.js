@@ -551,6 +551,10 @@ services:
       lines.push(`      - ADDITIONAL_ARGS=${serverConfig.additionalArgs}`);
     }
     
+    if (serverConfig.disableBattleEye) {
+      lines.push(`      - DISABLE_BATTLE_EYE=true`);
+    }
+    
     lines.push(`    volumes:`);
     lines.push(`      - /opt/asa/asa-server/${serverConfig.name}:/opt/asa/asa-server`);
     lines.push(`    restart: unless-stopped`);

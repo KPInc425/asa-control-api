@@ -606,6 +606,9 @@ export class ServerProvisioner {
       const savesPath = path.join(serverPath, 'saves');
       const logsPath = path.join(serverPath, 'logs');
       
+      // Add BattleEye flag based on server configuration
+      const battleEyeArg = serverConfig.disableBattleEye ? ' -NoBattleEye' : '';
+      
       const startScript = `@echo off
 echo Starting ${serverName}...
 cd /d "${binariesPath}"
@@ -636,12 +639,13 @@ REM Start the server
   ?ClusterPassword=%CLUSTERPASSWORD% \\
   ?AltSaveDirectoryName=%SAVEPATH% \\
   ?ConfigOverridePath=%CONFIGPATH% \\
-  ?LogPath=%LOGPATH%
+  ?LogPath=%LOGPATH%${battleEyeArg}
 
 pause`;
 
       await fs.writeFile(path.join(serverPath, 'start.bat'), startScript);
       logger.info(`Start script created for server: ${serverName}`);
+      logger.info(`BattleEye disabled: ${serverConfig.disableBattleEye || false}`);
     } catch (error) {
       logger.error(`Failed to create start script for ${serverConfig.name}:`, error);
       throw error;
@@ -782,7 +786,11 @@ pause`;
           
           // Create startup script
           this.emitProgress?.(`Creating startup script for ${serverName}`);
-          await this.createStartScriptInCluster(clusterName, serverPath, { ...serverConfig, customDynamicConfigUrl: clusterConfig.customDynamicConfigUrl });
+          await this.createStartScriptInCluster(clusterName, serverPath, { 
+            ...serverConfig, 
+            customDynamicConfigUrl: clusterConfig.customDynamicConfigUrl,
+            disableBattleEye: clusterConfig.disableBattleEye || false
+          });
           
           // Create stop script
           await this.createStopScriptInCluster(clusterName, serverPath, serverName);
@@ -1109,6 +1117,9 @@ if %ERRORLEVEL% NEQ 0 (
       // Add mods parameter if mods are configured
       const modsArg = serverConfig.mods && serverConfig.mods.length > 0 ? ` -mods=${serverConfig.mods.join(',')}` : '';
       
+      // Add BattleEye flag based on cluster configuration
+      const battleEyeArg = serverConfig.disableBattleEye ? ' -NoBattleEye' : '';
+      
       // Build the query string for the server parameters
       let queryParams = [
         `SessionName=${serverName}`,
@@ -1129,7 +1140,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo Starting ${serverName}...
 
 REM Start the ASA server with proper parameters
-      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?${queryString}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName} -NoBattleEye
+      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?${queryString}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
 
 echo Server ${serverName} has stopped.
 pause`;
@@ -1138,6 +1149,7 @@ pause`;
       await fs.writeFile(startScriptPath, startScript);
       logger.info(`Start script created for server: ${serverName} in cluster ${clusterName} at: ${startScriptPath}`);
       logger.info(`Start script content length: ${startScript.length} characters`);
+      logger.info(`BattleEye disabled: ${serverConfig.disableBattleEye || false}`);
       this.emitProgress?.(`Start script created for server: ${serverName}`);
     } catch (error) {
       logger.error(`Failed to create start script for ${serverConfig.name} in cluster ${clusterName}:`, error);
