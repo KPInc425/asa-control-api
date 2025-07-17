@@ -988,87 +988,44 @@ export class NativeServerManager extends ServerManager {
 
   async isRunning(name) {
     try {
-      // Ensure processes Map is initialized
-      if (!this.processes) {
-        this.processes = new Map();
-      }
-      
-      // Check if we have process info
+      if (!this.processes) this.processes = new Map();
       const processInfo = this.processes.get(name);
-      if (processInfo && processInfo.process) {
-        return !processInfo.process.killed;
-      }
-      
-      // Get server config to find the ports
+      if (processInfo && processInfo.process) return !processInfo.process.killed;
       let serverPorts = null;
+      let serverInfo = null;
       try {
-        // Try to get server info from cluster config
-        const serverInfo = await this.getClusterServerInfo(name);
+        serverInfo = await this.getClusterServerInfo(name);
         if (serverInfo) {
           serverPorts = {
             gamePort: serverInfo.gamePort,
             queryPort: serverInfo.queryPort,
             rconPort: serverInfo.rconPort,
-            externalPort: serverInfo.port // This is the external port that appears in command line
+            externalPort: serverInfo.port,
+            map: serverInfo.map,
+            sessionName: serverInfo.name
           };
         }
       } catch (error) {
         console.warn(`Failed to get server info for ${name}:`, error.message);
       }
-      
-      // Get all running processes
       const processes = await this.getRunningProcesses();
-      
-      // Look for matching process by checking multiple criteria
       for (const process of processes) {
         const commandLine = process.commandLine || '';
         const processName = process.name || '';
-        
-        // Debug logging
-        console.log(`Checking process: ${processName}`);
-        console.log(`Command line: ${commandLine}`);
-        
-        // Method 1: Check by external port (primary method)
-        if (serverPorts && serverPorts.externalPort) {
-          const portPattern = `Port=${serverPorts.externalPort}`;
-          if (commandLine.includes(portPattern)) {
-            console.log(`Found running server ${name} by external port ${serverPorts.externalPort}`);
-            return true;
-          }
-        }
-        
-        // Method 2: Check by query port
-        if (serverPorts && serverPorts.queryPort) {
-          const queryPortPattern = `QueryPort=${serverPorts.queryPort}`;
-          if (commandLine.includes(queryPortPattern)) {
-            console.log(`Found running server ${name} by query port ${serverPorts.queryPort}`);
-            return true;
-          }
-        }
-        
-        // Method 3: Check by RCON port
-        if (serverPorts && serverPorts.rconPort) {
-          const rconPortPattern = `RCONPort=${serverPorts.rconPort}`;
-          if (commandLine.includes(rconPortPattern)) {
-            console.log(`Found running server ${name} by RCON port ${serverPorts.rconPort}`);
-            return true;
-          }
-        }
-        
-        // Method 4: Check by session name (fallback)
-        if (commandLine.includes(`SessionName=${name}`)) {
-          console.log(`Found running server ${name} by session name`);
-          return true;
-        }
-        
-        // Method 5: Check by server name in path (fallback)
-        if (commandLine.includes(name.replace(/\s+/g, '\\s*'))) {
-          console.log(`Found running server ${name} by name in path`);
+        // Tight match: require all key params
+        if (
+          serverPorts &&
+          commandLine.includes(`Port=${serverPorts.gamePort}`) &&
+          commandLine.includes(`QueryPort=${serverPorts.queryPort}`) &&
+          commandLine.includes(`RCONPort=${serverPorts.rconPort}`) &&
+          commandLine.includes(serverPorts.map) &&
+          commandLine.includes(`SessionName=${serverPorts.sessionName}`)
+        ) {
+          console.log(`Strict match: found running server ${name}`);
           return true;
         }
       }
-      
-      console.log(`No running process found for server ${name}`);
+      console.log(`No strict match found for server ${name}`);
       return false;
     } catch (error) {
       console.error(`Error checking if server ${name} is running:`, error);
@@ -1350,14 +1307,6 @@ export class NativeServerManager extends ServerManager {
     try {
       const processInfo = this.processes.get(name);
       const isRunning = await this.isRunning(name);
-      
-      console.log(`getServerStatus for ${name}:`, {
-        hasProcessInfo: !!processInfo,
-        isRunning: isRunning,
-        processStatus: processInfo?.status,
-        processNull: processInfo?.process === null
-      });
-      
       if (!processInfo && !isRunning) {
         return {
           name: name,
@@ -1367,26 +1316,16 @@ export class NativeServerManager extends ServerManager {
           crashInfo: null
         };
       }
-      
       if (processInfo) {
         const uptime = Math.floor((Date.now() - processInfo.startTime.getTime()) / 1000);
-        
-        // If the process is null but we have process info, it means the cmd process exited
-        // but the actual server might still be running
         let currentStatus = processInfo.status;
-        if (processInfo.process === null && isRunning) {
+        if (processInfo.status === 'crashed') {
+          currentStatus = 'failed';
+        } else if (processInfo.process === null && isRunning) {
           currentStatus = 'running';
         } else if (processInfo.process === null && !isRunning) {
           currentStatus = 'stopped';
         }
-        
-        console.log(`Status calculation for ${name}:`, {
-          originalStatus: processInfo.status,
-          processNull: processInfo.process === null,
-          isRunning: isRunning,
-          finalStatus: currentStatus
-        });
-        
         return {
           name: name,
           status: currentStatus,
@@ -1402,16 +1341,13 @@ export class NativeServerManager extends ServerManager {
           startupErrors: processInfo.startupErrors || null
         };
       }
-      
-      // Process not tracked but server is running
       return {
         name: name,
-        status: 'running',
-        uptime: 0, // Unknown uptime
+        status: isRunning ? 'running' : 'stopped',
+        uptime: 0,
         pid: null,
         crashInfo: null
       };
-      
     } catch (error) {
       logger.error(`Failed to get server status for ${name}:`, error);
       return {
