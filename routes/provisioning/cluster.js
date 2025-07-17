@@ -40,7 +40,8 @@ export default async function clusterRoutes(fastify) {
               clusterId: { type: 'string' },
               clusterPassword: { type: 'string' },
               sessionName: { type: 'string' },
-              disableBattleEye: { type: 'boolean' }
+              disableBattleEye: { type: 'boolean' },
+              customDynamicConfigUrl: { type: 'string' }
             }
           },
           regenerateConfigs: { type: 'boolean' },
@@ -98,7 +99,8 @@ export default async function clusterRoutes(fastify) {
           harvestMultiplier: { type: 'number' },
           xpMultiplier: { type: 'number' },
           tamingMultiplier: { type: 'number' },
-          disableBattleEye: { type: 'boolean' }
+          disableBattleEye: { type: 'boolean' },
+          customDynamicConfigUrl: { type: 'string' }
         }
       }
     }
@@ -117,7 +119,8 @@ export default async function clusterRoutes(fastify) {
         harvestMultiplier = 3.0,
         xpMultiplier = 3.0,
         tamingMultiplier = 5.0,
-        disableBattleEye = false
+        disableBattleEye = false,
+        customDynamicConfigUrl = ''
       } = request.body;
 
       if (!name) {
@@ -140,7 +143,8 @@ export default async function clusterRoutes(fastify) {
         harvestMultiplier,
         xpMultiplier,
         tamingMultiplier,
-        disableBattleEye
+        disableBattleEye,
+        customDynamicConfigUrl
       };
 
       const result = await provisioner.createServer(serverConfig);

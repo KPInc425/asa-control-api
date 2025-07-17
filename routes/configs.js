@@ -30,7 +30,8 @@ const SAFE_ENV_VARS = [
   'POWERSHELL_ENABLED',
   'PORT',
   'HOST',
-  'NODE_ENV'
+  'NODE_ENV',
+  'CUSTOM_DYNAMIC_CONFIG_URL'
 ];
 
 // Sensitive variables that should never be exposed or edited via dashboard

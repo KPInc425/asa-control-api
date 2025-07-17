@@ -1057,22 +1057,28 @@ export class NativeServerManager extends ServerManager {
       `?ServerPassword="${config.serverPassword || ''}"`,
       `?AdminPassword="${config.adminPassword || 'admin123'}"`
     ];
-
     // Add mods if specified
     if (config.mods && config.mods.length > 0) {
       args.push(`?Mods=${config.mods.join(',')}`);
     }
-
     // Add BattleEye flag if disabled
     if (config.disableBattleEye) {
       args.push('-NoBattleEye');
     }
-
+    // Add DynamicConfigURL if present
+    const dynamicConfigUrl = config.dynamicConfigUrl || (config.asa && config.asa.dynamicConfigUrl) || require('../config/index.js').default.asa.dynamicConfigUrl;
+    if (dynamicConfigUrl) {
+      args.push(`-DynamicConfigURL=${dynamicConfigUrl}`);
+    }
+    // Add CustomDynamicConfigUrl if present
+    const customDynamicConfigUrl = config.customDynamicConfigUrl || (config.asa && config.asa.customDynamicConfigUrl) || require('../config/index.js').default.asa.customDynamicConfigUrl;
+    if (customDynamicConfigUrl) {
+      args.push(`?CustomDynamicConfigUrl=\"${customDynamicConfigUrl}\"`);
+    }
     // Add additional arguments
     if (config.additionalArgs) {
       args.push(...config.additionalArgs.split(' '));
     }
-
     return args;
   }
 
@@ -1081,38 +1087,36 @@ export class NativeServerManager extends ServerManager {
    */
   buildServerArgsFromCluster(server) {
     const args = [];
-    
-    // Map
     args.push(server.map || 'TheIsland');
-    
-    // Basic server parameters - use the correct port values
     args.push('?listen');
     args.push(`?Port=${server.gamePort || 7777}`);
     args.push(`?QueryPort=${server.queryPort || 27015}`);
     args.push(`?RCONPort=${server.rconPort || 32330}`);
     args.push(`?MaxPlayers=${server.maxPlayers || 70}`);
-    
-    // Passwords
     if (server.adminPassword) {
       args.push(`?ServerAdminPassword=${server.adminPassword}`);
     }
     if (server.serverPassword) {
       args.push(`?ServerPassword=${server.serverPassword}`);
     }
-    
-    // Cluster settings
     if (server.clusterId) {
       args.push(`?ClusterId=${server.clusterId}`);
     }
     if (server.clusterPassword) {
       args.push(`?ClusterPassword=${server.clusterPassword}`);
     }
-    
-    // Paths - fix ClusterDirOverride path formatting
     const clusterDataPath = path.join(path.dirname(server.serverPath || ''), 'clusterdata').replace(/\\/g, '/');
     args.push(`?ClusterDirOverride=${clusterDataPath}`);
-    // ConfigOverridePath is now handled separately based on directory existence
-    
+    // Add DynamicConfigURL if present
+    const dynamicConfigUrl = server.dynamicConfigUrl || require('../config/index.js').default.asa.dynamicConfigUrl;
+    if (dynamicConfigUrl) {
+      args.push(`-DynamicConfigURL=${dynamicConfigUrl}`);
+    }
+    // Add CustomDynamicConfigUrl if present
+    const customDynamicConfigUrl = server.customDynamicConfigUrl || require('../config/index.js').default.asa.customDynamicConfigUrl;
+    if (customDynamicConfigUrl) {
+      args.push(`?CustomDynamicConfigUrl=\"${customDynamicConfigUrl}\"`);
+    }
     return args;
   }
 

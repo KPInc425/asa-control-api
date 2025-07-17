@@ -51,7 +51,9 @@ const config = {
         path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', '.update.lock') : 
         '/opt/asa/.update.lock'),
     // Default config files to look for
-    defaultConfigFiles: ['Game.ini', 'GameUserSettings.ini']
+    defaultConfigFiles: ['Game.ini', 'GameUserSettings.ini'],
+    // Custom Dynamic Config URL (global)
+    customDynamicConfigUrl: process.env.CUSTOM_DYNAMIC_CONFIG_URL || '',
   },
   
   rcon: {
