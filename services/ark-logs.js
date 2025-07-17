@@ -8,7 +8,7 @@ import { createServerManager } from './server-manager.js';
 
 class ArkLogsService {
   constructor() {
-    this.basePath = config.arkLogs.basePath || '/home/gameserver/server-files';
+    this.basePath = config.arkLogs.basePath || 'F:\\ARK';
     this.serverManager = createServerManager();
   }
 
@@ -43,7 +43,7 @@ class ArkLogsService {
         serverPath = serverInfo.serverPath;
       } else {
         // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
       }
 
       logger.info(`Using server path for logs: ${serverPath}`);
@@ -143,7 +143,7 @@ class ArkLogsService {
       serverPath = serverInfo.serverPath;
     } else {
       // Fallback to default path
-      serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+      serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
     }
 
     // Look for the log file in multiple possible locations
@@ -256,7 +256,7 @@ class ArkLogsService {
         serverPath = serverInfo.serverPath;
       } else {
         // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
       }
 
       // Look for the log file in multiple possible locations
@@ -309,7 +309,7 @@ class ArkLogsService {
         serverPath = serverInfo.serverPath;
       } else {
         // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', serverName);
+        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
       }
 
       // Look for the log file in multiple possible locations
