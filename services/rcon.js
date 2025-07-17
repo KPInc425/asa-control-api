@@ -98,14 +98,19 @@ class RconService {
     
     // Validate required parameters
     if (!host) {
+      logger.error('RCON command failed: host is required');
       throw new Error('RCON host is required');
     }
     if (!port) {
+      logger.error('RCON command failed: port is required');
       throw new Error('RCON port is required');
     }
     if (!command) {
+      logger.error('RCON command failed: command is required');
       throw new Error('RCON command is required');
     }
+    
+    logger.info(`Attempting RCON connection to ${host}:${port} with command: ${command}`);
     
     try {
       const connection = new Rcon({
@@ -149,20 +154,30 @@ class RconService {
    * Get or create RCON connection
    */
   async getConnection(containerName, options = {}) {
-    const connectionKey = `${containerName}-${options.host || 'localhost'}-${options.port || config.rcon.defaultPort}`;
+    // Ensure options is an object and handle undefined values
+    const safeOptions = options || {};
+    
+    // Validate container name
+    if (!containerName) {
+      throw new Error('Container name is required for RCON connection');
+    }
+    
+    const connectionKey = `${containerName}-${safeOptions.host || 'localhost'}-${safeOptions.port || config.rcon.defaultPort}`;
     
     if (this.connections.has(connectionKey)) {
       const connection = this.connections.get(connectionKey);
-      if (connection.connected) {
+      if (connection && connection.connected) {
         return connection;
       }
+      // Remove stale connection
+      this.connections.delete(connectionKey);
     }
 
     const connection = new Rcon({
-      host: options.host || 'localhost',
-      port: options.port || config.rcon.defaultPort,
-      password: options.password || config.rcon.password,
-      timeout: options.timeout || 5000
+      host: safeOptions.host || 'localhost',
+      port: safeOptions.port || config.rcon.defaultPort,
+      password: safeOptions.password || config.rcon.password,
+      timeout: safeOptions.timeout || 5000
     });
 
     try {

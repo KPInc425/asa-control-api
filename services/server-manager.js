@@ -529,27 +529,28 @@ export class NativeServerManager extends ServerManager {
     }
   }
 
+  /**
+   * Get server configuration from database
+   */
+  getServerConfigFromDatabase(name) {
+    try {
+      const dbConfig = getServerConfig(name);
+      if (dbConfig) {
+        return JSON.parse(dbConfig.config_data);
+      }
+      return null;
+    } catch (error) {
+      logger.warn(`Failed to get database config for ${name}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get cluster server info with database config merge
+   */
   async getClusterServerInfo(name) {
     try {
-      // Find the server in the clusters using the correct native path
-      let clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
-      
-      try {
-        await fs.access(clustersPath);
-        logger.info(`Using native clusters path for server info: ${clustersPath}`);
-      } catch (error) {
-        logger.warn(`Native clusters path not accessible: ${clustersPath}`, error.message);
-        // Try Docker path as fallback
-        const dockerClustersPath = '/opt/asa/asa-server/clusters';
-        try {
-          await fs.access(dockerClustersPath);
-          clustersPath = dockerClustersPath;
-          logger.info(`Using Docker clusters path as fallback: ${clustersPath}`);
-        } catch {
-          throw new Error(`No clusters directory found or accessible`);
-        }
-      }
-      
+      const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
       const clusterDirs = await fs.readdir(clustersPath);
       
       for (const clusterDir of clusterDirs) {
@@ -561,14 +562,16 @@ export class NativeServerManager extends ServerManager {
           if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
             const server = clusterConfig.servers.find(s => s.name === name);
             if (server) {
-              // Return server info with cluster context
-              return {
-                ...server,
-                clusterName: clusterConfig.name || clusterDir,
-                clusterPath: path.join(clustersPath, clusterDir),
-                serverPath: server.serverPath || path.join(clustersPath, clusterDir, server.name),
-                clusterConfig: clusterConfig
-              };
+              // Merge with database config (database takes precedence)
+              const dbConfig = this.getServerConfigFromDatabase(name);
+              if (dbConfig) {
+                Object.assign(server, dbConfig);
+                logger.info(`Merged database config for cluster server ${name}`, { 
+                  disableBattleEye: server.disableBattleEye 
+                });
+              }
+              
+              return server;
             }
           }
         } catch (error) {
@@ -838,6 +841,18 @@ export class NativeServerManager extends ServerManager {
     try {
       const servers = [];
       
+      // Get database configurations
+      const dbConfigs = getAllServerConfigs();
+      const dbConfigMap = new Map();
+      dbConfigs.forEach(config => {
+        try {
+          const parsedConfig = JSON.parse(config.config_data);
+          dbConfigMap.set(config.name, parsedConfig);
+        } catch (error) {
+          logger.warn(`Failed to parse database config for ${config.name}:`, error.message);
+        }
+      });
+      
       // List individual servers
       try {
         const serverDirs = await fs.readdir(this.serversPath);
@@ -857,6 +872,15 @@ export class NativeServerManager extends ServerManager {
                 // Use defaults if config not found
               }
               
+              // Merge with database config (database takes precedence)
+              const dbConfig = dbConfigMap.get(serverName);
+              if (dbConfig) {
+                serverConfig = { ...serverConfig, ...dbConfig };
+                logger.info(`Merged database config for server ${serverName}`, { 
+                  disableBattleEye: serverConfig.disableBattleEye 
+                });
+              }
+              
               const isRunning = await this.isRunning(serverName);
               
               servers.push({
@@ -872,7 +896,9 @@ export class NativeServerManager extends ServerManager {
                 maxPlayers: serverConfig.maxPlayers || 70,
                 serverPath: serverPath,
                 config: serverConfig,
-                isClusterServer: false
+                isClusterServer: false,
+                // Include BattleEye setting
+                disableBattleEye: serverConfig.disableBattleEye || false
               });
             }
           } catch (error) {
@@ -896,6 +922,15 @@ export class NativeServerManager extends ServerManager {
             
             if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
               for (const server of clusterConfig.servers) {
+                // Merge with database config (database takes precedence)
+                const dbConfig = dbConfigMap.get(server.name);
+                if (dbConfig) {
+                  Object.assign(server, dbConfig);
+                  logger.info(`Merged database config for cluster server ${server.name}`, { 
+                    disableBattleEye: server.disableBattleEye 
+                  });
+                }
+                
                 const isRunning = await this.isRunning(server.name);
                 const serverInfo = {
                   name: server.name,
@@ -912,6 +947,8 @@ export class NativeServerManager extends ServerManager {
                   serverPath: server.serverPath || path.join(clustersPath, clusterDir, server.name),
                   config: server,
                   isClusterServer: true,
+                  // Include BattleEye setting
+                  disableBattleEye: server.disableBattleEye || false,
                   // Additional fields from enhanced format
                   password: server.serverPassword || '',
                   adminPassword: server.adminPassword || '',
@@ -928,7 +965,9 @@ export class NativeServerManager extends ServerManager {
                   }
                 };
                 
-                logger.info(`Adding cluster server to servers list: ${JSON.stringify(serverInfo)}`);
+                logger.info(`Adding cluster server to servers list: ${server.name}`, { 
+                  disableBattleEye: serverInfo.disableBattleEye 
+                });
                 servers.push(serverInfo);
               }
             }

@@ -750,11 +750,14 @@ export default async function nativeServerRoutes(fastify, options) {
       const { name } = request.params;
       const { command } = request.body;
       
+      logger.info(`RCON command request for server ${name}: ${command}`);
+      
       // Get server info to find RCON port
       const servers = await serverManager.listServers();
       const server = servers.find(s => s.name === name);
       
       if (!server) {
+        logger.warn(`RCON command failed: Server ${name} not found`);
         return reply.status(404).send({
           success: false,
           message: `Server ${name} not found`
@@ -764,30 +767,36 @@ export default async function nativeServerRoutes(fastify, options) {
       // Check if server is running
       const isRunning = await serverManager.isRunning(name);
       if (!isRunning) {
+        logger.warn(`RCON command failed: Server ${name} is not running`);
         return reply.status(400).send({
           success: false,
           message: `Server ${name} is not running. Cannot send RCON commands to a stopped server.`
         });
       }
 
+      // Check for RCON configuration
       if (!server.rconPort) {
+        logger.error(`RCON command failed: No RCON port configured for server ${name}`);
         return reply.status(400).send({
           success: false,
           message: `No RCON port configured for server ${name}. Please check server configuration.`
         });
       }
 
+      logger.info(`Sending RCON command to ${name} on port ${server.rconPort}: ${command}`);
+
       // Use the RCON service to send command
       const rconService = await import('../services/rcon.js');
-      const response = await rconService.default.sendCommand('127.0.0.1', server.rconPort, command);
+      const response = await rconService.default.sendCommand('127.0.0.1', server.rconPort, command, 'admin123');
       
+      logger.info(`RCON command successful for ${name}: ${command}`);
       return {
         success: true,
         message: 'Command sent successfully',
         response: response
       };
     } catch (error) {
-      fastify.log.error(`Error sending RCON command to ${request.params.name}:`, error);
+      logger.error(`RCON command error for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message

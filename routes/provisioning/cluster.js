@@ -10,9 +10,98 @@ import { createJob, updateJob, addJobProgress } from '../../services/job-manager
 export default async function clusterRoutes(fastify) {
   const provisioner = new ServerProvisioner();
 
+  // Update server settings
+  fastify.post('/api/provisioning/servers/:serverName/update-settings', {
+    preHandler: requirePermission('write'),
+    schema: {
+      params: {
+        type: 'object',
+        required: ['serverName'],
+        properties: {
+          serverName: { type: 'string' }
+        }
+      },
+      body: {
+        type: 'object',
+        required: ['settings'],
+        properties: {
+          settings: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              map: { type: 'string' },
+              gamePort: { type: 'number' },
+              queryPort: { type: 'number' },
+              rconPort: { type: 'number' },
+              maxPlayers: { type: 'number' },
+              adminPassword: { type: 'string' },
+              serverPassword: { type: 'string' },
+              rconPassword: { type: 'string' },
+              clusterId: { type: 'string' },
+              clusterPassword: { type: 'string' },
+              sessionName: { type: 'string' },
+              disableBattleEye: { type: 'boolean' }
+            }
+          },
+          regenerateConfigs: { type: 'boolean' },
+          regenerateScripts: { type: 'boolean' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { settings, regenerateConfigs = true, regenerateScripts = true } = request.body;
+      
+      logger.info(`Updating server settings for ${serverName}`, { 
+        disableBattleEye: settings.disableBattleEye,
+        regenerateConfigs,
+        regenerateScripts
+      });
+      
+      const result = await provisioner.updateServerSettings(serverName, settings, {
+        regenerateConfigs,
+        regenerateScripts
+      });
+      
+      return {
+        success: true,
+        message: result.message,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to update server settings for ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
   // Create individual server
   fastify.post('/api/provisioning/create-server', {
-    preHandler: requirePermission('write')
+    preHandler: requirePermission('write'),
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' },
+          map: { type: 'string' },
+          gamePort: { type: 'number' },
+          queryPort: { type: 'number' },
+          rconPort: { type: 'number' },
+          maxPlayers: { type: 'number' },
+          adminPassword: { type: 'string' },
+          serverPassword: { type: 'string' },
+          rconPassword: { type: 'string' },
+          harvestMultiplier: { type: 'number' },
+          xpMultiplier: { type: 'number' },
+          tamingMultiplier: { type: 'number' },
+          disableBattleEye: { type: 'boolean' }
+        }
+      }
+    }
   }, async (request, reply) => {
     try {
       const {
@@ -27,7 +116,8 @@ export default async function clusterRoutes(fastify) {
         rconPassword = 'rcon123',
         harvestMultiplier = 3.0,
         xpMultiplier = 3.0,
-        tamingMultiplier = 5.0
+        tamingMultiplier = 5.0,
+        disableBattleEye = false
       } = request.body;
 
       if (!name) {
@@ -49,7 +139,8 @@ export default async function clusterRoutes(fastify) {
         rconPassword,
         harvestMultiplier,
         xpMultiplier,
-        tamingMultiplier
+        tamingMultiplier,
+        disableBattleEye
       };
 
       const result = await provisioner.createServer(serverConfig);
@@ -69,7 +160,30 @@ export default async function clusterRoutes(fastify) {
 
   // Create cluster (direct)
   fastify.post('/api/provisioning/create-cluster', {
-    preHandler: requirePermission('write')
+    preHandler: requirePermission('write'),
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' },
+          description: { type: 'string' },
+          serverCount: { type: 'number' },
+          basePort: { type: 'number' },
+          maps: { type: 'array', items: { type: 'string' } },
+          maxPlayers: { type: 'number' },
+          adminPassword: { type: 'string' },
+          serverPassword: { type: 'string' },
+          rconPassword: { type: 'string' },
+          clusterPassword: { type: 'string' },
+          harvestMultiplier: { type: 'number' },
+          xpMultiplier: { type: 'number' },
+          tamingMultiplier: { type: 'number' },
+          foreground: { type: 'boolean' },
+          disableBattleEye: { type: 'boolean' }
+        }
+      }
+    }
   }, async (request, reply) => {
     try {
       const {
@@ -86,7 +200,8 @@ export default async function clusterRoutes(fastify) {
         harvestMultiplier = 3.0,
         xpMultiplier = 3.0,
         tamingMultiplier = 5.0,
-        foreground = false
+        foreground = false,
+        disableBattleEye = false
       } = request.body;
 
       if (!name) {
@@ -114,7 +229,8 @@ export default async function clusterRoutes(fastify) {
         clusterPassword,
         harvestMultiplier,
         xpMultiplier,
-        tamingMultiplier
+        tamingMultiplier,
+        disableBattleEye
       };
       const result = await provisioner.createCluster(clusterConfig, foreground);
       return {
@@ -331,6 +447,57 @@ export default async function clusterRoutes(fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to restart cluster'
+      });
+    }
+  });
+
+  // Get update status for all servers
+  fastify.get('/api/provisioning/update-status-all', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const clusters = await provisioner.listClusters();
+      const allServers = [];
+      
+      for (const cluster of clusters) {
+        if (cluster.config && cluster.config.servers) {
+          for (const server of cluster.config.servers) {
+            try {
+              const updateStatus = await provisioner.checkServerUpdateStatus(server.name);
+              const updateConfig = await provisioner.getServerUpdateConfig(server.name);
+              
+              allServers.push({
+                serverName: server.name,
+                clusterName: cluster.name,
+                status: updateStatus,
+                config: updateConfig
+              });
+            } catch (error) {
+              logger.warn(`Failed to get update status for server ${server.name}:`, error);
+              allServers.push({
+                serverName: server.name,
+                clusterName: cluster.name,
+                status: {
+                  needsUpdate: false,
+                  reason: 'Error checking update status',
+                  error: error.message
+                },
+                config: null
+              });
+            }
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        data: allServers
+      };
+    } catch (error) {
+      logger.error('Failed to get update status for all servers:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get update status for all servers'
       });
     }
   });

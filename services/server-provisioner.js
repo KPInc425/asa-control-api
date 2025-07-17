@@ -2759,13 +2759,27 @@ ConfigOverridePath=./configs`;
         xpMultiplier: newSettings.xpMultiplier,
         tamingMultiplier: newSettings.tamingMultiplier,
         sessionName: newSettings.sessionName,
+        // Include BattleEye setting
+        disableBattleEye: newSettings.disableBattleEye,
         updated: new Date().toISOString()
       };
       
-      // Save updated server configuration
+      // Save updated server configuration to file
       await fs.writeFile(serverConfigPath, JSON.stringify(updatedConfig, null, 2));
       logger.info(`Updated server configuration for ${serverName}`);
       this.emitProgress?.(`Updated server configuration for ${serverName}`);
+      
+      // Save to database using server manager
+      try {
+        const { createServerManager } = await import('./server-manager.js');
+        const serverManager = createServerManager();
+        await serverManager.addServerConfig(serverName, updatedConfig);
+        logger.info(`Saved server configuration to database for ${serverName}`, { 
+          disableBattleEye: updatedConfig.disableBattleEye 
+        });
+      } catch (dbError) {
+        logger.warn(`Failed to save server configuration to database for ${serverName}:`, dbError.message);
+      }
       
       // Regenerate configuration files if requested
       if (regenerateConfigs) {

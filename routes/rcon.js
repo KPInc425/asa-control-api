@@ -43,6 +43,23 @@ export default async function rconRoutes(fastify, options) {
       const { name } = request.params;
       const { command, host, port, password, timeout } = request.body;
       
+      // Validate required parameters
+      if (!name) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Container name is required'
+        });
+      }
+      
+      if (!command || command.trim() === '') {
+        return reply.status(400).send({
+          success: false,
+          message: 'RCON command is required'
+        });
+      }
+      
+      fastify.log.info(`RCON command request for container ${name}: ${command}`);
+      
       const options = {};
       if (host) options.host = host;
       if (port) options.port = port;
@@ -50,12 +67,14 @@ export default async function rconRoutes(fastify, options) {
       if (timeout) options.timeout = timeout;
       
       const result = await rconService.sendRconCommand(name, command, options);
+      
+      fastify.log.info(`RCON command successful for container ${name}: ${command}`);
       return result;
     } catch (error) {
       fastify.log.error(`RCON command failed for container ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
-        message: error.message
+        message: error.message || 'RCON command failed'
       });
     }
   });
