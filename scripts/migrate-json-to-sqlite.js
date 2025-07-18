@@ -139,7 +139,9 @@ async function getDatabaseService() {
       INSERT OR REPLACE INTO shared_mods (mod_id, mod_name, enabled, updated_at) 
       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
     `);
-    return stmt.run(modId, modName, enabled);
+    // Ensure all parameters are properly typed for SQLite
+    const enabledValue = enabled ? 1 : 0; // Convert boolean to integer
+    return stmt.run(modId, modName, enabledValue);
   };
 
   const upsertServerMod = (serverName, modId, modName = null, enabled = true) => {
@@ -147,7 +149,9 @@ async function getDatabaseService() {
       INSERT OR REPLACE INTO server_mods (server_name, mod_id, mod_name, enabled, updated_at) 
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     `);
-    return stmt.run(serverName, modId, modName, enabled);
+    // Ensure all parameters are properly typed for SQLite
+    const enabledValue = enabled ? 1 : 0; // Convert boolean to integer
+    return stmt.run(serverName, modId, modName, enabledValue);
   };
 
   return { upsertServerConfig, upsertSharedMod, upsertServerMod, db };
@@ -342,31 +346,43 @@ async function migrateSharedMods(dbService) {
     const modsRaw = await fs.readFile(SHARED_MODS_PATH, 'utf8');
     const sharedMods = JSON.parse(modsRaw);
     let count = 0;
+    
+    console.log('DEBUG: Shared mods structure:', JSON.stringify(sharedMods, null, 2));
+    
     if (Array.isArray(sharedMods)) {
+      // Direct array format
       for (const modId of sharedMods) {
         // Ensure modId is a valid string and handle null/undefined
         const cleanModId = modId ? modId.toString() : '';
-        if (cleanModId) {
+        if (cleanModId && cleanModId !== 'null' && cleanModId !== 'undefined') {
           await dbService.upsertSharedMod(cleanModId, null, true);
           count++;
         }
       }
     } else if (sharedMods && Array.isArray(sharedMods.modList)) {
+      // Object with modList property
       for (const modId of sharedMods.modList) {
+        console.log('DEBUG: Processing modId:', modId, 'Type:', typeof modId);
         // Ensure modId is a valid string and handle null/undefined
         const cleanModId = modId ? modId.toString() : '';
-        if (cleanModId) {
+        console.log('DEBUG: Clean modId:', cleanModId, 'Type:', typeof cleanModId);
+        if (cleanModId && cleanModId !== 'null' && cleanModId !== 'undefined') {
+          console.log('DEBUG: Inserting modId:', cleanModId);
           await dbService.upsertSharedMod(cleanModId, null, true);
           count++;
         }
       }
+    } else {
+      console.log('WARNING: Unexpected shared mods format, skipping.');
     }
+    
     console.log(`✅ Migrated ${count} shared mods.`);
   } catch (err) {
     if (err.code === 'ENOENT') {
       console.log('No shared-mods.json found, skipping.');
     } else {
       console.error('Failed to migrate shared-mods.json:', err);
+      console.error('Error details:', err.message);
     }
   }
 }

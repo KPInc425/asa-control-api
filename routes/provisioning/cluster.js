@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs/promises';
 import { requirePermission } from '../../middleware/auth.js';
 import logger from '../../utils/logger.js';
 import config from '../../config/index.js';
@@ -502,6 +503,118 @@ export default async function clusterRoutes(fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to get update status for all servers'
+      });
+    }
+  });
+
+  // Get start script for a server
+  fastify.get('/api/provisioning/start-script/:serverName', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      
+      // Find the server in clusters
+      const clusters = await provisioner.listClusters();
+      let serverConfig = null;
+      let clusterName = null;
+      
+      for (const cluster of clusters) {
+        if (cluster.config && cluster.config.servers) {
+          const server = cluster.config.servers.find(s => s.name === serverName);
+          if (server) {
+            serverConfig = server;
+            clusterName = cluster.name;
+            break;
+          }
+        }
+      }
+      
+      if (!serverConfig) {
+        return reply.status(404).send({
+          success: false,
+          message: `Server "${serverName}" not found`
+        });
+      }
+      
+      // Get the server path
+      const serverPath = clusterName 
+        ? path.join(config.native.clustersPath, clusterName, serverName)
+        : path.join(config.native.serversPath, serverName);
+      
+      // Check if start script exists
+      const startScriptPath = path.join(serverPath, 'start.bat');
+      try {
+        const startScript = await fs.readFile(startScriptPath, 'utf8');
+        return {
+          success: true,
+          data: {
+            serverName,
+            clusterName,
+            scriptPath: startScriptPath,
+            content: startScript
+          }
+        };
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          return reply.status(404).send({
+            success: false,
+            message: `Start script not found for server "${serverName}"`
+          });
+        }
+        throw error;
+      }
+    } catch (error) {
+      logger.error(`Failed to get start script for ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get start script'
+      });
+    }
+  });
+
+  // Regenerate start scripts for all servers
+  fastify.post('/api/provisioning/regenerate-start-scripts', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const clusters = await provisioner.listClusters();
+      const results = [];
+      
+      for (const cluster of clusters) {
+        if (cluster.config && cluster.config.servers) {
+          for (const server of cluster.config.servers) {
+            try {
+              await provisioner.regenerateServerStartScript(server.name);
+              results.push({
+                serverName: server.name,
+                clusterName: cluster.name,
+                success: true,
+                message: `Start script regenerated for ${server.name}`
+              });
+            } catch (error) {
+              logger.error(`Failed to regenerate start script for ${server.name}:`, error);
+              results.push({
+                serverName: server.name,
+                clusterName: cluster.name,
+                success: false,
+                message: `Failed to regenerate start script: ${error.message}`
+              });
+            }
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        message: 'Start script regeneration completed',
+        data: results
+      };
+    } catch (error) {
+      logger.error('Failed to regenerate start scripts:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to regenerate start scripts'
       });
     }
   });
