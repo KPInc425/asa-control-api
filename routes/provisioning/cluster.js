@@ -849,4 +849,25 @@ export default async function clusterRoutes(fastify) {
       });
     }
   });
+
+  // List available backups for a cluster
+  fastify.get('/api/provisioning/cluster-backups/:clusterName', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const result = await provisioner.listClusterBackups(clusterName);
+      return {
+        success: true,
+        message: 'Cluster backups retrieved successfully',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to list cluster backups:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
 } 

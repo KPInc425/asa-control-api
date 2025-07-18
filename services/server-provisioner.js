@@ -3668,6 +3668,64 @@ ConfigOverridePath=./configs`;
       throw error;
     }
   }
+
+  /**
+   * List available backups for a specific cluster
+   */
+  async listClusterBackups(clusterName) {
+    try {
+      const backupsRoot = path.join(this.clustersPath, '..', 'backups');
+      // Check if backups directory exists
+      try {
+        await fs.access(backupsRoot);
+      } catch {
+        return {
+          success: true,
+          backups: [],
+          message: 'No cluster backups found'
+        };
+      }
+      const entries = await fs.readdir(backupsRoot, { withFileTypes: true });
+      const backups = [];
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name.startsWith(clusterName + '-')) {
+          const backupPath = path.join(backupsRoot, entry.name);
+          try {
+            const stats = await fs.stat(backupPath);
+            // Try to read cluster-config.json for details
+            let backupDate = stats.mtime.toISOString();
+            let size = stats.size;
+            let config = null;
+            try {
+              const configPath = path.join(backupPath, 'cluster-config.json');
+              const configContent = await fs.readFile(configPath, 'utf8');
+              config = JSON.parse(configContent);
+            } catch {}
+            backups.push({
+              name: entry.name,
+              path: backupPath,
+              backupDate,
+              size,
+              sizeFormatted: this.formatBytes(size),
+              config
+            });
+          } catch (error) {
+            logger.warn(`Failed to process backup ${entry.name}:`, error.message);
+          }
+        }
+      }
+      // Sort by backup date (newest first)
+      backups.sort((a, b) => new Date(b.backupDate) - new Date(a.backupDate));
+      return {
+        success: true,
+        backups,
+        count: backups.length
+      };
+    } catch (error) {
+      logger.error('Failed to list cluster backups:', error);
+      throw error;
+    }
+  }
 }
 
 export default ServerProvisioner; 
