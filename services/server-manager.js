@@ -1260,8 +1260,26 @@ export class NativeServerManager extends ServerManager {
             // Get mod configuration for this server
             const finalMods = await this.getFinalModListForServer(serverName);
             
-            // Update server config with new mods
+            // Preserve the excludeSharedMods flag from the database
+            const dbServerConfig = getServerConfig(serverName);
+            let excludeSharedMods = false;
+            if (dbServerConfig && dbServerConfig.config_data) {
+              try {
+                const parsedConfig = JSON.parse(dbServerConfig.config_data);
+                excludeSharedMods = parsedConfig.excludeSharedMods === true;
+              } catch (error) {
+                logger.warn(`Failed to parse server config for ${serverName}:`, error.message);
+              }
+            }
+            
+            // Update server config with new mods and preserve excludeSharedMods flag
             serverConfig.mods = finalMods;
+            serverConfig.excludeSharedMods = excludeSharedMods;
+            
+            logger.info(`[regenerateServerStartScript] Updated server config for ${serverName}:`, {
+              mods: finalMods,
+              excludeSharedMods: excludeSharedMods
+            });
             
             // Update cluster config file
             await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
@@ -1277,12 +1295,11 @@ export class NativeServerManager extends ServerManager {
             return;
           }
         } catch (error) {
-          // Continue to next cluster if this one fails
-          logger.warn(`Failed to process cluster ${clusterName}:`, error.message);
+          logger.warn(`Error processing cluster ${clusterName}:`, error.message);
         }
       }
       
-      logger.warn(`Server ${serverName} not found in any cluster`);
+      throw new Error(`Server ${serverName} not found in any cluster`);
     } catch (error) {
       logger.error(`Failed to regenerate start script for ${serverName}:`, error);
       throw error;
@@ -1306,18 +1323,42 @@ export class NativeServerManager extends ServerManager {
         .filter(mod => mod.enabled === 1)
         .map(mod => mod.mod_id);
       
-      // Check if server should exclude shared mods (legacy logic for Club ARK servers)
-      const isClubArkServer = serverName.toLowerCase().includes('club') || 
-                             serverName.toLowerCase().includes('bobs');
+      // Check if server should exclude shared mods
+      // First check database config for excludeSharedMods flag
+      const serverConfig = getServerConfig(serverName);
+      let excludeSharedMods = false;
       
-      if (isClubArkServer && serverMods.length === 0) {
-        // Legacy fallback for Club ARK servers
-        return [1005639]; // Club ARK mod
+      if (serverConfig && serverConfig.config_data) {
+        try {
+          const parsedConfig = JSON.parse(serverConfig.config_data);
+          excludeSharedMods = parsedConfig.excludeSharedMods === true;
+          logger.info(`[getFinalModListForServer] Server ${serverName} excludeSharedMods from DB: ${excludeSharedMods}`);
+        } catch (error) {
+          logger.warn(`[getFinalModListForServer] Failed to parse server config for ${serverName}:`, error.message);
+        }
+      }
+      
+      // Legacy fallback: Check if it's a Club ARK server
+      if (!excludeSharedMods) {
+        const isClubArkServer = serverName.toLowerCase().includes('club') || 
+                               serverName.toLowerCase().includes('bobs');
+        excludeSharedMods = isClubArkServer;
+        if (isClubArkServer) {
+          logger.info(`[getFinalModListForServer] Server ${serverName} marked as Club ARK (legacy logic)`);
+        }
+      }
+      
+      // If server should exclude shared mods, only return server-specific mods
+      if (excludeSharedMods) {
+        logger.info(`[getFinalModListForServer] Server ${serverName} excluding shared mods. Server mods only: ${serverMods.join(', ')}`);
+        return serverMods;
       }
       
       // Combine shared and server-specific mods, removing duplicates
       const allMods = [...sharedMods, ...serverMods];
-      return [...new Set(allMods)];
+      const finalMods = [...new Set(allMods)];
+      logger.info(`[getFinalModListForServer] Server ${serverName} combining mods. Shared: ${sharedMods.join(', ')}, Server: ${serverMods.join(', ')}, Final: ${finalMods.join(', ')}`);
+      return finalMods;
       
     } catch (error) {
       logger.error(`Failed to get final mod list for ${serverName}:`, error);
