@@ -42,8 +42,13 @@ class ArkLogsService {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
+        // Robust fallback to default path
+        const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+        if (!basePath) {
+          logger.error('ArkLogsService: Missing basePath for log file resolution.');
+          throw new Error('Server configuration error: basePath is not set.');
+        }
+        serverPath = path.join(basePath, 'servers', serverName);
       }
 
       logger.info(`Using server path for logs: ${serverPath}`);
@@ -142,8 +147,13 @@ class ArkLogsService {
     if (serverInfo && serverInfo.serverPath) {
       serverPath = serverInfo.serverPath;
     } else {
-      // Fallback to default path
-      serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
+      // Robust fallback to default path
+      const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+      if (!basePath) {
+        logger.error('ArkLogsService: Missing basePath for log file resolution.');
+        throw new Error('Server configuration error: basePath is not set.');
+      }
+      serverPath = path.join(basePath, 'servers', serverName);
     }
 
     // Look for the log file in multiple possible locations
@@ -255,8 +265,13 @@ class ArkLogsService {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
+        // Robust fallback to default path
+        const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+        if (!basePath) {
+          logger.error('ArkLogsService: Missing basePath for log file resolution.');
+          throw new Error('Server configuration error: basePath is not set.');
+        }
+        serverPath = path.join(basePath, 'servers', serverName);
       }
 
       // Look for the log file in multiple possible locations
@@ -308,8 +323,13 @@ class ArkLogsService {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', serverName);
+        // Robust fallback to default path
+        const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+        if (!basePath) {
+          logger.error('ArkLogsService: Missing basePath for log file resolution.');
+          throw new Error('Server configuration error: basePath is not set.');
+        }
+        serverPath = path.join(basePath, 'servers', serverName);
       }
 
       // Look for the log file in multiple possible locations

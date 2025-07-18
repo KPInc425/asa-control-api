@@ -34,8 +34,11 @@ export class ServerProvisioner {
     }
     
     // Updated paths for separate binary architecture
-    this.serversPath = path.join(this.basePath, 'servers');
-    this.clustersPath = path.join(this.basePath, 'clusters');
+    this.serversPath = process.env.NATIVE_SERVERS_PATH || (config.server && config.server.native && config.server.native.serversPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'servers') : null);
+    this.clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'clusters') : null);
+    if (!this.serversPath || !this.clustersPath) {
+      logger.error('ServerProvisioner: Missing serversPath or clustersPath in configuration.');
+    }
     this.autoInstallSteamCmd = config.server.native.autoInstallSteamCmd !== false;
   }
 

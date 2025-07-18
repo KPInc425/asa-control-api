@@ -538,10 +538,19 @@ export default async function clusterRoutes(fastify) {
         });
       }
       
-      // Get the server path
+      // Robust path resolution for clustersPath and serversPath
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'clusters') : null);
+      const serversPath = process.env.NATIVE_SERVERS_PATH || (config.server && config.server.native && config.server.native.serversPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'servers') : null);
+      if (!clustersPath || !serversPath) {
+        logger.error('Missing clustersPath or serversPath in configuration.');
+        return reply.status(500).send({
+          success: false,
+          message: 'Server configuration error: clustersPath or serversPath is not set.'
+        });
+      }
       const serverPath = clusterName 
-        ? path.join(config.native.clustersPath, clusterName, serverName)
-        : path.join(config.native.serversPath, serverName);
+        ? path.join(clustersPath, clusterName, serverName)
+        : path.join(serversPath, serverName);
       
       // Check if start script exists
       const startScriptPath = path.join(serverPath, 'start.bat');
@@ -579,6 +588,15 @@ export default async function clusterRoutes(fastify) {
     preHandler: requirePermission('write')
   }, async (request, reply) => {
     try {
+      // Robust path resolution for clustersPath
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'clusters') : null);
+      if (!clustersPath) {
+        logger.error('Missing clustersPath in configuration.');
+        return reply.status(500).send({
+          success: false,
+          message: 'Server configuration error: clustersPath is not set.'
+        });
+      }
       const clusters = await provisioner.listClusters();
       const results = [];
       
