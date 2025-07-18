@@ -879,14 +879,43 @@ export default async function clusterRoutes(fastify) {
     preHandler: requirePermission('read')
   }, async (request, reply) => {
     try {
+      // Helper function to clean Windows paths
+      const cleanPath = (path) => {
+        if (typeof path === 'string') {
+          // Replace double backslashes with single backslashes (handles .env file format)
+          return path.replace(/\\\\/g, '\\');
+        }
+        return path;
+      };
+
+      // Helper function to recursively clean paths in objects
+      const cleanPathsInObject = (obj) => {
+        if (typeof obj !== 'object' || obj === null) {
+          return cleanPath(obj);
+        }
+        
+        if (Array.isArray(obj)) {
+          return obj.map(cleanPathsInObject);
+        }
+        
+        const cleaned = {};
+        for (const [key, value] of Object.entries(obj)) {
+          cleaned[key] = cleanPathsInObject(value);
+        }
+        return cleaned;
+      };
+
+      // Get environment variables and clean them
+      const envVars = {
+        NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+        NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH,
+        NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH
+      };
+
       const debugInfo = {
         timestamp: new Date().toISOString(),
-        environment: {
-          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
-          NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH,
-          NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH
-        },
-        config: {
+        environment: cleanPathsInObject(envVars),
+        config: cleanPathsInObject({
           server: {
             native: {
               basePath: config.server?.native?.basePath,
@@ -894,12 +923,12 @@ export default async function clusterRoutes(fastify) {
               serversPath: config.server?.native?.serversPath
             }
           }
-        },
-        provisioner: {
+        }),
+        provisioner: cleanPathsInObject({
           basePath: provisioner.basePath,
           clustersPath: provisioner.clustersPath,
           serversPath: provisioner.serversPath
-        },
+        }),
         clusters: [],
         errors: []
       };
@@ -909,11 +938,11 @@ export default async function clusterRoutes(fastify) {
         const clusters = await provisioner.listClusters();
         debugInfo.clusters = clusters.map(cluster => ({
           name: cluster.name,
-          path: cluster.path,
+          path: cleanPath(cluster.path),
           serverCount: cluster.config?.servers?.length || 0,
           servers: cluster.config?.servers?.map(s => ({
             name: s.name,
-            serverPath: s.serverPath,
+            serverPath: cleanPath(s.serverPath),
             map: s.map,
             gamePort: s.gamePort
           })) || []
@@ -922,16 +951,7 @@ export default async function clusterRoutes(fastify) {
         debugInfo.errors.push(`Failed to list clusters: ${error.message}`);
       }
 
-      // Use a custom JSON replacer to avoid escaping backslashes in Windows paths
-      const jsonReplacer = (key, value) => {
-        if (typeof value === 'string' && value.includes('\\')) {
-          // For Windows paths, return as-is without escaping
-          return value;
-        }
-        return value;
-      };
-
-      return reply.send(JSON.parse(JSON.stringify(debugInfo, jsonReplacer)));
+      return reply.send(debugInfo);
     } catch (error) {
       logger.error('Debug endpoint error:', error);
       return reply.status(500).send({
