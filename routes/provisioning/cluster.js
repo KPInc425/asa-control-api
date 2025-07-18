@@ -618,4 +618,154 @@ export default async function clusterRoutes(fastify) {
       });
     }
   });
+
+  // Update server with config
+  fastify.post('/api/provisioning/servers/:serverName/update-with-config', {
+    preHandler: requirePermission('write'),
+    schema: {
+      params: {
+        type: 'object',
+        required: ['serverName'],
+        properties: {
+          serverName: { type: 'string' }
+        }
+      },
+      body: {
+        type: 'object',
+        required: ['config'],
+        properties: {
+          config: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              map: { type: 'string' },
+              gamePort: { type: 'number' },
+              queryPort: { type: 'number' },
+              rconPort: { type: 'number' },
+              maxPlayers: { type: 'number' },
+              adminPassword: { type: 'string' },
+              serverPassword: { type: 'string' },
+              rconPassword: { type: 'string' },
+              clusterId: { type: 'string' },
+              clusterPassword: { type: 'string' },
+              sessionName: { type: 'string' },
+              disableBattleEye: { type: 'boolean' },
+              customDynamicConfigUrl: { type: 'string' }
+            }
+          },
+          regenerateConfigs: { type: 'boolean' },
+          regenerateScripts: { type: 'boolean' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { config, regenerateConfigs = true, regenerateScripts = true } = request.body;
+      
+      logger.info(`Updating server config for ${serverName}`, { 
+        disableBattleEye: config.disableBattleEye,
+        regenerateConfigs,
+        regenerateScripts
+      });
+      
+      const result = await provisioner.updateServerSettings(serverName, config, {
+        regenerateConfigs,
+        regenerateScripts
+      });
+      
+      return {
+        success: true,
+        message: result.message,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to update server config for ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Delete cluster
+  fastify.delete('/api/provisioning/clusters/:clusterName', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const { backupSaved = true, deleteFiles = true } = request.query;
+      
+      logger.info(`Deleting cluster: ${clusterName}`, { backupSaved, deleteFiles });
+      
+      const result = await provisioner.deleteCluster(clusterName, {
+        backupSaved: backupSaved === 'true',
+        deleteFiles: deleteFiles === 'true'
+      });
+      
+      return {
+        success: true,
+        message: `Cluster ${clusterName} deleted successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to delete cluster ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Backup cluster saved data
+  fastify.post('/api/provisioning/clusters/:clusterName/backup', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const { destination } = request.body;
+      
+      logger.info(`Backing up cluster: ${clusterName}`, { destination });
+      
+      const result = await provisioner.backupCluster(clusterName, destination);
+      
+      return {
+        success: true,
+        message: `Cluster ${clusterName} backed up successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to backup cluster ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Restore cluster saved data
+  fastify.post('/api/provisioning/clusters/:clusterName/restore', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const { source } = request.body;
+      
+      logger.info(`Restoring cluster: ${clusterName}`, { source });
+      
+      const result = await provisioner.restoreCluster(clusterName, source);
+      
+      return {
+        success: true,
+        message: `Cluster ${clusterName} restored successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to restore cluster ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
 } 
