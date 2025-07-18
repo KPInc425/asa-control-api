@@ -922,7 +922,16 @@ export default async function clusterRoutes(fastify) {
         debugInfo.errors.push(`Failed to list clusters: ${error.message}`);
       }
 
-      return debugInfo;
+      // Use a custom JSON replacer to avoid escaping backslashes in Windows paths
+      const jsonReplacer = (key, value) => {
+        if (typeof value === 'string' && value.includes('\\')) {
+          // For Windows paths, return as-is without escaping
+          return value;
+        }
+        return value;
+      };
+
+      return reply.send(JSON.parse(JSON.stringify(debugInfo, jsonReplacer)));
     } catch (error) {
       logger.error('Debug endpoint error:', error);
       return reply.status(500).send({
