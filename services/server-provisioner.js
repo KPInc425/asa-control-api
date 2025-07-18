@@ -706,6 +706,7 @@ pause`;
    * Create a cluster with multiple servers
    */
   async createCluster(clusterConfig, foreground = false) {
+    logger.info('[createCluster] Method entered');
     try {
       // Defensive checks for required fields
       if (!clusterConfig || typeof clusterConfig !== 'object') {

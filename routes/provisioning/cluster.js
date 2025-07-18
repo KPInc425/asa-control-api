@@ -258,6 +258,7 @@ export default async function clusterRoutes(fastify) {
   }, async (request, reply) => {
     const io = fastify.io;
     const clusterConfig = request.body;
+    logger.info('[ROUTE] Received cluster creation request:', JSON.stringify(clusterConfig, null, 2));
     logger.info('Creating cluster with config:', {
       name: clusterConfig.name,
       serverCount: clusterConfig.serverCount,
