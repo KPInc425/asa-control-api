@@ -120,13 +120,36 @@ export default async function modRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { serverName } = request.params;
-      const { additionalMods } = request.body;
+      const { additionalMods, excludeSharedMods } = request.body;
+      // Update server mods in DB
       deleteAllServerMods(serverName);
       for (const modId of additionalMods) {
         upsertServerMod(serverName, modId.toString(), null, true);
       }
-      logger.info(`Server mods configuration updated for ${serverName}`);
-      await regenerateServerStartScript(serverName, provisioner);
+      // Update excludeSharedMods in cluster config
+      const provisioner = new ServerProvisioner();
+      const clusters = await provisioner.listClusters();
+      let updated = false;
+      for (const cluster of clusters) {
+        if (cluster.config && cluster.config.servers) {
+          const server = cluster.config.servers.find(s => s.name === serverName);
+          if (server) {
+            server.excludeSharedMods = excludeSharedMods;
+            // Save updated cluster config
+            const clusterPath = path.join(provisioner.clustersPath, cluster.name, 'cluster.json');
+            await fs.writeFile(clusterPath, JSON.stringify(cluster.config, null, 2));
+            updated = true;
+            logger.info(`[server-mods PUT] Updated excludeSharedMods for ${serverName} in cluster ${cluster.name} to ${excludeSharedMods}`);
+            break;
+          }
+        }
+      }
+      if (!updated) {
+        logger.warn(`[server-mods PUT] Server ${serverName} not found in any cluster for excludeSharedMods update.`);
+      }
+      // Regenerate start.bat
+      await provisioner.regenerateServerStartScript(serverName);
+      logger.info(`[server-mods PUT] Regenerated start.bat for ${serverName}`);
       return { success: true, message: `Server mods configuration for ${serverName} updated successfully. Start script has been regenerated.` };
     } catch (error) {
       logger.error('Failed to update server mods:', error);

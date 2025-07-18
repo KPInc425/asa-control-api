@@ -514,48 +514,32 @@ export default async function clusterRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { serverName } = request.params;
-      
+      logger.info(`[start-script endpoint] Fetching start script for server: ${serverName}`);
       // Find the server in clusters
       const clusters = await provisioner.listClusters();
       let serverConfig = null;
       let clusterName = null;
-      
+      let serverPath = null;
       for (const cluster of clusters) {
         if (cluster.config && cluster.config.servers) {
           const server = cluster.config.servers.find(s => s.name === serverName);
           if (server) {
             serverConfig = server;
             clusterName = cluster.name;
+            serverPath = path.join(provisioner.clustersPath, clusterName, serverName);
             break;
           }
         }
       }
-      
       if (!serverConfig) {
-        return reply.status(404).send({
-          success: false,
-          message: `Server "${serverName}" not found`
-        });
+        // Try standalone servers
+        serverPath = path.join(provisioner.serversPath, serverName);
       }
-      
-      // Robust path resolution for clustersPath and serversPath
-      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'clusters') : null);
-      const serversPath = process.env.NATIVE_SERVERS_PATH || (config.server && config.server.native && config.server.native.serversPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'servers') : null);
-      if (!clustersPath || !serversPath) {
-        logger.error('Missing clustersPath or serversPath in configuration.');
-        return reply.status(500).send({
-          success: false,
-          message: 'Server configuration error: clustersPath or serversPath is not set.'
-        });
-      }
-      const serverPath = clusterName 
-        ? path.join(clustersPath, clusterName, serverName)
-        : path.join(serversPath, serverName);
-      
-      // Check if start script exists
       const startScriptPath = path.join(serverPath, 'start.bat');
+      logger.info(`[start-script endpoint] Resolved start.bat path: ${startScriptPath}`);
       try {
         const startScript = await fs.readFile(startScriptPath, 'utf8');
+        logger.info(`[start-script endpoint] Read start.bat, content length: ${startScript.length}`);
         return {
           success: true,
           data: {
@@ -566,16 +550,17 @@ export default async function clusterRoutes(fastify) {
           }
         };
       } catch (error) {
+        logger.error(`[start-script endpoint] Failed to read start.bat at ${startScriptPath}:`, error);
         if (error.code === 'ENOENT') {
           return reply.status(404).send({
             success: false,
-            message: `Start script not found for server "${serverName}"`
+            message: `Start script not found for server "${serverName}" at ${startScriptPath}`
           });
         }
         throw error;
       }
     } catch (error) {
-      logger.error(`Failed to get start script for ${request.params.serverName}:`, error);
+      logger.error(`[start-script endpoint] Failed to get start script for ${request.params.serverName}:`, error);
       return reply.status(500).send({
         success: false,
         message: 'Failed to get start script'
