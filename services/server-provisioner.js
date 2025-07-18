@@ -711,7 +711,8 @@ pause`;
       if (!clusterConfig || typeof clusterConfig !== 'object') {
         throw new Error('Missing or invalid clusterConfig object');
       }
-      const clusterName = clusterConfig.name;
+      // Accept either 'name' or 'clusterName' for compatibility
+      const clusterName = clusterConfig.name || clusterConfig.clusterName;
       if (!clusterName || typeof clusterName !== 'string' || !clusterName.trim()) {
         throw new Error('Invalid or missing clusterName');
       }
