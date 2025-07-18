@@ -771,51 +771,40 @@ pause`;
           console.log(`\n=== Installing ${clusterConfig.servers.length} servers ===`);
           console.log('Servers will be installed sequentially to avoid file locks...');
         }
-        
-        // Stagger (sequential) server installs for reliability
+        // Merge globalMods into each server's mods array unless excludeSharedMods is true
+        const globalMods = Array.isArray(clusterConfig.globalMods) ? clusterConfig.globalMods : [];
         for (let i = 0; i < clusterConfig.servers.length; i++) {
-          const serverConfig = clusterConfig.servers[i];
+          const serverConfig = { ...clusterConfig.servers[i] };
+          // Exclude global mods for Club ARK or if excludeSharedMods is set
+          const isClubArk = serverConfig.name && (serverConfig.name.toLowerCase().includes('club') || serverConfig.name.toLowerCase().includes('bobs'));
+          const excludeSharedMods = serverConfig.excludeSharedMods === true || isClubArk;
+          if (!excludeSharedMods) {
+            serverConfig.mods = Array.isArray(serverConfig.mods) ? Array.from(new Set([...globalMods, ...serverConfig.mods])) : [...globalMods];
+          }
           // Create server in cluster directory instead of servers directory
-    const serverName = serverConfig.name;
-    const serverPath = path.join(clusterPath, serverName);
-          
+          const serverName = serverConfig.name;
+          const serverPath = path.join(clusterPath, serverName);
           this.emitProgress?.(`Installing ASA server files for server ${i + 1}/${clusterConfig.servers.length}: ${serverName}`);
-          
           if (foreground) {
             console.log(`\n--- Installing Server ${i + 1}/${clusterConfig.servers.length}: ${serverName} ---`);
           }
           logger.info(`Creating server: ${serverName} in cluster ${clusterName}`);
-          
-          // Don't pre-create server directories - let SteamCMD create them
-          // Just create the cluster directory if it doesn't exist
           await fs.mkdir(clusterPath, { recursive: true });
-          
-          // Install ASA binaries for this server (this will create the server folder structure)
-          // This is intentionally awaited sequentially to avoid file locks and resource contention
           await this.installASABinariesForServerInCluster(clusterName, serverName, foreground);
-          
-          // Create server configuration (after SteamCMD has created the structure)
           this.emitProgress?.(`Creating server configuration for ${serverName}`);
           await this.createServerConfigInCluster(clusterName, serverPath, serverConfig);
-          
-          // Create startup script
           this.emitProgress?.(`Creating startup script for ${serverName}`);
           await this.createStartScriptInCluster(clusterName, serverPath, { 
             ...serverConfig, 
             customDynamicConfigUrl: clusterConfig.customDynamicConfigUrl,
             disableBattleEye: clusterConfig.disableBattleEye || false
           });
-          
-          // Create stop script
           await this.createStopScriptInCluster(clusterName, serverPath, serverName);
-          
-          // Add to cluster config
           clusterData.servers.push({
             name: serverName,
             serverPath: serverPath,
             ...serverConfig
           });
-          
           if (foreground) {
             console.log(`--- Server ${serverName} completed ---`);
           }
@@ -2214,7 +2203,7 @@ pause`;
 
       return {
         success: true,
-        backups: backups,
+        backups,
         count: backups.length
       };
     } catch (error) {
