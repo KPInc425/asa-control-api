@@ -707,7 +707,19 @@ pause`;
    */
   async createCluster(clusterConfig, foreground = false) {
     try {
+      // Defensive checks for required fields
+      if (!clusterConfig || typeof clusterConfig !== 'object') {
+        throw new Error('Missing or invalid clusterConfig object');
+      }
       const clusterName = clusterConfig.name;
+      if (!clusterName || typeof clusterName !== 'string' || !clusterName.trim()) {
+        throw new Error('Invalid or missing clusterName');
+      }
+      if (!this.clustersPath || typeof this.clustersPath !== 'string' || !this.clustersPath.trim()) {
+        throw new Error('Invalid or missing clustersPath');
+      }
+      // Log incoming config for debugging
+      logger.info('[createCluster] Incoming clusterConfig:', JSON.stringify(clusterConfig, null, 2));
       const clusterPath = path.join(this.clustersPath, clusterName);
       this.emitProgress?.(`Validating configuration for cluster: ${clusterName}`);
       logger.info(`Creating cluster: ${clusterName} (foreground: ${foreground})`);
