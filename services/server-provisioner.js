@@ -1084,6 +1084,9 @@ if %ERRORLEVEL% NEQ 0 (
   async createStartScriptInCluster(clusterName, serverPath, serverConfig) {
     try {
       const serverName = serverConfig.name;
+      logger.info(`[createStartScriptInCluster] Creating start script for server: ${serverName} in cluster: ${clusterName}`);
+      logger.info(`[createStartScriptInCluster] Server path: ${serverPath}`);
+      logger.info(`[createStartScriptInCluster] Server config: ${JSON.stringify(serverConfig, null, 2)}`);
       logger.info(`Creating start script for server: ${serverName} in cluster: ${clusterName}`);
       logger.info(`Server path: ${serverPath}`);
       logger.info(`Server config mods: ${JSON.stringify(serverConfig.mods)}`);
@@ -1153,12 +1156,13 @@ pause`;
 
       const startScriptPath = path.join(serverPath, 'start.bat');
       await fs.writeFile(startScriptPath, startScript);
-      logger.info(`Start script created for server: ${serverName} in cluster ${clusterName} at: ${startScriptPath}`);
-      logger.info(`Start script content length: ${startScript.length} characters`);
-      logger.info(`BattleEye disabled: ${serverConfig.disableBattleEye || false}`);
+      logger.info(`[createStartScriptInCluster] Start script written to: ${startScriptPath}`);
+      logger.info(`[createStartScriptInCluster] Start script content:\n${startScript}`);
+      logger.info(`[createStartScriptInCluster] Start script content length: ${startScript.length} characters`);
+      logger.info(`[createStartScriptInCluster] BattleEye disabled: ${serverConfig.disableBattleEye || false}`);
       this.emitProgress?.(`Start script created for server: ${serverName}`);
     } catch (error) {
-      logger.error(`Failed to create start script for ${serverConfig.name} in cluster ${clusterName}:`, error);
+      logger.error(`[createStartScriptInCluster] Failed to create start script for ${serverConfig.name} in cluster ${clusterName}:`, error);
       this.emitProgress?.(`Failed to create start script for server: ${serverConfig.name}: ${error.message}`);
       throw error;
     }
@@ -2220,6 +2224,7 @@ pause`;
    */
   async regenerateServerStartScript(serverName) {
     try {
+      logger.info(`[regenerateServerStartScript] Regenerating start script for server: ${serverName}`);
       // Find the server in clusters
       const clusters = await this.listClusters();
       let serverConfig = null;
@@ -2237,8 +2242,11 @@ pause`;
       }
       
       if (!serverConfig) {
+        logger.warn(`[regenerateServerStartScript] Server config not found for: ${serverName}`);
         throw new Error(`Server "${serverName}" not found`);
       }
+      logger.info(`[regenerateServerStartScript] Found server in cluster: ${clusterName}`);
+      logger.info(`[regenerateServerStartScript] Server config: ${JSON.stringify(serverConfig, null, 2)}`);
       
       // Get the server path
       const serverPath = clusterName 
@@ -2252,10 +2260,11 @@ pause`;
         await this.createStartScript(serverPath, serverConfig);
       }
       
-      logger.info(`Start script regenerated for server: ${serverName}`);
+      logger.info(`[regenerateServerStartScript] Regenerating start script at path: ${serverPath}`);
+      logger.info(`[regenerateServerStartScript] Start script regenerated for server: ${serverName}`);
       return { success: true, message: `Start script regenerated for ${serverName}` };
     } catch (error) {
-      logger.error(`Failed to regenerate start script for ${serverName}:`, error);
+      logger.error(`[regenerateServerStartScript] Failed to regenerate start script for ${serverName}:`, error);
       throw error;
     }
   }

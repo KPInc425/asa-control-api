@@ -92,16 +92,20 @@ class RconService {
   /**
    * Send RCON command to native server
    */
-  async sendCommand(host, port, command, password = 'admin123') {
+  async sendCommand(options, command) {
+    if (!options || typeof options !== 'object' || !options.host) {
+      logger.error(`[RconService] Invalid options passed to sendCommand:`, options);
+      throw new Error('RCON options must include a host property.');
+    }
     const startTime = Date.now();
     const commandType = this.getCommandType(command);
     
     // Validate required parameters
-    if (!host) {
+    if (!options.host) {
       logger.error('RCON command failed: host is required');
       throw new Error('RCON host is required');
     }
-    if (!port) {
+    if (!options.port) {
       logger.error('RCON command failed: port is required');
       throw new Error('RCON port is required');
     }
@@ -110,13 +114,13 @@ class RconService {
       throw new Error('RCON command is required');
     }
     
-    logger.info(`Attempting RCON connection to ${host}:${port} with command: ${command}`);
+    logger.info(`Attempting RCON connection to ${options.host}:${options.port} with command: ${command}`);
     
     try {
       const connection = new Rcon(
-        host || 'localhost',
-        port,
-        password,
+        options.host || 'localhost',
+        options.port,
+        options.password || config.rcon.password,
         { timeout: 5000 }
       );
 
@@ -125,21 +129,21 @@ class RconService {
       await connection.end();
       
       const duration = (Date.now() - startTime) / 1000;
-      incrementRconCommand(`native-${host}:${port}`, commandType);
-      recordRconCommandDuration(`native-${host}:${port}`, commandType, duration);
+      incrementRconCommand(`native-${options.host}:${options.port}`, commandType);
+      recordRconCommandDuration(`native-${options.host}:${options.port}`, commandType, duration);
       
-      logger.info(`RCON command sent to native server ${host}:${port}: ${command}`);
+      logger.info(`RCON command sent to native server ${options.host}:${options.port}: ${command}`);
       return response;
     } catch (error) {
       const duration = (Date.now() - startTime) / 1000;
-      incrementRconCommand(`native-${host}:${port}`, commandType);
-      recordRconCommandDuration(`native-${host}:${port}`, commandType, duration);
+      incrementRconCommand(`native-${options.host}:${options.port}`, commandType);
+      recordRconCommandDuration(`native-${options.host}:${options.port}`, commandType, duration);
       
-      logger.error(`RCON command failed for native server ${host}:${port}: ${command}`, error);
+      logger.error(`RCON command failed for native server ${options.host}:${options.port}: ${command}`, error);
       
       // Provide more specific error messages
       if (error.message.includes('ECONNREFUSED')) {
-        throw new Error(`RCON connection refused. Server may not be running or RCON port ${port} is not accessible.`);
+        throw new Error(`RCON connection refused. Server may not be running or RCON port ${options.port} is not accessible.`);
       } else if (error.message.includes('timeout')) {
         throw new Error(`RCON connection timeout. Server may not be responding.`);
       } else if (error.message.includes('authentication')) {
