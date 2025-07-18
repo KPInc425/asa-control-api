@@ -19,6 +19,27 @@ async function regenerateAllClusterStartScripts(provisioner) {
   return [];
 }
 
+// Helper: migrate excludeSharedMods from cluster.json to DB if needed
+async function migrateExcludeSharedModsToDB(serverName) {
+  const provisioner = new ServerProvisioner();
+  const clusters = await provisioner.listClusters();
+  for (const cluster of clusters) {
+    if (cluster.config && cluster.config.servers) {
+      const server = cluster.config.servers.find(s => s.name === serverName);
+      if (server && typeof server.excludeSharedMods === 'boolean') {
+        // Write to DB
+        upsertServerMod(serverName, null, null, true, server.excludeSharedMods);
+        // Remove from cluster.json and save
+        delete server.excludeSharedMods;
+        const clusterPath = path.join(provisioner.clustersPath, cluster.name, 'cluster.json');
+        await fs.writeFile(clusterPath, JSON.stringify(cluster.config, null, 2));
+        return server.excludeSharedMods;
+      }
+    }
+  }
+  return null;
+}
+
 export default async function modRoutes(fastify) {
   const provisioner = new ServerProvisioner();
 
@@ -70,7 +91,7 @@ export default async function modRoutes(fastify) {
     }
   });
 
-  // Get server-specific mods configuration
+  // GET server mods (DB only, migrate from json if needed)
   fastify.get('/api/provisioning/server-mods/:serverName', {
     preHandler: requirePermission('read'),
     schema: {
@@ -83,23 +104,29 @@ export default async function modRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { serverName } = request.params;
-      const serverModsData = getServerMods(serverName);
-      const additionalMods = serverModsData
-        .filter(mod => mod.enabled === 1)
-        .map(mod => parseInt(mod.mod_id));
-      // Check if this is a Club ARK server and set defaults if no mods configured
+      let serverModsData = getServerMods(serverName);
+      let additionalMods = serverModsData.filter(mod => mod.enabled === 1).map(mod => parseInt(mod.mod_id));
+      let excludeSharedMods = false;
+      if (serverModsData.length > 0 && typeof serverModsData[0].excludeSharedMods === 'boolean') {
+        excludeSharedMods = serverModsData[0].excludeSharedMods;
+      } else {
+        // Try to migrate from json if not in DB
+        const migrated = await migrateExcludeSharedModsToDB(serverName);
+        if (typeof migrated === 'boolean') excludeSharedMods = migrated;
+      }
+      // Club ARK fallback
       const isClubArkServer = serverName.toLowerCase().includes('club') || serverName.toLowerCase().includes('bobs');
       if (isClubArkServer && additionalMods.length === 0) {
         return { success: true, serverConfig: { additionalMods: [1005639], excludeSharedMods: true } };
       }
-      return { success: true, serverConfig: { additionalMods, excludeSharedMods: false } };
+      return { success: true, serverConfig: { additionalMods, excludeSharedMods } };
     } catch (error) {
       logger.error('Failed to get server mods:', error);
       return reply.status(500).send({ success: false, message: 'Failed to get server mods configuration' });
     }
   });
 
-  // Update server-specific mods configuration
+  // PUT server mods (DB only)
   fastify.put('/api/provisioning/server-mods/:serverName', {
     preHandler: requirePermission('write'),
     schema: {
@@ -124,30 +151,14 @@ export default async function modRoutes(fastify) {
       // Update server mods in DB
       deleteAllServerMods(serverName);
       for (const modId of additionalMods) {
-        upsertServerMod(serverName, modId.toString(), null, true);
+        upsertServerMod(serverName, modId.toString(), null, true, excludeSharedMods);
       }
-      // Update excludeSharedMods in cluster config
-      const provisioner = new ServerProvisioner();
-      const clusters = await provisioner.listClusters();
-      let updated = false;
-      for (const cluster of clusters) {
-        if (cluster.config && cluster.config.servers) {
-          const server = cluster.config.servers.find(s => s.name === serverName);
-          if (server) {
-            server.excludeSharedMods = excludeSharedMods;
-            // Save updated cluster config
-            const clusterPath = path.join(provisioner.clustersPath, cluster.name, 'cluster.json');
-            await fs.writeFile(clusterPath, JSON.stringify(cluster.config, null, 2));
-            updated = true;
-            logger.info(`[server-mods PUT] Updated excludeSharedMods for ${serverName} in cluster ${cluster.name} to ${excludeSharedMods}`);
-            break;
-          }
-        }
-      }
-      if (!updated) {
-        logger.warn(`[server-mods PUT] Server ${serverName} not found in any cluster for excludeSharedMods update.`);
+      // If no mods, still persist the exclusion flag
+      if (additionalMods.length === 0) {
+        upsertServerMod(serverName, null, null, true, excludeSharedMods);
       }
       // Regenerate start.bat
+      const provisioner = new ServerProvisioner();
       await provisioner.regenerateServerStartScript(serverName);
       logger.info(`[server-mods PUT] Regenerated start.bat for ${serverName}`);
       return { success: true, message: `Server mods configuration for ${serverName} updated successfully. Start script has been regenerated.` };
