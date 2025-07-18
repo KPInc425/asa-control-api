@@ -873,4 +873,63 @@ export default async function clusterRoutes(fastify) {
       });
     }
   });
+
+  // Debug endpoint for troubleshooting
+  fastify.get('/api/provisioning/debug', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const debugInfo = {
+        timestamp: new Date().toISOString(),
+        environment: {
+          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+          NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH,
+          NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH
+        },
+        config: {
+          server: {
+            native: {
+              basePath: config.server?.native?.basePath,
+              clustersPath: config.server?.native?.clustersPath,
+              serversPath: config.server?.native?.serversPath
+            }
+          }
+        },
+        provisioner: {
+          basePath: provisioner.basePath,
+          clustersPath: provisioner.clustersPath,
+          serversPath: provisioner.serversPath
+        },
+        clusters: [],
+        errors: []
+      };
+
+      // Try to list clusters
+      try {
+        const clusters = await provisioner.listClusters();
+        debugInfo.clusters = clusters.map(cluster => ({
+          name: cluster.name,
+          path: cluster.path,
+          serverCount: cluster.config?.servers?.length || 0,
+          servers: cluster.config?.servers?.map(s => ({
+            name: s.name,
+            serverPath: s.serverPath,
+            map: s.map,
+            gamePort: s.gamePort
+          })) || []
+        }));
+      } catch (error) {
+        debugInfo.errors.push(`Failed to list clusters: ${error.message}`);
+      }
+
+      return debugInfo;
+    } catch (error) {
+      logger.error('Debug endpoint error:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+  });
 } 

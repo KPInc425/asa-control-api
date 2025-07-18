@@ -642,10 +642,61 @@ export class NativeServerManager extends ServerManager {
   async getClusterServerStartBat(name) {
     try {
       const serverInfo = await this.getClusterServerInfo(name);
+      if (!serverInfo) {
+        throw new Error(`Server ${name} not found`);
+      }
+      
+      // Use robust path resolution for clustersPath
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'clusters') : null);
+      if (!clustersPath) {
+        throw new Error('Missing clustersPath in configuration.');
+      }
+      
+      // Find which cluster contains this server
+      const clusterDirs = await fs.readdir(clustersPath);
+      let clusterName = null;
+      
+      for (const clusterDir of clusterDirs) {
+        try {
+          const clusterConfigPath = path.join(clustersPath, clusterDir, 'cluster.json');
+          const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+          const clusterConfig = JSON.parse(clusterConfigContent);
+          
+          if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+            const server = clusterConfig.servers.find(s => s.name === name);
+            if (server) {
+              clusterName = clusterDir;
+              break;
+            }
+          }
+        } catch (error) {
+          logger.warn(`Error reading cluster ${clusterDir}:`, error.message);
+        }
+      }
+      
+      if (!clusterName) {
+        throw new Error(`Server ${name} not found in any cluster`);
+      }
+      
+      // Construct the start.bat path
+      const startBatPath = path.join(clustersPath, clusterName, name, 'start.bat');
+      
+      // Check if the file exists
+      try {
+        await fs.access(startBatPath);
+      } catch (error) {
+        throw new Error(`Start.bat file not found: ${startBatPath}`);
+      }
+      
+      // Read the file content
+      const content = await fs.readFile(startBatPath, 'utf8');
+      
+      logger.info(`[getClusterServerStartBat] Read start.bat for ${name}, content length: ${content.length}`);
+      
       return {
         success: true,
-        content: serverInfo.startBatContent,
-        path: serverInfo.startBatPath
+        content: content,
+        path: startBatPath
       };
     } catch (error) {
       logger.error(`Failed to get start.bat for ${name}:`, error);
@@ -656,7 +707,50 @@ export class NativeServerManager extends ServerManager {
   async updateClusterServerStartBat(name, content) {
     try {
       const serverInfo = await this.getClusterServerInfo(name);
-      await fs.writeFile(serverInfo.startBatPath, content, 'utf8');
+      if (!serverInfo) {
+        throw new Error(`Server ${name} not found`);
+      }
+      
+      // Use robust path resolution for clustersPath
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, 'clusters') : null);
+      if (!clustersPath) {
+        throw new Error('Missing clustersPath in configuration.');
+      }
+      
+      // Find which cluster contains this server
+      const clusterDirs = await fs.readdir(clustersPath);
+      let clusterName = null;
+      
+      for (const clusterDir of clusterDirs) {
+        try {
+          const clusterConfigPath = path.join(clustersPath, clusterDir, 'cluster.json');
+          const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+          const clusterConfig = JSON.parse(clusterConfigContent);
+          
+          if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+            const server = clusterConfig.servers.find(s => s.name === name);
+            if (server) {
+              clusterName = clusterDir;
+              break;
+            }
+          }
+        } catch (error) {
+          logger.warn(`Error reading cluster ${clusterDir}:`, error.message);
+        }
+      }
+      
+      if (!clusterName) {
+        throw new Error(`Server ${name} not found in any cluster`);
+      }
+      
+      // Construct the start.bat path
+      const startBatPath = path.join(clustersPath, clusterName, name, 'start.bat');
+      
+      // Write the new content
+      await fs.writeFile(startBatPath, content, 'utf8');
+      
+      logger.info(`[updateClusterServerStartBat] Updated start.bat for ${name} at: ${startBatPath}`);
+      
       return { success: true, message: `Start.bat updated for ${name}` };
     } catch (error) {
       logger.error(`Failed to update start.bat for ${name}:`, error);
