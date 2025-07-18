@@ -614,7 +614,7 @@ echo Starting ${serverName}...
 cd /d "${binariesPath}"
 
 REM Set server parameters
-set MAP=${serverConfig.map || 'TheIsland'}
+set MAP=${(serverConfig.map || 'TheIsland')}_WP
 set PORT=${serverConfig.gamePort || 7777}
 set QUERYPORT=${serverConfig.queryPort || 27015}
 set RCONPORT=${serverConfig.rconPort || 32330}
@@ -1140,7 +1140,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo Starting ${serverName}...
 
 REM Start the ASA server with proper parameters
-      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}?${queryString}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
+      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}_WP?${queryString}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
 
 echo Server ${serverName} has stopped.
 pause`;
@@ -1465,18 +1465,27 @@ pause`;
     
     try {
       const clusterPath = path.join(this.clustersPath, clusterName);
+      
       // Check if cluster exists
+      let clusterExists = false;
       try {
         await fs.access(clusterPath);
+        clusterExists = true;
       } catch {
-        throw new Error(`Cluster ${clusterName} not found`);
+        // Cluster doesn't exist, but we might still want to clean up
+        logger.warn(`Cluster directory ${clusterPath} not found`);
       }
 
-      // Backup saved data if requested
+      // Backup saved data if requested and cluster exists
       let backupPath = null;
-      if (backupSaved) {
-        backupPath = await this.backupCluster(clusterName);
-        logger.info(`Backed up cluster ${clusterName} to: ${backupPath}`);
+      if (backupSaved && clusterExists) {
+        try {
+          backupPath = await this.backupCluster(clusterName);
+          logger.info(`Backed up cluster ${clusterName} to: ${backupPath}`);
+        } catch (backupError) {
+          logger.warn(`Failed to backup cluster ${clusterName}: ${backupError.message}`);
+          // Continue with deletion even if backup fails
+        }
       }
 
       // Kill any ArkAscendedServer.exe and steamcmd.exe processes before deletion
@@ -1489,22 +1498,51 @@ pause`;
         logger.warn('Failed to kill some processes before cluster deletion (may not be running):', killError.message);
       }
 
-      if (deleteFiles) {
-        // Try to delete with fs.rm (Node 16+)
+      if (deleteFiles && clusterExists) {
+        // Try multiple deletion methods
+        let deleted = false;
+        
+        // Method 1: Try fs.rm (Node 16+)
         try {
           await fs.rm(clusterPath, { recursive: true, force: true });
           logger.info(`Cluster ${clusterName} deleted successfully with fs.rm`);
+          deleted = true;
         } catch (rmError) {
-          logger.warn(`fs.rm failed for ${clusterName}: ${rmError.message}, trying PowerShell fallback`);
-          // Fallback to PowerShell Remove-Item
+          logger.warn(`fs.rm failed for ${clusterName}: ${rmError.message}, trying alternative methods`);
+        }
+
+        // Method 2: Try PowerShell Remove-Item with better error handling
+        if (!deleted) {
           try {
             const { execSync } = await import('child_process');
-            execSync(`powershell -Command "Remove-Item -Path \"${clusterPath}\" -Recurse -Force"`, { stdio: 'inherit' });
-            logger.info(`Cluster ${clusterName} deleted successfully with PowerShell`);
+            const psCommand = `powershell -Command "try { Remove-Item -Path '${clusterPath.replace(/\\/g, '\\\\')}' -Recurse -Force -ErrorAction Stop; Write-Host 'SUCCESS' } catch { Write-Host 'ERROR:' $_.Exception.Message; exit 1 }"`;
+            const result = execSync(psCommand, { encoding: 'utf8', stdio: 'pipe' });
+            
+            if (result.includes('SUCCESS')) {
+              logger.info(`Cluster ${clusterName} deleted successfully with PowerShell`);
+              deleted = true;
+            } else {
+              throw new Error(result);
+            }
           } catch (psError) {
-            logger.error(`Failed to delete cluster ${clusterName} with all methods:`, psError);
-            throw new Error(`Failed to delete cluster ${clusterName}: ${psError.message}`);
+            logger.warn(`PowerShell deletion failed for ${clusterName}: ${psError.message}`);
           }
+        }
+
+        // Method 3: Try manual deletion of subdirectories
+        if (!deleted) {
+          try {
+            logger.info(`Attempting manual deletion of cluster ${clusterName}`);
+            await this.deleteDirectoryManually(clusterPath);
+            logger.info(`Cluster ${clusterName} deleted successfully with manual method`);
+            deleted = true;
+          } catch (manualError) {
+            logger.warn(`Manual deletion failed for ${clusterName}: ${manualError.message}`);
+          }
+        }
+
+        if (!deleted) {
+          throw new Error(`Failed to delete cluster ${clusterName} with all available methods`);
         }
       }
 
@@ -1516,6 +1554,40 @@ pause`;
     } catch (error) {
       logger.error(`Failed to delete cluster ${clusterName}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Helper method to delete directory manually by removing files first
+   */
+  async deleteDirectoryManually(dirPath) {
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        
+        if (entry.isDirectory()) {
+          await this.deleteDirectoryManually(fullPath);
+        } else {
+          try {
+            await fs.unlink(fullPath);
+          } catch (unlinkError) {
+            logger.warn(`Failed to delete file ${fullPath}: ${unlinkError.message}`);
+            // Try to make file writable first
+            try {
+              await fs.chmod(fullPath, 0o666);
+              await fs.unlink(fullPath);
+            } catch (retryError) {
+              logger.warn(`Failed to delete file ${fullPath} after chmod: ${retryError.message}`);
+            }
+          }
+        }
+      }
+      
+      await fs.rmdir(dirPath);
+    } catch (error) {
+      throw new Error(`Failed to manually delete directory ${dirPath}: ${error.message}`);
     }
   }
 
@@ -1542,8 +1614,23 @@ pause`;
 
       // Read cluster config to get server names
       const clusterConfigPath = path.join(clusterPath, 'cluster.json');
-      const configContent = await fs.readFile(clusterConfigPath, 'utf8');
-      const clusterConfig = JSON.parse(configContent);
+      let clusterConfig;
+      
+      try {
+        const configContent = await fs.readFile(clusterConfigPath, 'utf8');
+        clusterConfig = JSON.parse(configContent);
+      } catch (error) {
+        logger.warn(`Failed to read cluster config for ${clusterName}: ${error.message}`);
+        // Try to find servers by scanning the directory
+        const entries = await fs.readdir(clusterPath, { withFileTypes: true });
+        const serverDirs = entries.filter(entry => entry.isDirectory() && entry.name !== 'backups');
+        
+        clusterConfig = {
+          servers: serverDirs.map(dir => ({ name: dir.name }))
+        };
+        
+        logger.info(`Found ${clusterConfig.servers.length} servers by directory scan for ${clusterName}`);
+      }
 
       const backupResults = [];
 
@@ -1687,6 +1774,438 @@ pause`;
       }
     } catch (error) {
       throw new Error(`Failed to copy directory from ${source} to ${destination}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Backup individual server
+   */
+  async backupServer(serverName, options = {}) {
+    const { destination, includeConfigs = true, includeScripts = false } = options;
+    
+    try {
+      // Find the server in clusters
+      const clusters = await this.listClusters();
+      let serverConfig = null;
+      let clusterName = null;
+      let serverPath = null;
+      
+      for (const cluster of clusters) {
+        if (cluster.config && cluster.config.servers) {
+          const server = cluster.config.servers.find(s => s.name === serverName);
+          if (server) {
+            serverConfig = server;
+            clusterName = cluster.name;
+            serverPath = path.join(this.clustersPath, clusterName, serverName);
+            break;
+          }
+        }
+      }
+      
+      if (!serverConfig) {
+        throw new Error(`Server "${serverName}" not found`);
+      }
+
+      // Create backup directory
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupDir = destination || path.join(this.clustersPath, '..', 'backups', 'servers', `${serverName}-${timestamp}`);
+      
+      // Ensure backup directory exists
+      await fs.mkdir(path.dirname(backupDir), { recursive: true });
+
+      const backupResults = [];
+
+      // Backup Saved folder (always included)
+      const savedPath = path.join(serverPath, 'ShooterGame', 'Saved');
+      const backupSavedPath = path.join(backupDir, 'ShooterGame', 'Saved');
+      
+      try {
+        await fs.access(savedPath);
+        await this.copyDirectory(savedPath, backupSavedPath);
+        backupResults.push({
+          type: 'saved',
+          success: true,
+          path: backupSavedPath
+        });
+        logger.info(`Backed up ${serverName} Saved folder to: ${backupSavedPath}`);
+      } catch (error) {
+        backupResults.push({
+          type: 'saved',
+          success: false,
+          error: error.message
+        });
+        logger.warn(`Failed to backup ${serverName} Saved folder:`, error.message);
+      }
+
+      // Backup configs if requested
+      if (includeConfigs) {
+        const configPath = path.join(serverPath, 'ShooterGame', 'Config');
+        const backupConfigPath = path.join(backupDir, 'ShooterGame', 'Config');
+        
+        try {
+          await fs.access(configPath);
+          await this.copyDirectory(configPath, backupConfigPath);
+          backupResults.push({
+            type: 'configs',
+            success: true,
+            path: backupConfigPath
+          });
+          logger.info(`Backed up ${serverName} configs to: ${backupConfigPath}`);
+        } catch (error) {
+          backupResults.push({
+            type: 'configs',
+            success: false,
+            error: error.message
+          });
+          logger.warn(`Failed to backup ${serverName} configs:`, error.message);
+        }
+      }
+
+      // Backup scripts if requested
+      if (includeScripts) {
+        const scriptsToBackup = ['start.bat', 'stop.bat'];
+        const backupScriptsPath = path.join(backupDir, 'scripts');
+        
+        try {
+          await fs.mkdir(backupScriptsPath, { recursive: true });
+          
+          for (const script of scriptsToBackup) {
+            const scriptPath = path.join(serverPath, script);
+            const backupScriptPath = path.join(backupScriptsPath, script);
+            
+            try {
+              await fs.access(scriptPath);
+              await fs.copyFile(scriptPath, backupScriptPath);
+              backupResults.push({
+                type: `script-${script}`,
+                success: true,
+                path: backupScriptPath
+              });
+              logger.info(`Backed up ${serverName} ${script} to: ${backupScriptPath}`);
+            } catch (error) {
+              backupResults.push({
+                type: `script-${script}`,
+                success: false,
+                error: error.message
+              });
+              logger.warn(`Failed to backup ${serverName} ${script}:`, error.message);
+            }
+          }
+        } catch (error) {
+          backupResults.push({
+            type: 'scripts',
+            success: false,
+            error: error.message
+          });
+          logger.warn(`Failed to backup ${serverName} scripts:`, error.message);
+        }
+      }
+
+      // Backup server configuration
+      const serverConfigPath = path.join(backupDir, 'server-config.json');
+      await fs.writeFile(serverConfigPath, JSON.stringify(serverConfig, null, 2));
+
+      // Backup cluster info
+      const clusterInfoPath = path.join(backupDir, 'cluster-info.json');
+      await fs.writeFile(clusterInfoPath, JSON.stringify({
+        originalCluster: clusterName,
+        serverName: serverName,
+        backupDate: new Date().toISOString(),
+        options: options
+      }, null, 2));
+
+      return {
+        success: true,
+        backupPath: backupDir,
+        timestamp: timestamp,
+        serverName: serverName,
+        clusterName: clusterName,
+        results: backupResults
+      };
+    } catch (error) {
+      logger.error(`Failed to backup server ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Restore individual server
+   */
+  async restoreServer(serverName, sourcePath, options = {}) {
+    const { targetClusterName, overwrite = false } = options;
+    
+    try {
+      // Check if source backup exists
+      try {
+        await fs.access(sourcePath);
+      } catch {
+        throw new Error(`Backup source not found: ${sourcePath}`);
+      }
+
+      // Read server config from backup
+      const serverConfigPath = path.join(sourcePath, 'server-config.json');
+      let serverConfig;
+      try {
+        const configContent = await fs.readFile(serverConfigPath, 'utf8');
+        serverConfig = JSON.parse(configContent);
+      } catch (error) {
+        throw new Error(`Failed to read server config from backup: ${error.message}`);
+      }
+
+      // Determine target cluster
+      let targetCluster = targetClusterName;
+      if (!targetCluster) {
+        // Try to restore to original cluster
+        const clusterInfoPath = path.join(sourcePath, 'cluster-info.json');
+        try {
+          const clusterInfoContent = await fs.readFile(clusterInfoPath, 'utf8');
+          const clusterInfo = JSON.parse(clusterInfoContent);
+          targetCluster = clusterInfo.originalCluster;
+        } catch (error) {
+          throw new Error('No target cluster specified and could not determine original cluster');
+        }
+      }
+
+      // Check if target cluster exists
+      const targetClusterPath = path.join(this.clustersPath, targetCluster);
+      try {
+        await fs.access(targetClusterPath);
+      } catch {
+        throw new Error(`Target cluster "${targetCluster}" not found`);
+      }
+
+      // Check if server already exists in target cluster
+      const targetServerPath = path.join(targetClusterPath, serverName);
+      const serverExists = await fs.access(targetServerPath).then(() => true).catch(() => false);
+      
+      if (serverExists && !overwrite) {
+        throw new Error(`Server "${serverName}" already exists in cluster "${targetCluster}". Use overwrite=true to replace it.`);
+      }
+
+      const restoreResults = [];
+
+      // Create server directory if it doesn't exist
+      if (!serverExists) {
+        await fs.mkdir(targetServerPath, { recursive: true });
+        logger.info(`Created server directory: ${targetServerPath}`);
+      }
+
+      // Restore Saved folder
+      const backupSavedPath = path.join(sourcePath, 'ShooterGame', 'Saved');
+      const targetSavedPath = path.join(targetServerPath, 'ShooterGame', 'Saved');
+      
+      try {
+        await fs.access(backupSavedPath);
+        
+        // Remove existing Saved folder if it exists
+        try {
+          await fs.rm(targetSavedPath, { recursive: true, force: true });
+        } catch (error) {
+          // Saved folder might not exist, which is fine
+        }
+        
+        await this.copyDirectory(backupSavedPath, targetSavedPath);
+        restoreResults.push({
+          type: 'saved',
+          success: true,
+          path: targetSavedPath
+        });
+        logger.info(`Restored ${serverName} Saved folder to: ${targetSavedPath}`);
+      } catch (error) {
+        restoreResults.push({
+          type: 'saved',
+          success: false,
+          error: error.message
+        });
+        logger.warn(`Failed to restore ${serverName} Saved folder:`, error.message);
+      }
+
+      // Restore configs if they exist in backup
+      const backupConfigPath = path.join(sourcePath, 'ShooterGame', 'Config');
+      const targetConfigPath = path.join(targetServerPath, 'ShooterGame', 'Config');
+      
+      try {
+        await fs.access(backupConfigPath);
+        
+        // Remove existing configs if they exist
+        try {
+          await fs.rm(targetConfigPath, { recursive: true, force: true });
+        } catch (error) {
+          // Config folder might not exist, which is fine
+        }
+        
+        await this.copyDirectory(backupConfigPath, targetConfigPath);
+        restoreResults.push({
+          type: 'configs',
+          success: true,
+          path: targetConfigPath
+        });
+        logger.info(`Restored ${serverName} configs to: ${targetConfigPath}`);
+      } catch (error) {
+        restoreResults.push({
+          type: 'configs',
+          success: false,
+          error: error.message
+        });
+        logger.warn(`Failed to restore ${serverName} configs:`, error.message);
+      }
+
+      // Restore scripts if they exist in backup
+      const backupScriptsPath = path.join(sourcePath, 'scripts');
+      try {
+        await fs.access(backupScriptsPath);
+        const scripts = await fs.readdir(backupScriptsPath);
+        
+        for (const script of scripts) {
+          const backupScriptPath = path.join(backupScriptsPath, script);
+          const targetScriptPath = path.join(targetServerPath, script);
+          
+          try {
+            await fs.copyFile(backupScriptPath, targetScriptPath);
+            restoreResults.push({
+              type: `script-${script}`,
+              success: true,
+              path: targetScriptPath
+            });
+            logger.info(`Restored ${serverName} ${script} to: ${targetScriptPath}`);
+          } catch (error) {
+            restoreResults.push({
+              type: `script-${script}`,
+              success: false,
+              error: error.message
+            });
+            logger.warn(`Failed to restore ${serverName} ${script}:`, error.message);
+          }
+        }
+      } catch (error) {
+        // Scripts might not exist in backup, which is fine
+        logger.info(`No scripts found in backup for ${serverName}`);
+      }
+
+      // Update cluster config to include the restored server
+      const clusterConfigPath = path.join(targetClusterPath, 'cluster.json');
+      try {
+        const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+        const clusterConfig = JSON.parse(clusterConfigContent);
+        
+        // Check if server already exists in cluster config
+        const existingServerIndex = clusterConfig.servers.findIndex(s => s.name === serverName);
+        
+        if (existingServerIndex >= 0) {
+          // Update existing server config
+          clusterConfig.servers[existingServerIndex] = serverConfig;
+        } else {
+          // Add new server to cluster config
+          clusterConfig.servers.push(serverConfig);
+        }
+        
+        await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
+        restoreResults.push({
+          type: 'cluster-config',
+          success: true,
+          path: clusterConfigPath
+        });
+        logger.info(`Updated cluster config for ${serverName} in ${targetCluster}`);
+      } catch (error) {
+        restoreResults.push({
+          type: 'cluster-config',
+          success: false,
+          error: error.message
+        });
+        logger.warn(`Failed to update cluster config for ${serverName}:`, error.message);
+      }
+
+      return {
+        success: true,
+        sourcePath: sourcePath,
+        targetCluster: targetCluster,
+        serverName: serverName,
+        results: restoreResults
+      };
+    } catch (error) {
+      logger.error(`Failed to restore server ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * List available server backups
+   */
+  async listServerBackups() {
+    try {
+      const backupsPath = path.join(this.clustersPath, '..', 'backups', 'servers');
+      
+      // Check if backups directory exists
+      try {
+        await fs.access(backupsPath);
+      } catch {
+        return {
+          success: true,
+          backups: [],
+          message: 'No server backups found'
+        };
+      }
+
+      const backups = [];
+      const entries = await fs.readdir(backupsPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const backupPath = path.join(backupsPath, entry.name);
+          
+          try {
+            // Read server config to get details
+            const serverConfigPath = path.join(backupPath, 'server-config.json');
+            const clusterInfoPath = path.join(backupPath, 'cluster-info.json');
+            
+            let serverConfig = null;
+            let clusterInfo = null;
+            
+            try {
+              const configContent = await fs.readFile(serverConfigPath, 'utf8');
+              serverConfig = JSON.parse(configContent);
+            } catch (error) {
+              logger.warn(`Failed to read server config for backup ${entry.name}:`, error.message);
+            }
+            
+            try {
+              const clusterInfoContent = await fs.readFile(clusterInfoPath, 'utf8');
+              clusterInfo = JSON.parse(clusterInfoContent);
+            } catch (error) {
+              logger.warn(`Failed to read cluster info for backup ${entry.name}:`, error.message);
+            }
+
+            // Get backup size
+            const stats = await fs.stat(backupPath);
+            
+            backups.push({
+              name: entry.name,
+              path: backupPath,
+              serverName: serverConfig?.name || 'Unknown',
+              originalCluster: clusterInfo?.originalCluster || 'Unknown',
+              backupDate: clusterInfo?.backupDate || stats.mtime.toISOString(),
+              size: stats.size,
+              sizeFormatted: this.formatBytes(stats.size),
+              serverConfig: serverConfig,
+              clusterInfo: clusterInfo
+            });
+          } catch (error) {
+            logger.warn(`Failed to process backup ${entry.name}:`, error.message);
+          }
+        }
+      }
+
+      // Sort by backup date (newest first)
+      backups.sort((a, b) => new Date(b.backupDate) - new Date(a.backupDate));
+
+      return {
+        success: true,
+        backups: backups,
+        count: backups.length
+      };
+    } catch (error) {
+      logger.error('Failed to list server backups:', error);
+      throw error;
     }
   }
 

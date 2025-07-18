@@ -768,4 +768,84 @@ export default async function clusterRoutes(fastify) {
       });
     }
   });
+
+  // Backup individual server
+  fastify.post('/api/provisioning/servers/:serverName/backup', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { destination, includeConfigs = true, includeScripts = false } = request.body;
+      
+      logger.info(`Backing up server: ${serverName}`, { destination, includeConfigs, includeScripts });
+      
+      const result = await provisioner.backupServer(serverName, {
+        destination,
+        includeConfigs,
+        includeScripts
+      });
+      
+      return {
+        success: true,
+        message: `Server ${serverName} backed up successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to backup server ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Restore individual server
+  fastify.post('/api/provisioning/servers/:serverName/restore', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { source, targetClusterName, overwrite = false } = request.body;
+      
+      logger.info(`Restoring server: ${serverName}`, { source, targetClusterName, overwrite });
+      
+      const result = await provisioner.restoreServer(serverName, source, {
+        targetClusterName,
+        overwrite
+      });
+      
+      return {
+        success: true,
+        message: `Server ${serverName} restored successfully`,
+        data: result
+      };
+    } catch (error) {
+      logger.error(`Failed to restore server ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // List available server backups
+  fastify.get('/api/provisioning/server-backups', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const result = await provisioner.listServerBackups();
+      
+      return {
+        success: true,
+        message: 'Server backups retrieved successfully',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Failed to list server backups:', error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
 } 

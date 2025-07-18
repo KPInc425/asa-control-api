@@ -1047,7 +1047,7 @@ export class NativeServerManager extends ServerManager {
    */
   buildServerArgs(config) {
     const args = [
-      config.mapName || 'TheIsland',
+      (config.mapName || 'TheIsland') + '_WP',
       '?listen',
       `?Port=${config.gamePort || 7777}`,
       `?QueryPort=${config.queryPort || 27015}`,
@@ -1087,7 +1087,7 @@ export class NativeServerManager extends ServerManager {
    */
   buildServerArgsFromCluster(server) {
     const args = [];
-    args.push(server.map || 'TheIsland');
+    args.push((server.map || 'TheIsland') + '_WP');
     args.push('?listen');
     args.push(`?Port=${server.gamePort || 7777}`);
     args.push(`?QueryPort=${server.queryPort || 27015}`);
