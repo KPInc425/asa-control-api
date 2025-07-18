@@ -1,341 +1,221 @@
-# ARK Empire Creator Scripts
+# ASA Management API Scripts
 
-This directory contains scripts and tools for creating ARK: Survival Ascended server clusters from the command line, without needing to use the web dashboard.
+This directory contains utility scripts for the ASA Management API, including service installation, migration, and maintenance tools.
 
-## Overview
+## Service Installation
 
-The ARK Empire Creator provides multiple ways to create and manage ARK server clusters:
+### Flexible Service Installer (Recommended)
 
-1. **Node.js CLI Script** - Cross-platform command-line tool
-2. **PowerShell Script** - Windows-specific PowerShell tool
-3. **Configuration Files** - JSON-based cluster configuration
-4. **API Integration** - Direct API calls for automation
-
-## Quick Start
-
-### Prerequisites
-
-1. **Backend Server Running**: Ensure the ASA Management backend is running on `http://localhost:3000`
-2. **Node.js**: Required for the Node.js CLI script
-3. **PowerShell**: Required for the PowerShell script (Windows only)
-
-### Basic Usage
-
-#### Node.js CLI Script
-
-```bash
-# Create a simple cluster
-node create-ark-empire.js --name "MyCluster" --servers 3
-
-# Interactive mode
-node create-ark-empire.js --interactive
-
-# From configuration file
-node create-ark-empire.js --config cluster-config.json
-
-# Show help
-node create-ark-empire.js --help
-```
-
-#### PowerShell Script
+The flexible service installer is the recommended way to install the ASA API as a Windows service:
 
 ```powershell
-# Create a simple cluster
-.\create-ark-empire.ps1 -Name "MyCluster" -Servers 3
+# Run from the project directory
+.\scripts\install-service-flexible.ps1
 
-# Interactive mode
-.\create-ark-empire.ps1 -Interactive
-
-# From configuration file
-.\create-ark-empire.ps1 -ConfigFile cluster-config.json
-
-# Show help
-.\create-ark-empire.ps1 -Help
+# Options:
+.\scripts\install-service-flexible.ps1 -CopyFiles -InstallPath "C:\ASA-API"
+.\scripts\install-service-flexible.ps1 -RunFromCurrent
 ```
 
-## Configuration Files
+**Features:**
+- Choose between running from current directory or copying files
+- Automatic NSSM installation and configuration
+- Comprehensive error checking and validation
+- Service testing and verification
 
-### Basic Configuration
+## Data Migration
 
-Create a JSON file with your cluster configuration:
+### JSON to SQLite Migration
 
-```json
-{
-  "name": "MyARKCluster",
-  "description": "My awesome ARK cluster",
-  "basePort": 7777,
-  "serverCount": 3
-}
-```
-
-### Advanced Configuration
-
-For more control, use the advanced configuration format:
-
-```json
-{
-  "name": "MyARKCluster",
-  "description": "My awesome ARK cluster",
-  "basePort": 7777,
-  "serverCount": 3,
-  "settings": {
-    "maxPlayers": 70,
-    "difficulty": 1.0,
-    "harvestAmount": 2.0,
-    "tamingSpeed": 3.0,
-    "xpMultiplier": 2.0
-  },
-  "maps": ["TheIsland", "ScorchedEarth", "Aberration"],
-  "clusterSettings": {
-    "clusterId": "MyClusterID",
-    "clusterName": "MyARKCluster",
-    "clusterPassword": "",
-    "clusterOwner": "Admin"
-  }
-}
-```
-
-## Script Options
-
-### Node.js CLI Options
-
-| Option | Short | Description | Default |
-|--------|-------|-------------|---------|
-| `--name` | `-n` | Cluster name | Required |
-| `--description` | `-d` | Cluster description | "" |
-| `--servers` | `-s` | Number of servers | 1 |
-| `--base-port` | `-p` | Base port for servers | 7777 |
-| `--config` | `-c` | Load from JSON file | - |
-| `--interactive` | `-i` | Interactive mode | false |
-| `--help` | `-h` | Show help | - |
-
-### PowerShell Options
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `-Name` | Cluster name | Required |
-| `-Description` | Cluster description | "" |
-| `-Servers` | Number of servers | 1 |
-| `-BasePort` | Base port for servers | 7777 |
-| `-ConfigFile` | Load from JSON file | - |
-| `-Interactive` | Interactive mode | false |
-| `-Help` | Show help | - |
-
-## API Integration
-
-### Direct API Calls
-
-You can also create clusters directly via API calls:
+Migrate existing JSON configuration files to SQLite database:
 
 ```bash
-# Create cluster via API
-curl -X POST http://localhost:3000/api/provisioning/clusters/script \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "MyCluster",
-    "description": "My ARK cluster",
-    "serverCount": 3,
-    "basePort": 7777,
-    "autoStart": true
-  }'
+# Development environment (from project directory)
+node scripts/migrate-json-to-sqlite.js
 
-# Validate configuration
-curl -X POST http://localhost:3000/api/provisioning/validate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "MyCluster",
-    "serverCount": 3,
-    "basePort": 7777
-  }'
+# Production environment (from service directory)
+node scripts/migrate-json-to-sqlite.js --service-path
 
-# Start cluster
-curl -X POST http://localhost:3000/api/provisioning/clusters/MyCluster/start
-
-# Stop cluster
-curl -X POST http://localhost:3000/api/provisioning/clusters/MyCluster/stop
+# Custom database path
+node scripts/migrate-json-to-sqlite.js --db-path "D:\custom\path\asa-data.sqlite"
 ```
 
-### Enhanced Script Endpoint
+**What gets migrated:**
+- Clusters and servers from `C:\ARK\clusters\*`
+- Server mods from `C:\ARK\server-mods.json` and `C:\ARK\server-mods\*.json`
+- Shared mods from `C:\ARK\shared-mods.json`
+- Mods from server configuration files
 
-The `/api/provisioning/clusters/script` endpoint provides additional features:
+### Production Migration Scripts
 
-- **Validation**: Pre-flight configuration validation
-- **Auto-start**: Automatically start servers after creation
-- **Advanced settings**: Support for game settings and cluster configuration
+For production environments, use these helper scripts:
 
-## Cluster Management
+```powershell
+# PowerShell script (recommended)
+.\scripts\migrate-production.ps1
 
-### Starting Clusters
+# Batch file alternative
+scripts\migrate-production.bat
+```
+
+### Dependency Installation
+
+If you encounter module issues during migration:
+
+```powershell
+# Install required dependencies
+.\scripts\install-dependencies.ps1
+```
+
+## Backup and Restore
+
+### Data Backup
+
+```powershell
+# Backup ASA data
+.\scripts\backup-asa-data.ps1
+
+# Options:
+.\scripts\backup-asa-data.ps1 -Destination "D:\backups"
+.\scripts\backup-asa-data.ps1 -Compress
+```
+
+### Data Restore
+
+```powershell
+# Restore ASA data
+.\scripts\restore-asa-data.ps1 -Source "D:\backups\backup-2024-01-01"
+
+# Options:
+.\scripts\restore-asa-data.ps1 -Source "D:\backups\backup-2024-01-01" -Verify
+```
+
+## Configuration and Setup
+
+### Environment Configuration
+
+```powershell
+# Configure G: drive mapping for native servers
+.\scripts\set-g-drive-native.ps1
+
+# Configure G: drive mapping for Docker
+.\scripts\set-g-drive.ps1
+```
+
+### Firewall Configuration
+
+```powershell
+# Configure Windows Firewall for ASA servers
+.\scripts\configure-firewall.ps1
+
+# Options:
+.\scripts\configure-firewall.ps1 -PortRange "7777-7780"
+.\scripts\configure-firewall.ps1 -RemoveRules
+```
+
+## Development and Testing
+
+### Interactive Console
 
 ```bash
-# Via API
-curl -X POST http://localhost:3000/api/provisioning/clusters/MyCluster/start
-
-# Via PowerShell
-.\create-ark-empire.ps1 -StartCluster "MyCluster"
+# Start interactive console for testing
+node scripts/interactive-console.js
 ```
 
-### Stopping Clusters
+### Setup and Initialization
 
 ```bash
-# Via API
-curl -X POST http://localhost:3000/api/provisioning/clusters/MyCluster/stop
+# Run initial setup
+node scripts/setup.js
 
-# Via PowerShell
-.\create-ark-empire.ps1 -StopCluster "MyCluster"
+# Options:
+node scripts/setup.js --config cluster-config-example.json
 ```
 
-### Listing Clusters
+## Utility Scripts
+
+### Port Management
 
 ```bash
-# Via API
-curl http://localhost:3000/api/provisioning/clusters
-
-# Via PowerShell
-.\create-ark-empire.ps1 -ListClusters
+# Migrate port configuration to gameport format
+node scripts/migrate-port-to-gameport.js
 ```
 
-## Examples
-
-### Example 1: Simple 3-Server Cluster
+### Console Logging
 
 ```bash
-node create-ark-empire.js --name "MyCluster" --servers 3 --base-port 7777
+# Console logger utility
+node scripts/console-logger.js
 ```
 
-### Example 2: Advanced Configuration
+## Deployment Scripts
 
-Create `my-cluster.json`:
-```json
-{
-  "name": "AdvancedCluster",
-  "description": "High-performance ARK cluster",
-  "basePort": 7777,
-  "serverCount": 5,
-  "settings": {
-    "maxPlayers": 100,
-    "difficulty": 1.5,
-    "harvestAmount": 3.0,
-    "tamingSpeed": 5.0,
-    "xpMultiplier": 3.0
-  },
-  "maps": ["TheIsland", "ScorchedEarth", "Aberration", "Extinction", "Genesis"],
-  "clusterSettings": {
-    "clusterId": "AdvancedClusterID",
-    "clusterName": "AdvancedCluster",
-    "clusterPassword": "mypassword123",
-    "clusterOwner": "Admin"
-  }
-}
-```
-
-Then run:
-```bash
-node create-ark-empire.js --config my-cluster.json
-```
-
-### Example 3: Interactive Mode
+### Production Deployment
 
 ```bash
-node create-ark-empire.js --interactive
+# Deploy to production server
+./scripts/deploy-production.sh
+
+# Remote deployment
+./scripts/deploy-remote.sh
 ```
 
-This will prompt you for:
-- Cluster name
-- Description
-- Number of servers
-- Base port
+### Docker Integration
+
+```bash
+# Docker entrypoint script
+./scripts/docker-entrypoint.sh
+```
+
+## Documentation
+
+- **Migration Guide**: See `MIGRATION_README.md` for detailed migration instructions
+- **Service Installation**: The flexible installer includes comprehensive help and validation
+- **API Documentation**: See the main project README for API usage
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Backend not running**: Ensure the ASA Management backend is running on port 3000
-2. **Permission errors**: Run scripts as Administrator on Windows
-3. **Port conflicts**: Check if ports are already in use
-4. **Insufficient disk space**: Ensure you have at least 10GB free per server
+1. **Service Installation Fails**
+   - Ensure running as Administrator
+   - Check if NSSM is available or let the script download it
+   - Verify Node.js is installed and in PATH
 
-### Validation
+2. **Migration Fails**
+   - Run `.\scripts\install-dependencies.ps1` first
+   - Check file permissions on source JSON files
+   - Verify database directory is writable
 
-The scripts automatically validate:
-- Cluster name format (alphanumeric, underscores, hyphens only)
-- Server count (1-10 servers)
-- Port range (1024-65535)
-- System requirements (disk space, memory)
-- Existing clusters (prevents duplicates)
+3. **Backup/Restore Issues**
+   - Ensure sufficient disk space
+   - Check file permissions
+   - Verify source/destination paths
 
-### Logs
+### Getting Help
 
-Check the backend logs for detailed error information:
-```bash
-# View backend logs
-tail -f logs/app.log
-```
+- Check script output for specific error messages
+- Review the migration guide for detailed troubleshooting
+- Ensure all prerequisites are met (Node.js, PowerShell, Administrator rights)
 
-## Integration with Dashboard
+## Script Categories
 
-The script-based approach works alongside the web dashboard:
+### Core Scripts
+- `install-service-flexible.ps1` - Service installation
+- `migrate-json-to-sqlite.js` - Data migration
+- `backup-asa-data.ps1` / `restore-asa-data.ps1` - Backup/restore
 
-1. **Create clusters via scripts** - Use CLI tools for automation
-2. **Manage via dashboard** - Use the web interface for ongoing management
-3. **Hybrid approach** - Create with scripts, monitor with dashboard
+### Helper Scripts
+- `install-dependencies.ps1` - Dependency management
+- `migrate-production.ps1` / `migrate-production.bat` - Production migration
+- `configure-firewall.ps1` - Firewall configuration
 
-## Automation
+### Development Scripts
+- `interactive-console.js` - Testing console
+- `setup.js` - Initial setup
+- `migrate-port-to-gameport.js` - Port migration
 
-### Batch Scripts
-
-Create batch files for common operations:
-
-```batch
-@echo off
-REM start-ark-cluster.bat
-node create-ark-empire.js --name "ProductionCluster" --servers 5 --base-port 7777
-```
-
-### Scheduled Tasks
-
-Set up scheduled cluster management:
-
-```powershell
-# PowerShell scheduled task
-Register-ScheduledJob -Name "StartARKCluster" -ScriptBlock {
-    .\create-ark-empire.ps1 -StartCluster "MyCluster"
-} -Trigger (New-JobTrigger -AtStartup)
-```
-
-### CI/CD Integration
-
-Integrate with your deployment pipeline:
-
-```yaml
-# GitHub Actions example
-- name: Deploy ARK Cluster
-  run: |
-    node create-ark-empire.js --config cluster-config.json
-```
-
-## Security Considerations
-
-1. **Cluster passwords**: Use strong passwords for cluster access
-2. **Admin passwords**: Secure admin access with strong passwords
-3. **Network security**: Configure firewall rules appropriately
-4. **File permissions**: Restrict access to cluster configuration files
-
-## Support
-
-For issues and questions:
-
-1. Check the backend logs for error details
-2. Validate your configuration using the validation endpoint
-3. Ensure system requirements are met
-4. Check network connectivity to the backend API
-
-## File Structure
-
-```
-scripts/
-├── create-ark-empire.js          # Node.js CLI script
-├── create-ark-empire.ps1         # PowerShell script
-├── cluster-config-example.json   # Example configuration
-└── README.md                     # This file
-``` 
+### Deployment Scripts
+- `deploy-production.sh` - Production deployment
+- `deploy-remote.sh` - Remote deployment
+- `docker-entrypoint.sh` - Docker integration 

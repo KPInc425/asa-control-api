@@ -89,7 +89,15 @@ The script respects these environment variables:
    Stop-Service ASA-API
    ```
 
-2. **Run Migration**:
+2. **Install Dependencies** (if needed):
+   ```powershell
+   cd C:\ASA-API
+   .\scripts\install-dependencies.ps1
+   ```
+   
+   This will install `better-sqlite3` and other required dependencies.
+
+3. **Run Migration**:
    ```powershell
    cd C:\ASA-API
    .\scripts\migrate-production.ps1
@@ -118,7 +126,9 @@ The script respects these environment variables:
    - Ensure it's in your PATH
 
 2. **"better-sqlite3 module not found"**
-   - Run `npm install better-sqlite3` in the API directory
+   - Run `.\scripts\install-dependencies.ps1` to install dependencies
+   - If that fails, try: `npm install better-sqlite3 --build-from-source`
+   - Ensure you have Visual Studio Build Tools installed for native compilation
    - The PowerShell script will attempt to install it automatically
 
 3. **"Migration script not found"**

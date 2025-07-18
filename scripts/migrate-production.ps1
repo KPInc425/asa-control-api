@@ -72,8 +72,15 @@ if (-not (Test-Path $migrationScript)) {
 
 # Check if better-sqlite3 is installed
 try {
-    $testModule = node -e "require('better-sqlite3'); console.log('better-sqlite3 available')"
-    Write-Host "better-sqlite3 module: Available" -ForegroundColor Green
+    # Try ES module import (which the migration script uses)
+    $testModule = node -e "import('better-sqlite3').then(() => console.log('better-sqlite3 available')).catch(() => process.exit(1))"
+    $exitCode = $LASTEXITCODE
+    
+    if ($exitCode -eq 0) {
+        Write-Host "better-sqlite3 module: Available" -ForegroundColor Green
+    } else {
+        throw "Module not found"
+    }
 } catch {
     Write-Host "WARNING: better-sqlite3 module not found" -ForegroundColor Yellow
     Write-Host "Attempting to install..." -ForegroundColor Cyan
@@ -81,9 +88,18 @@ try {
     try {
         npm install better-sqlite3
         Write-Host "better-sqlite3 installed successfully" -ForegroundColor Green
+        
+        # Verify installation worked
+        $verifyModule = node -e "import('better-sqlite3').then(() => console.log('better-sqlite3 verified')).catch(() => process.exit(1))"
+        $verifyExitCode = $LASTEXITCODE
+        
+        if ($verifyExitCode -ne 0) {
+            throw "Installation verification failed"
+        }
     } catch {
         Write-Host "ERROR: Failed to install better-sqlite3" -ForegroundColor Red
         Write-Host "Please run: npm install better-sqlite3" -ForegroundColor Yellow
+        Write-Host "If that fails, try: npm install better-sqlite3 --build-from-source" -ForegroundColor Yellow
         exit 1
     }
 }

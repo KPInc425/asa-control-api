@@ -64,7 +64,7 @@ function getDatabasePath() {
   const currentDir = process.cwd();
   const isServiceEnvironment = forceServicePath || 
     currentDir.includes('C:\\ASA-API') || 
-    process.env.NODE_ENV === 'production' ||
+    (process.env.NODE_ENV === 'production' && currentDir.includes('C:\\ASA-API')) ||
     process.env.SERVICE_MODE === 'true';
 
   if (isServiceEnvironment) {
@@ -215,8 +215,12 @@ async function migrateServerMods(dbService) {
     for (const [serverName, mods] of Object.entries(serverMods)) {
       if (Array.isArray(mods)) {
         for (const modId of mods) {
-          await dbService.upsertServerMod(serverName, modId.toString(), null, true);
-          count++;
+          // Ensure modId is a valid string and handle null/undefined
+          const cleanModId = modId ? modId.toString() : '';
+          if (cleanModId) {
+            await dbService.upsertServerMod(serverName, cleanModId, null, true);
+            count++;
+          }
         }
       }
     }
@@ -246,10 +250,14 @@ async function migrateServerModsFromFolder(dbService) {
           const mods = JSON.parse(modsRaw);
           
           if (Array.isArray(mods)) {
-            for (const modId of mods) {
-              await dbService.upsertServerMod(serverName, modId.toString(), null, true);
+                      for (const modId of mods) {
+            // Ensure modId is a valid string and handle null/undefined
+            const cleanModId = modId ? modId.toString() : '';
+            if (cleanModId) {
+              await dbService.upsertServerMod(serverName, cleanModId, null, true);
               totalMods++;
             }
+          }
             totalServers++;
             console.log(`  Migrated mods for server: ${serverName} (${mods.length} mods)`);
           }
@@ -299,8 +307,12 @@ async function migrateModsFromServerConfigs(dbService) {
               // Check if server config has mods
               if (serverConfig.mods && Array.isArray(serverConfig.mods)) {
                 for (const modId of serverConfig.mods) {
-                  await dbService.upsertServerMod(server.name, modId.toString(), null, true);
-                  totalMods++;
+                  // Ensure modId is a valid string and handle null/undefined
+                  const cleanModId = modId ? modId.toString() : '';
+                  if (cleanModId) {
+                    await dbService.upsertServerMod(server.name, cleanModId, null, true);
+                    totalMods++;
+                  }
                 }
                 totalServers++;
                 console.log(`  Migrated mods from server-config.json for: ${server.name} (${serverConfig.mods.length} mods)`);
@@ -332,13 +344,21 @@ async function migrateSharedMods(dbService) {
     let count = 0;
     if (Array.isArray(sharedMods)) {
       for (const modId of sharedMods) {
-        await dbService.upsertSharedMod(modId.toString(), null, true);
-        count++;
+        // Ensure modId is a valid string and handle null/undefined
+        const cleanModId = modId ? modId.toString() : '';
+        if (cleanModId) {
+          await dbService.upsertSharedMod(cleanModId, null, true);
+          count++;
+        }
       }
-    } else if (Array.isArray(sharedMods.modList)) {
+    } else if (sharedMods && Array.isArray(sharedMods.modList)) {
       for (const modId of sharedMods.modList) {
-        await dbService.upsertSharedMod(modId.toString(), null, true);
-        count++;
+        // Ensure modId is a valid string and handle null/undefined
+        const cleanModId = modId ? modId.toString() : '';
+        if (cleanModId) {
+          await dbService.upsertSharedMod(cleanModId, null, true);
+          count++;
+        }
       }
     }
     console.log(`✅ Migrated ${count} shared mods.`);
