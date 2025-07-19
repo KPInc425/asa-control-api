@@ -1124,8 +1124,8 @@ if %ERRORLEVEL% NEQ 0 (
       const customUrlArg = customUrl ? `?customdynamicconfigurl=\"${customUrl}\"` : '';
       
       // Get final mod list using database-based logic
-      const { ServerManager } = await import('./server-manager.js');
-      const serverManager = new ServerManager();
+      const { NativeServerManager } = await import('./server-manager.js');
+      const serverManager = new NativeServerManager();
       const finalMods = await serverManager.getFinalModListForServer(serverName);
       
       // Add mods parameter if mods are configured
