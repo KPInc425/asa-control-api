@@ -1,4 +1,4 @@
-import { Rcon } from 'rcon-client';
+import Rcon from 'rcon';
 import { spawn } from 'child_process';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
@@ -21,7 +21,18 @@ class RconService {
     
     try {
       const connection = await this.getConnection(containerName, options);
-      const response = await connection.send(command);
+      
+      const response = await new Promise((resolve, reject) => {
+        connection.on('response', (str) => {
+          resolve(str);
+        });
+
+        connection.on('error', (err) => {
+          reject(err);
+        });
+
+        connection.send(command);
+      });
       
       const duration = (Date.now() - startTime) / 1000;
       incrementRconCommand(containerName, commandType);
@@ -93,6 +104,7 @@ class RconService {
    * Send RCON command to native server
    */
   async sendCommand(options, command) {
+    logger.info(`[RconService] sendCommand called with options:`, JSON.stringify(options));
     if (!options || typeof options !== 'object' || !options.host) {
       logger.error(`[RconService] Invalid options passed to sendCommand:`, options);
       throw new Error('RCON options must include a host property.');
@@ -117,16 +129,42 @@ class RconService {
     logger.info(`Attempting RCON connection to ${options.host}:${options.port} with command: ${command}`);
     
     try {
-      const connection = new Rcon({
+      logger.info(`[RconService] Creating Rcon connection with:`, {
         host: options.host || 'localhost',
         port: options.port,
-        password: options.password || config.rcon.password,
-        timeout: 5000
+        password: options.password || config.rcon.password
       });
+      
+      const response = await new Promise((resolve, reject) => {
+        const connection = new Rcon(
+          options.host || 'localhost',
+          options.port,
+          options.password || config.rcon.password
+        );
 
-      await connection.connect();
-      const response = await connection.send(command);
-      await connection.end();
+        connection.on('auth', () => {
+          logger.info(`RCON authenticated successfully to ${options.host}:${options.port}`);
+          connection.send(command);
+        });
+
+        connection.on('response', (str) => {
+          logger.info(`RCON response received: ${str}`);
+          connection.disconnect();
+          resolve(str);
+        });
+
+        connection.on('error', (err) => {
+          logger.error(`RCON error: ${err}`);
+          connection.disconnect();
+          reject(err);
+        });
+
+        connection.on('end', () => {
+          logger.info(`RCON connection ended`);
+        });
+
+        connection.connect();
+      });
       
       const duration = (Date.now() - startTime) / 1000;
       incrementRconCommand(`native-${options.host}:${options.port}`, commandType);
@@ -177,28 +215,31 @@ class RconService {
       this.connections.delete(connectionKey);
     }
 
-    const connection = new Rcon({
-      host: safeOptions.host || 'localhost',
-      port: safeOptions.port || config.rcon.defaultPort,
-      password: safeOptions.password || config.rcon.password,
-      timeout: safeOptions.timeout || 5000
-    });
+    return new Promise((resolve, reject) => {
+      const connection = new Rcon(
+        safeOptions.host || 'localhost',
+        safeOptions.port || config.rcon.defaultPort,
+        safeOptions.password || config.rcon.password
+      );
 
-    try {
-      await connection.connect();
-      this.connections.set(connectionKey, connection);
-      
-      // Handle connection close
+      connection.on('auth', () => {
+        logger.info(`RCON authenticated successfully for ${containerName}`);
+        this.connections.set(connectionKey, connection);
+        resolve(connection);
+      });
+
+      connection.on('error', (err) => {
+        logger.error(`Failed to connect RCON for ${containerName}:`, err);
+        reject(new Error(`RCON connection failed: ${err.message}`));
+      });
+
       connection.on('end', () => {
         this.connections.delete(connectionKey);
         logger.info(`RCON connection closed for ${containerName}`);
       });
 
-      return connection;
-    } catch (error) {
-      logger.error(`Failed to connect RCON for ${containerName}:`, error);
-      throw new Error(`RCON connection failed: ${error.message}`);
-    }
+      connection.connect();
+    });
   }
 
   /**
