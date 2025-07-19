@@ -117,12 +117,12 @@ class RconService {
     logger.info(`Attempting RCON connection to ${options.host}:${options.port} with command: ${command}`);
     
     try {
-      const connection = new Rcon(
-        options.host || 'localhost',
-        options.port,
-        options.password || config.rcon.password,
-        { timeout: 5000 }
-      );
+      const connection = new Rcon({
+        host: options.host || 'localhost',
+        port: options.port,
+        password: options.password || config.rcon.password,
+        timeout: 5000
+      });
 
       await connection.connect();
       const response = await connection.send(command);
@@ -177,12 +177,12 @@ class RconService {
       this.connections.delete(connectionKey);
     }
 
-    const connection = new Rcon(
-      safeOptions.host || 'localhost',
-      safeOptions.port || config.rcon.defaultPort,
-      safeOptions.password || config.rcon.password,
-      { timeout: safeOptions.timeout || 5000 }
-    );
+    const connection = new Rcon({
+      host: safeOptions.host || 'localhost',
+      port: safeOptions.port || config.rcon.defaultPort,
+      password: safeOptions.password || config.rcon.password,
+      timeout: safeOptions.timeout || 5000
+    });
 
     try {
       await connection.connect();
