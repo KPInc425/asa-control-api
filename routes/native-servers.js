@@ -793,8 +793,15 @@ export default async function nativeServerRoutes(fastify, options) {
       // Ensure we have valid host and port
       const rconHost = '127.0.0.1';
       const rconPort = server.rconPort || 32330;
-      // Use server-specific admin password or fall back to global RCON password
-      const rconPassword = server.adminPassword || server.config?.adminPassword || config.default.rcon.password;
+      // Use server-specific admin password or fall back to default admin password
+      const rconPassword = server.adminPassword || server.config?.adminPassword || 'admin123';
+      
+      logger.info(`[RCON Debug] Server config for ${name}:`, {
+        serverAdminPassword: server.adminPassword,
+        configAdminPassword: server.config?.adminPassword,
+        defaultAdminPassword: 'admin123',
+        finalPassword: rconPassword
+      });
       
       // Create options object for RCON connection
       const rconOptions = {
