@@ -788,14 +788,23 @@ export default async function nativeServerRoutes(fastify, options) {
 
       // Use the RCON service to send command
       const rconService = await import('../services/rcon.js');
+      const config = await import('../config/index.js');
       
       // Ensure we have valid host and port
       const rconHost = '127.0.0.1';
       const rconPort = server.rconPort || 32330;
-      const rconPassword = 'admin123';
+      // Use server-specific admin password or fall back to global RCON password
+      const rconPassword = server.adminPassword || server.config?.adminPassword || config.default.rcon.password;
+      
+      // Create options object for RCON connection
+      const rconOptions = {
+        host: rconHost,
+        port: rconPort,
+        password: rconPassword
+      };
       
       logger.info(`Sending RCON command to ${name} on ${rconHost}:${rconPort}: ${command}`);
-      const response = await rconService.default.sendCommand(rconHost, rconPort, command, rconPassword);
+      const response = await rconService.default.sendCommand(rconOptions, command);
       
       logger.info(`RCON command successful for ${name}: ${command}`);
       return {

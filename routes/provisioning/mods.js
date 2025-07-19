@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import config from '../../config/index.js';
 import logger from '../../utils/logger.js';
 import { requirePermission } from '../../middleware/auth.js';
-import { getAllSharedMods, upsertSharedMod, getServerMods, upsertServerMod, deleteAllServerMods } from '../../services/database.js';
+import { getAllSharedMods, upsertSharedMod, getServerMods, upsertServerMod, deleteAllServerMods, upsertServerSettings, getServerSettings } from '../../services/database.js';
 import { ServerProvisioner } from '../../services/server-provisioner.js';
 
 // Helper for regenerating start scripts
@@ -27,8 +27,8 @@ async function migrateExcludeSharedModsToDB(serverName) {
     if (cluster.config && cluster.config.servers) {
       const server = cluster.config.servers.find(s => s.name === serverName);
       if (server && typeof server.excludeSharedMods === 'boolean') {
-        // Write to DB
-        upsertServerMod(serverName, null, null, true, server.excludeSharedMods);
+        // Write to DB using the new settings function
+        upsertServerSettings(serverName, server.excludeSharedMods);
         // Remove from cluster.json and save
         delete server.excludeSharedMods;
         const clusterPath = path.join(provisioner.clustersPath, cluster.name, 'cluster.json');
@@ -108,9 +108,10 @@ export default async function modRoutes(fastify) {
       let additionalMods = serverModsData.filter(mod => mod.enabled === 1).map(mod => parseInt(mod.mod_id));
       let excludeSharedMods = false;
       
-      if (serverModsData.length > 0) {
-        // Check if any server mod record has excludeSharedMods set to true
-        excludeSharedMods = serverModsData.some(mod => mod.excludeSharedMods === 1);
+      // Get server settings (excludeSharedMods flag)
+      const serverSettings = getServerSettings(serverName);
+      if (serverSettings) {
+        excludeSharedMods = serverSettings.excludeSharedMods === 1;
       } else {
         // Try to migrate from json if not in DB
         const migrated = await migrateExcludeSharedModsToDB(serverName);
@@ -155,15 +156,13 @@ export default async function modRoutes(fastify) {
       // Update server mods in DB
       deleteAllServerMods(serverName);
       
-      // Add each mod with the exclusion flag
+      // Add each mod
       for (const modId of additionalMods) {
-        upsertServerMod(serverName, modId.toString(), null, true, excludeSharedMods);
+        upsertServerMod(serverName, modId.toString(), null, true, false);
       }
       
-      // If no mods, still persist the exclusion flag
-      if (additionalMods.length === 0) {
-        upsertServerMod(serverName, null, null, true, excludeSharedMods);
-      }
+      // Store server settings (excludeSharedMods flag)
+      upsertServerSettings(serverName, excludeSharedMods);
       
       // Regenerate start.bat
       const provisioner = new ServerProvisioner();

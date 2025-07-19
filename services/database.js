@@ -135,7 +135,7 @@ db.prepare(`CREATE TABLE IF NOT EXISTS shared_mods (
 db.prepare(`CREATE TABLE IF NOT EXISTS server_mods (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   server_name TEXT NOT NULL,
-  mod_id TEXT NOT NULL,
+  mod_id TEXT,
   mod_name TEXT,
   enabled BOOLEAN DEFAULT TRUE,
   excludeSharedMods BOOLEAN DEFAULT FALSE,
@@ -149,6 +149,16 @@ try {
   db.prepare('ALTER TABLE server_mods ADD COLUMN excludeSharedMods BOOLEAN DEFAULT FALSE').run();
 } catch (error) {
   // Column already exists, ignore error
+}
+
+// Update mod_id to allow NULL (for storing server settings)
+try {
+  db.prepare('CREATE TABLE server_mods_new (id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, mod_id TEXT, mod_name TEXT, enabled BOOLEAN DEFAULT TRUE, excludeSharedMods BOOLEAN DEFAULT FALSE, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(server_name, mod_id))').run();
+  db.prepare('INSERT INTO server_mods_new SELECT * FROM server_mods').run();
+  db.prepare('DROP TABLE server_mods').run();
+  db.prepare('ALTER TABLE server_mods_new RENAME TO server_mods').run();
+} catch (error) {
+  // Table already updated, ignore error
 }
 
 // Create configuration exclusions table
@@ -737,6 +747,31 @@ function getAllServerMods() {
   return stmt.all();
 }
 
+/**
+ * Store server settings (like excludeSharedMods flag)
+ * @param {string} serverName
+ * @param {boolean} excludeSharedMods
+ */
+function upsertServerSettings(serverName, excludeSharedMods = false) {
+  const stmt = db.prepare(`
+    INSERT INTO server_mods (server_name, mod_id, mod_name, enabled, excludeSharedMods) 
+    VALUES (?, NULL, NULL, TRUE, ?) 
+    ON CONFLICT(server_name, mod_id) DO UPDATE SET 
+      excludeSharedMods = excluded.excludeSharedMods,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  return stmt.run(serverName, excludeSharedMods ? 1 : 0);
+}
+
+/**
+ * Get server settings
+ * @param {string} serverName
+ */
+function getServerSettings(serverName) {
+  const stmt = db.prepare('SELECT * FROM server_mods WHERE server_name = ? AND mod_id IS NULL');
+  return stmt.get(serverName);
+}
+
 export {
   db,
   // User functions
@@ -800,4 +835,6 @@ export {
   deleteConfigExclusion,
   deleteAllConfigExclusions,
   getAllServerMods,
+  upsertServerSettings,
+  getServerSettings,
 };

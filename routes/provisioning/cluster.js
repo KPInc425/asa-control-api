@@ -276,18 +276,22 @@ export default async function clusterRoutes(fastify) {
           io.emit('job-progress', {
             jobId: job.id,
             status: 'running',
-            progress: 0,
+            progress: 5,
             message: 'Starting cluster creation...'
           });
         }
-        // Progress callback
+        // Progress callback with actual progress calculation
+        let currentStep = 0;
+        const totalSteps = 5; // validation, directory creation, server installation, config creation, finalization
         const progressCb = (msg) => {
+          currentStep++;
+          const progress = Math.min(Math.round((currentStep / totalSteps) * 100), 95); // Cap at 95% until completion
           addJobProgress(job.id, msg);
           if (io) {
             io.emit('job-progress', {
               jobId: job.id,
               status: 'running',
-              progress: 0,
+              progress: progress,
               message: msg
             });
           }
