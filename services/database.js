@@ -138,10 +138,18 @@ db.prepare(`CREATE TABLE IF NOT EXISTS server_mods (
   mod_id TEXT NOT NULL,
   mod_name TEXT,
   enabled BOOLEAN DEFAULT TRUE,
+  excludeSharedMods BOOLEAN DEFAULT FALSE,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(server_name, mod_id)
 )`).run();
+
+// Add excludeSharedMods column if it doesn't exist (for existing databases)
+try {
+  db.prepare('ALTER TABLE server_mods ADD COLUMN excludeSharedMods BOOLEAN DEFAULT FALSE').run();
+} catch (error) {
+  // Column already exists, ignore error
+}
 
 // Create configuration exclusions table
 db.prepare(`CREATE TABLE IF NOT EXISTS config_exclusions (
@@ -623,17 +631,19 @@ function deleteSharedMod(modId) {
  * @param {string} modId
  * @param {string} [modName]
  * @param {boolean} [enabled]
+ * @param {boolean} [excludeSharedMods]
  */
-function upsertServerMod(serverName, modId, modName = null, enabled = true) {
+function upsertServerMod(serverName, modId, modName = null, enabled = true, excludeSharedMods = false) {
   const stmt = db.prepare(`
-    INSERT INTO server_mods (server_name, mod_id, mod_name, enabled) 
-    VALUES (?, ?, ?, ?) 
+    INSERT INTO server_mods (server_name, mod_id, mod_name, enabled, excludeSharedMods) 
+    VALUES (?, ?, ?, ?, ?) 
     ON CONFLICT(server_name, mod_id) DO UPDATE SET 
       mod_name = excluded.mod_name,
       enabled = excluded.enabled,
+      excludeSharedMods = excluded.excludeSharedMods,
       updated_at = CURRENT_TIMESTAMP
   `);
-  return stmt.run(serverName, modId, modName, enabled ? 1 : 0);
+  return stmt.run(serverName, modId, modName, enabled ? 1 : 0, excludeSharedMods ? 1 : 0);
 }
 
 /**

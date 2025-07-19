@@ -1324,18 +1324,13 @@ export class NativeServerManager extends ServerManager {
         .map(mod => mod.mod_id);
       
       // Check if server should exclude shared mods
-      // First check database config for excludeSharedMods flag
-      const serverConfig = getServerConfig(serverName);
+      // Check database config for excludeSharedMods flag in server_mods table
       let excludeSharedMods = false;
       
-      if (serverConfig && serverConfig.config_data) {
-        try {
-          const parsedConfig = JSON.parse(serverConfig.config_data);
-          excludeSharedMods = parsedConfig.excludeSharedMods === true;
-          logger.info(`[getFinalModListForServer] Server ${serverName} excludeSharedMods from DB: ${excludeSharedMods}`);
-        } catch (error) {
-          logger.warn(`[getFinalModListForServer] Failed to parse server config for ${serverName}:`, error.message);
-        }
+      if (serverModsData.length > 0) {
+        // Check if any server mod record has excludeSharedMods set to true
+        excludeSharedMods = serverModsData.some(mod => mod.excludeSharedMods === 1);
+        logger.info(`[getFinalModListForServer] Server ${serverName} excludeSharedMods from server_mods table: ${excludeSharedMods}`);
       }
       
       // Legacy fallback: Check if it's a Club ARK server

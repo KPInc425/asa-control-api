@@ -1123,8 +1123,13 @@ if %ERRORLEVEL% NEQ 0 (
       const customUrl = serverConfig.customDynamicConfigUrl || '';
       const customUrlArg = customUrl ? `?customdynamicconfigurl=\"${customUrl}\"` : '';
       
+      // Get final mod list using database-based logic
+      const { ServerManager } = await import('./server-manager.js');
+      const serverManager = new ServerManager();
+      const finalMods = await serverManager.getFinalModListForServer(serverName);
+      
       // Add mods parameter if mods are configured
-      const modsArg = serverConfig.mods && serverConfig.mods.length > 0 ? ` -mods=${serverConfig.mods.join(',')}` : '';
+      const modsArg = finalMods && finalMods.length > 0 ? ` -mods=${finalMods.join(',')}` : '';
       
       // Add BattleEye flag based on cluster configuration
       const battleEyeArg = serverConfig.disableBattleEye ? ' -NoBattleEye' : '';

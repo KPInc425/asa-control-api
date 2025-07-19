@@ -107,13 +107,16 @@ export default async function modRoutes(fastify) {
       let serverModsData = getServerMods(serverName);
       let additionalMods = serverModsData.filter(mod => mod.enabled === 1).map(mod => parseInt(mod.mod_id));
       let excludeSharedMods = false;
-      if (serverModsData.length > 0 && typeof serverModsData[0].excludeSharedMods === 'boolean') {
-        excludeSharedMods = serverModsData[0].excludeSharedMods;
+      
+      if (serverModsData.length > 0) {
+        // Check if any server mod record has excludeSharedMods set to true
+        excludeSharedMods = serverModsData.some(mod => mod.excludeSharedMods === 1);
       } else {
         // Try to migrate from json if not in DB
         const migrated = await migrateExcludeSharedModsToDB(serverName);
         if (typeof migrated === 'boolean') excludeSharedMods = migrated;
       }
+      
       // Club ARK fallback
       const isClubArkServer = serverName.toLowerCase().includes('club') || serverName.toLowerCase().includes('bobs');
       if (isClubArkServer && additionalMods.length === 0) {
@@ -148,15 +151,20 @@ export default async function modRoutes(fastify) {
     try {
       const { serverName } = request.params;
       const { additionalMods, excludeSharedMods } = request.body;
+      
       // Update server mods in DB
       deleteAllServerMods(serverName);
+      
+      // Add each mod with the exclusion flag
       for (const modId of additionalMods) {
         upsertServerMod(serverName, modId.toString(), null, true, excludeSharedMods);
       }
+      
       // If no mods, still persist the exclusion flag
       if (additionalMods.length === 0) {
         upsertServerMod(serverName, null, null, true, excludeSharedMods);
       }
+      
       // Regenerate start.bat
       const provisioner = new ServerProvisioner();
       await provisioner.regenerateServerStartScript(serverName);
