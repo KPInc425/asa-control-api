@@ -2,6 +2,8 @@ import { NativeServerManager } from '../services/server-manager.js';
 import { requireRead, requireWrite, requirePermission } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 import { getServerConfig, deleteServerConfig } from '../services/database.js';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 // Create native server manager instance (no Docker service)
 const serverManager = new NativeServerManager();
@@ -1022,8 +1024,8 @@ export default async function nativeServerRoutes(fastify, options) {
           const provisioner = new ServerProvisioner();
           
           // Get the server path
-          const clustersPath = process.env.NATIVE_CLUSTERS_PATH || path.join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
-          const serverPath = path.join(clustersPath, server.clusterName || 'iLGaming', name);
+          const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
+          const serverPath = join(clustersPath, server.clusterName || 'iLGaming', name);
           
           // Create a basic server config with the current password
           const serverConfig = {
@@ -1204,6 +1206,13 @@ export default async function nativeServerRoutes(fastify, options) {
           port: rconPort,
           password: rconPassword
         };
+        
+        logger.info(`Testing RCON connection for ${name}:`, {
+          host: rconHost,
+          port: rconPort,
+          passwordLength: rconPassword ? rconPassword.length : 0,
+          passwordPreview: rconPassword ? rconPassword.substring(0, 3) + '***' : 'none'
+        });
         
         const response = await rconService.default.sendCommand(rconOptions, 'gettime');
         debugInfo.rconTest = {
