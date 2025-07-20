@@ -1242,61 +1242,59 @@ export class NativeServerManager extends ServerManager {
    */
   async regenerateServerStartScript(serverName) {
     try {
+      // Use the same approach as getClusterServerInfo which works
       const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
-      
-      // Find which cluster contains this server
       const clusterDirs = await fs.readdir(clustersPath);
       
-      for (const clusterName of clusterDirs) {
-        const clusterPath = path.join(clustersPath, clusterName);
-        const clusterConfigPath = path.join(clusterPath, 'cluster.json');
-        
+      for (const clusterDir of clusterDirs) {
         try {
+          const clusterConfigPath = path.join(clustersPath, clusterDir, 'cluster.json');
           const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
           const clusterConfig = JSON.parse(clusterConfigContent);
           
-          // Find the server in this cluster
-          const serverConfig = clusterConfig.servers?.find(s => s.name === serverName);
-          if (serverConfig) {
-            // Get mod configuration for this server
-            const finalMods = await this.getFinalModListForServer(serverName);
-            
-            // Preserve the excludeSharedMods flag from the database
-            const dbServerConfig = getServerConfig(serverName);
-            let excludeSharedMods = false;
-            if (dbServerConfig && dbServerConfig.config_data) {
-              try {
-                const parsedConfig = JSON.parse(dbServerConfig.config_data);
-                excludeSharedMods = parsedConfig.excludeSharedMods === true;
-              } catch (error) {
-                logger.warn(`Failed to parse server config for ${serverName}:`, error.message);
+          if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+            const serverConfig = clusterConfig.servers.find(s => s.name === serverName);
+            if (serverConfig) {
+              // Get mod configuration for this server
+              const finalMods = await this.getFinalModListForServer(serverName);
+              
+              // Preserve the excludeSharedMods flag from the database
+              const dbServerConfig = getServerConfig(serverName);
+              let excludeSharedMods = false;
+              if (dbServerConfig && dbServerConfig.config_data) {
+                try {
+                  const parsedConfig = JSON.parse(dbServerConfig.config_data);
+                  excludeSharedMods = parsedConfig.excludeSharedMods === true;
+                } catch (error) {
+                  logger.warn(`Failed to parse server config for ${serverName}:`, error.message);
+                }
               }
+              
+              // Update server config with new mods and preserve excludeSharedMods flag
+              serverConfig.mods = finalMods;
+              serverConfig.excludeSharedMods = excludeSharedMods;
+              
+              logger.info(`[regenerateServerStartScript] Updated server config for ${serverName}:`, {
+                mods: finalMods,
+                excludeSharedMods: excludeSharedMods
+              });
+              
+              // Update cluster config file
+              await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
+              
+              // Regenerate start.bat file using the provisioner
+              const serverPath = path.join(clustersPath, clusterDir, serverName);
+              
+              // Import the provisioner dynamically to avoid circular dependencies
+              const { default: provisioner } = await import('./server-provisioner.js');
+              await provisioner.createStartScriptInCluster(clusterDir, serverPath, serverConfig);
+              
+              logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterDir}`);
+              return;
             }
-            
-            // Update server config with new mods and preserve excludeSharedMods flag
-            serverConfig.mods = finalMods;
-            serverConfig.excludeSharedMods = excludeSharedMods;
-            
-            logger.info(`[regenerateServerStartScript] Updated server config for ${serverName}:`, {
-              mods: finalMods,
-              excludeSharedMods: excludeSharedMods
-            });
-            
-            // Update cluster config file
-            await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
-            
-            // Regenerate start.bat file using the provisioner
-            const serverPath = path.join(clusterPath, serverName);
-            
-            // Import the provisioner dynamically to avoid circular dependencies
-            const { default: provisioner } = await import('./server-provisioner.js');
-            await provisioner.createStartScriptInCluster(clusterName, serverPath, serverConfig);
-            
-            logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterName}`);
-            return;
           }
         } catch (error) {
-          logger.warn(`Error processing cluster ${clusterName}:`, error.message);
+          logger.warn(`Error processing cluster ${clusterDir}:`, error.message);
         }
       }
       
