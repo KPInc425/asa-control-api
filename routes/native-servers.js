@@ -807,7 +807,7 @@ export default async function nativeServerRoutes(fastify, options) {
       logger.info(`Sending RCON command to ${name} on port ${server.rconPort}: ${command}`);
 
       // Use the RCON service to send command
-      const rconService = await import('../services/rcon.js');
+      const rconService = (await import('../services/rcon.js')).default;
       const config = await import('../config/index.js');
       
       // Ensure we have valid host and port
@@ -837,7 +837,7 @@ export default async function nativeServerRoutes(fastify, options) {
       };
       
       logger.info(`Sending RCON command to ${name} on ${rconHost}:${rconPort}: ${command}`);
-      const response = await rconService.default.sendCommand(rconOptions, command);
+      const response = await rconService.sendCommand(rconOptions, command);
       
       logger.info(`RCON command successful for ${name}: ${command}`);
       return {
@@ -1500,6 +1500,7 @@ export default async function nativeServerRoutes(fastify, options) {
 
       // Try a simple RCON command to test connection
       try {
+        const rconService = (await import('../services/rcon.js')).default;
         const rconOptions = {
           host: rconHost,
           port: rconPort,
@@ -1513,7 +1514,7 @@ export default async function nativeServerRoutes(fastify, options) {
           passwordPreview: rconPassword ? rconPassword.substring(0, 3) + '***' : 'none'
         });
         
-        const response = await rconService.default.sendCommand(rconOptions, 'gettime');
+        const response = await rconService.sendCommand(rconOptions, 'gettime');
         debugInfo.rconTest = {
           success: true,
           response: response
