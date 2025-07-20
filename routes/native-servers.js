@@ -1182,26 +1182,79 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   }, async (request, reply) => {
     try {
-      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
-      
+      // Enhanced debug info with environment variables
       const debugInfo = {
-        clustersPath: clustersPath,
+        environment: {
+          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+          NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH,
+          NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH,
+          SERVER_MODE: process.env.SERVER_MODE,
+          NODE_ENV: process.env.NODE_ENV
+        },
+        calculatedPaths: {
+          clustersPath: process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters'),
+          basePath: process.env.NATIVE_BASE_PATH || 'F:\\ARK',
+          serversPath: process.env.NATIVE_SERVERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers')
+        },
+        clustersPath: process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters'),
         clustersPathExists: false,
         clusterDirs: [],
-        clusterConfigs: {}
+        clusterConfigs: {},
+        commonPaths: []
       };
       
+      // Check if common ARK paths exist
+      const commonPaths = [
+        'F:\\ARK',
+        'G:\\ARK', 
+        'C:\\ARK',
+        'D:\\ARK',
+        'E:\\ARK',
+        'F:\\ASA',
+        'G:\\ASA',
+        'C:\\ASA',
+        'D:\\ASA',
+        'E:\\ASA'
+      ];
+      
+      for (const testPath of commonPaths) {
+        try {
+          const exists = await fs.access(testPath).then(() => true).catch(() => false);
+          if (exists) {
+            debugInfo.commonPaths.push({
+              path: testPath,
+              exists: true
+            });
+            
+            // Check if clusters subfolder exists
+            const clustersSubPath = join(testPath, 'clusters');
+            const clustersExists = await fs.access(clustersSubPath).then(() => true).catch(() => false);
+            debugInfo.commonPaths.push({
+              path: clustersSubPath,
+              exists: clustersExists,
+              isClustersFolder: true
+            });
+          }
+        } catch (error) {
+          debugInfo.commonPaths.push({
+            path: testPath,
+            exists: false,
+            error: error.message
+          });
+        }
+      }
+      
       try {
-        const exists = await fs.access(clustersPath).then(() => true).catch(() => false);
+        const exists = await fs.access(debugInfo.clustersPath).then(() => true).catch(() => false);
         debugInfo.clustersPathExists = exists;
         
         if (exists) {
-          const clusterDirs = await fs.readdir(clustersPath);
+          const clusterDirs = await fs.readdir(debugInfo.clustersPath);
           debugInfo.clusterDirs = clusterDirs;
           
           for (const clusterDir of clusterDirs) {
             try {
-              const clusterConfigPath = join(clustersPath, clusterDir, 'cluster.json');
+              const clusterConfigPath = join(debugInfo.clustersPath, clusterDir, 'cluster.json');
               const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
               const clusterConfig = JSON.parse(clusterConfigContent);
               
@@ -1293,6 +1346,30 @@ export default async function nativeServerRoutes(fastify, options) {
         startBatContent = await fs.readFile(startBatPath, 'utf8');
       } catch (fileError) {
         logger.warn(`Could not read start.bat for ${name}: ${fileError.message}`);
+        // Try to find the start.bat file in common locations
+        const commonPaths = [
+          'F:\\ARK', 'G:\\ARK', 'C:\\ARK', 'D:\\ARK', 'E:\\ARK',
+          'F:\\ASA', 'G:\\ASA', 'C:\\ASA', 'D:\\ASA', 'E:\\ASA'
+        ];
+        
+        for (const basePath of commonPaths) {
+          try {
+            let testPath;
+            if (server.isClusterServer && server.clusterName) {
+              testPath = join(basePath, 'clusters', server.clusterName, name, 'start.bat');
+            } else {
+              testPath = join(basePath, 'servers', name, 'start.bat');
+            }
+            
+            const testContent = await fs.readFile(testPath, 'utf8');
+            startBatPath = testPath;
+            startBatContent = testContent;
+            logger.info(`Found start.bat for ${name} at: ${testPath}`);
+            break;
+          } catch (testError) {
+            // Continue to next path
+          }
+        }
       }
       
       // Extract password from start.bat if it exists
@@ -1306,6 +1383,12 @@ export default async function nativeServerRoutes(fastify, options) {
       
       const debugInfo = {
         serverName: name,
+        environment: {
+          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+          NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH,
+          NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH,
+          SERVER_MODE: process.env.SERVER_MODE
+        },
         serverInfo: {
           adminPassword: server.adminPassword,
           configAdminPassword: server.config?.adminPassword,
