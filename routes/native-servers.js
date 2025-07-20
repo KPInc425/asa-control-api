@@ -1010,16 +1010,42 @@ export default async function nativeServerRoutes(fastify, options) {
       logger.info(`Step 1: Getting server configuration from database for ${name}`);
       
       // Get the actual server configuration from database
-      const dbServerConfig = getServerConfig(name);
-      if (!dbServerConfig) {
-        throw new Error(`Server ${name} not found in database`);
-      }
-      
+      let dbServerConfig = getServerConfig(name);
       let serverConfig;
-      try {
-        serverConfig = JSON.parse(dbServerConfig.config_data);
-      } catch (parseError) {
-        throw new Error(`Invalid server configuration in database for ${name}: ${parseError.message}`);
+      
+      if (!dbServerConfig) {
+        logger.warn(`Server ${name} not found in database, creating from cluster config`);
+        
+        // Server not in database, create it from the cluster/server info
+        serverConfig = {
+          name: name,
+          map: server.map || 'TheIsland_WP',
+          gamePort: server.gamePort || 7777,
+          queryPort: server.queryPort || 27015,
+          rconPort: server.rconPort || 32330,
+          maxPlayers: server.maxPlayers || 70,
+          adminPassword: server.adminPassword || 'King5252',
+          serverPassword: server.serverPassword || '',
+          clusterId: server.clusterName || '',
+          clusterPassword: '',
+          customDynamicConfigUrl: server.config?.customDynamicConfigUrl || '',
+          disableBattleEye: server.config?.disableBattleEye || false,
+          mods: server.config?.mods || [],
+          serverPath: server.serverPath || '',
+          created: new Date().toISOString()
+        };
+        
+        // Save to database
+        await serverManager.addServerConfig(name, serverConfig);
+        logger.info(`Created database entry for server ${name}`);
+        
+      } else {
+        // Server exists in database, parse the config
+        try {
+          serverConfig = JSON.parse(dbServerConfig.config_data);
+        } catch (parseError) {
+          throw new Error(`Invalid server configuration in database for ${name}: ${parseError.message}`);
+        }
       }
       
       logger.info(`Step 2: Creating start script directly from database config for ${name}`);
