@@ -578,6 +578,8 @@ export class ServerProvisioner {
         rconPassword: serverConfig.adminPassword || 'admin123', // RCON password is same as admin password
         clusterId: serverConfig.clusterId || '',
         clusterPassword: serverConfig.clusterPassword || '',
+        customDynamicConfigUrl: serverConfig.customDynamicConfigUrl || '',
+        disableBattleEye: serverConfig.disableBattleEye || false,
         created: new Date().toISOString(),
         binariesPath: path.join(serverPath, 'binaries'),
         configsPath: configsPath,
@@ -612,6 +614,10 @@ export class ServerProvisioner {
       // Add BattleEye flag based on server configuration
       const battleEyeArg = serverConfig.disableBattleEye ? ' -NoBattleEye' : '';
       
+      // Use customDynamicConfigUrl if provided
+      const customUrl = serverConfig.customDynamicConfigUrl || '';
+      const customUrlArg = customUrl ? `?customdynamicconfigurl=\"${customUrl}\"` : '';
+      
       const startScript = `@echo off
 echo Starting ${serverName}...
 cd /d "${binariesPath}"
@@ -642,7 +648,7 @@ REM Start the server
   ?ClusterPassword=%CLUSTERPASSWORD% \\
   ?AltSaveDirectoryName=%SAVEPATH% \\
   ?ConfigOverridePath=%CONFIGPATH% \\
-  ?LogPath=%LOGPATH%${battleEyeArg}
+  ?LogPath=%LOGPATH%${customUrlArg}${battleEyeArg}
 
 pause`;
 
@@ -1056,6 +1062,8 @@ if %ERRORLEVEL% NEQ 0 (
         rconPassword: serverConfig.adminPassword || 'admin123', // RCON password is same as admin password
         clusterId: serverConfig.clusterId || clusterName,
         clusterPassword: serverConfig.clusterPassword || '',
+        customDynamicConfigUrl: serverConfig.customDynamicConfigUrl || '',
+        disableBattleEye: serverConfig.disableBattleEye || false,
         created: new Date().toISOString(),
         binariesPath: binariesPath,
         configsPath: configsPath,
@@ -3577,6 +3585,8 @@ ConfigOverridePath=./configs`;
         sessionName: newSettings.sessionName,
         // Include BattleEye setting
         disableBattleEye: newSettings.disableBattleEye,
+        // Include custom dynamic config URL
+        customDynamicConfigUrl: newSettings.customDynamicConfigUrl,
         updated: new Date().toISOString()
       };
       

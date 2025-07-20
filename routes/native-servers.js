@@ -820,6 +820,7 @@ export default async function nativeServerRoutes(fastify, options) {
         configAdminPassword: server.config?.adminPassword,
         defaultAdminPassword: 'admin123',
         finalPassword: rconPassword,
+        finalPasswordLength: rconPassword ? rconPassword.length : 0,
         serverPath: server.serverPath,
         rconPort: rconPort,
         isClusterServer: server.isClusterServer,
@@ -890,6 +891,9 @@ export default async function nativeServerRoutes(fastify, options) {
       // Check if server is running
       const isRunning = await serverManager.isRunning(name);
       
+      // Get database config for comparison
+      const dbConfig = serverManager.getServerConfigFromDatabase(name);
+      
       const debugInfo = {
         serverName: name,
         isRunning,
@@ -902,6 +906,7 @@ export default async function nativeServerRoutes(fastify, options) {
           isClusterServer: server.isClusterServer,
           clusterName: server.clusterName
         },
+        databaseConfig: dbConfig,
         rconConnection: {
           host: '127.0.0.1',
           port: server.rconPort || 32330,
@@ -931,6 +936,147 @@ export default async function nativeServerRoutes(fastify, options) {
       };
     } catch (error) {
       logger.error(`Error getting debug info for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Regenerate start script for a server
+  fastify.post('/api/native-servers/:name/regenerate-start-script', {
+    preHandler: [requireWrite],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      logger.info(`Regenerating start script for server: ${name}`);
+      
+      // Regenerate the start script using the server manager
+      await serverManager.regenerateServerStartScript(name);
+      
+      return {
+        success: true,
+        message: `Start script regenerated for ${name}`
+      };
+    } catch (error) {
+      logger.error(`Error regenerating start script for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Test RCON connection with debug info
+  fastify.get('/api/native-servers/:name/test-rcon', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            debug: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      // Get server info to find RCON port
+      const servers = await serverManager.listServers();
+      const server = servers.find(s => s.name === name);
+      
+      if (!server) {
+        return reply.status(404).send({
+          success: false,
+          message: `Server ${name} not found`
+        });
+      }
+
+      // Get database config for comparison
+      const dbConfig = serverManager.getServerConfigFromDatabase(name);
+      
+      // Ensure we have valid host and port
+      const rconHost = '127.0.0.1';
+      const rconPort = server.rconPort || 32330;
+      const rconPassword = server.adminPassword || server.config?.adminPassword || 'admin123';
+      
+      const debugInfo = {
+        serverName: name,
+        serverConfig: {
+          adminPassword: server.adminPassword,
+          configAdminPassword: server.config?.adminPassword,
+          rconPort: rconPort,
+          gamePort: server.gamePort,
+          serverPath: server.serverPath,
+          isClusterServer: server.isClusterServer,
+          clusterName: server.clusterName
+        },
+        databaseConfig: dbConfig,
+        rconConnection: {
+          host: rconHost,
+          port: rconPort,
+          password: rconPassword,
+          passwordLength: rconPassword ? rconPassword.length : 0
+        }
+      };
+
+      // Try a simple RCON command to test connection
+      try {
+        const rconOptions = {
+          host: rconHost,
+          port: rconPort,
+          password: rconPassword
+        };
+        
+        const response = await rconService.default.sendCommand(rconOptions, 'gettime');
+        debugInfo.rconTest = {
+          success: true,
+          response: response
+        };
+      } catch (error) {
+        debugInfo.rconTest = {
+          success: false,
+          error: error.message,
+          errorType: error.constructor.name
+        };
+      }
+
+      return {
+        success: true,
+        debug: debugInfo
+      };
+    } catch (error) {
+      logger.error(`Error testing RCON for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message

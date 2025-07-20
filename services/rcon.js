@@ -160,11 +160,13 @@ class RconService {
     logger.info(`Attempting RCON connection to ${options.host}:${options.port} with command: ${command}`);
     
     try {
-      logger.info(`[RconService] Creating Rcon connection with:`, {
-        host: options.host || 'localhost',
-        port: options.port,
-        password: options.password || config.rcon.password
-      });
+          logger.info(`[RconService] Creating Rcon connection with:`, {
+      host: options.host || 'localhost',
+      port: options.port,
+      password: options.password || config.rcon.password,
+      passwordLength: (options.password || config.rcon.password || '').length,
+      passwordSource: options.password ? 'options' : 'config'
+    });
       
       const response = await new Promise((resolve, reject) => {
         const connection = new Rcon(
