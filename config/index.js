@@ -27,11 +27,11 @@ const config = {
     nodeEnv: process.env.NODE_ENV || 'development',
     mode: process.env.SERVER_MODE || 'docker', // 'docker', 'native', or 'hybrid'
     native: {
-      basePath: process.env.NATIVE_BASE_PATH || 'C:\\ARK',
+      basePath: path.normalize(process.env.NATIVE_BASE_PATH || 'C:\\ARK'),
       configFile: process.env.NATIVE_CONFIG_FILE || 'native-servers.json',
       steamCmdPath: process.env.STEAMCMD_PATH || null,
       autoInstallSteamCmd: process.env.AUTO_INSTALL_STEAMCMD !== 'false',
-      clustersPath: process.env.NATIVE_CLUSTERS_PATH || 'C:\\ARK\\clusters'
+      clustersPath: path.normalize(process.env.NATIVE_CLUSTERS_PATH || 'C:\\ARK\\clusters')
     },
     hybrid: {
       agentUrl: process.env.AGENT_URL || 'http://host.docker.internal:5000',
@@ -41,14 +41,14 @@ const config = {
   
   asa: {
     // Root directory containing all ASA server folders
-    serverRootPath: process.env.NATIVE_BASE_PATH || 
-      (process.env.SERVER_MODE === 'native' ? 'C:\\ARK' : '/opt/asa/asa-server'),
+    serverRootPath: path.normalize(process.env.NATIVE_BASE_PATH || 
+      (process.env.SERVER_MODE === 'native' ? 'C:\\ARK' : '/opt/asa/asa-server')),
     // Default config subfolder structure (Config/WindowsServer/)
     configSubPath: process.env.ASA_CONFIG_SUB_PATH || 'Config/WindowsServer',
     // Update lock file path - derive from base path or use default
     updateLockPath: process.env.ASA_UPDATE_LOCK_PATH || 
       (process.env.SERVER_MODE === 'native' ? 
-        path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', '.update.lock') : 
+        path.join(path.normalize(process.env.NATIVE_BASE_PATH || 'C:\\ARK'), '.update.lock') : 
         '/opt/asa/.update.lock'),
     // Default config files to look for
     defaultConfigFiles: ['Game.ini', 'GameUserSettings.ini'],
@@ -82,7 +82,7 @@ const config = {
   arkLogs: {
     basePath: process.env.ARK_LOGS_BASE_PATH || 
       (process.env.SERVER_MODE === 'native' ? 
-        path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'logs') : 
+        path.join(path.normalize(process.env.NATIVE_BASE_PATH || 'C:\\ARK'), 'logs') : 
         '/home/gameserver/server-files')
   }
 };

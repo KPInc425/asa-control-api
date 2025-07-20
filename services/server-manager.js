@@ -175,7 +175,9 @@ export class DockerServerManager extends ServerManager {
 export class NativeServerManager extends ServerManager {
   constructor() {
     super();
-    this.basePath = config.server.native.basePath || process.env.NATIVE_BASE_PATH || 'C:\\ARK';
+    // Normalize the base path to fix double backslash issues
+    const rawBasePath = config.server.native.basePath || process.env.NATIVE_BASE_PATH || 'C:\\ARK';
+    this.basePath = path.normalize(rawBasePath);
     this.serversPath = path.join(this.basePath, 'servers');
     this.clustersPath = path.join(this.basePath, 'clusters');
     this.processes = new Map(); // Initialize the processes Map
