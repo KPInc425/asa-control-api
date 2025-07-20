@@ -1002,87 +1002,90 @@ export default async function nativeServerRoutes(fastify, options) {
       };
 
       // Steps to fix RCON:
-      // 1. Try to regenerate start script with current database password
-      // 2. If that fails, create a new start script directly
-      // 3. Update cluster config with database password
-      // 4. Restart server to use new password
+      // 1. Get the actual server configuration from database
+      // 2. Create start script directly from database config
+      // 3. Update the database config if needed
+      // 4. Provide restart instructions
 
-      logger.info(`Step 1: Attempting to regenerate start script for ${name}`);
-      let startScriptRegenerated = false;
+      logger.info(`Step 1: Getting server configuration from database for ${name}`);
+      
+      // Get the actual server configuration from database
+      const dbServerConfig = getServerConfig(name);
+      if (!dbServerConfig) {
+        throw new Error(`Server ${name} not found in database`);
+      }
+      
+      let serverConfig;
+      try {
+        serverConfig = JSON.parse(dbServerConfig.config_data);
+      } catch (parseError) {
+        throw new Error(`Invalid server configuration in database for ${name}: ${parseError.message}`);
+      }
+      
+      logger.info(`Step 2: Creating start script directly from database config for ${name}`);
       
       try {
-        await serverManager.regenerateServerStartScript(name);
-        startScriptRegenerated = true;
-        logger.info(`Successfully regenerated start script for ${name}`);
-      } catch (regenerateError) {
-        logger.warn(`Failed to regenerate start script for ${name}: ${regenerateError.message}`);
-        logger.info(`Step 1b: Creating new start script directly for ${name}`);
+        const { ServerProvisioner } = await import('../services/server-provisioner.js');
+        const provisioner = new ServerProvisioner();
         
-        // If regeneration fails, create a new start script directly
-        try {
-          const { ServerProvisioner } = await import('../services/server-provisioner.js');
-          const provisioner = new ServerProvisioner();
-          
-          // Get the server path
+        // Ensure the admin password is set correctly
+        const adminPassword = dbConfig?.adminPassword || serverConfig.adminPassword || 'King5252';
+        
+        // Update the server config with the correct password
+        const updatedServerConfig = {
+          ...serverConfig,
+          adminPassword: adminPassword,
+          rconPassword: adminPassword, // RCON password should always match admin password
+          customDynamicConfigUrl: dbConfig?.customDynamicConfigUrl || serverConfig.customDynamicConfigUrl || ''
+        };
+        
+        // Determine the server path
+        let serverPath;
+        if (server.isClusterServer && server.clusterName) {
+          // Cluster server
           const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
-          const serverPath = join(clustersPath, server.clusterName || 'iLGaming', name);
+          serverPath = join(clustersPath, server.clusterName, name);
+          logger.info(`Creating start script for cluster server ${name} at: ${serverPath}`);
           
-          // Create a basic server config with the current password
-          const serverConfig = {
-            name: name,
-            map: server.map || 'Ragnarok_WP',
-            gamePort: server.gamePort || 30003,
-            queryPort: server.queryPort || 30004,
-            rconPort: server.rconPort || 30005,
-            maxPlayers: server.maxPlayers || 50,
-            adminPassword: dbConfig?.adminPassword || server.adminPassword || 'King5252',
-            serverPassword: server.serverPassword || '',
-            clusterId: server.clusterName || 'iLGaming',
-            clusterPassword: '',
-            customDynamicConfigUrl: dbConfig?.customDynamicConfigUrl || server.config?.customDynamicConfigUrl || '',
-            disableBattleEye: server.config?.disableBattleEye || false,
-            mods: server.config?.mods || []
-          };
+          // Create start script in cluster
+          await provisioner.createStartScriptInCluster(server.clusterName, serverPath, updatedServerConfig);
+        } else {
+          // Standalone server
+          serverPath = serverConfig.serverPath || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', name);
+          logger.info(`Creating start script for standalone server ${name} at: ${serverPath}`);
           
-          // Create the start script directly
-          await provisioner.createStartScriptInCluster(server.clusterName || 'iLGaming', serverPath, serverConfig);
-          startScriptRegenerated = true;
-          logger.info(`Successfully created new start script for ${name}`);
-        } catch (createError) {
-          logger.error(`Failed to create new start script for ${name}: ${createError.message}`);
-          throw new Error(`Failed to regenerate or create start script: ${createError.message}`);
+          // Create start script for standalone server
+          await provisioner.createStartScript(serverPath, updatedServerConfig);
         }
+        
+        // Update the database with the corrected configuration
+        await serverManager.addServerConfig(name, updatedServerConfig);
+        
+        logger.info(`Successfully created start script for ${name} with password: ${adminPassword.substring(0, 3)}***`);
+        
+      } catch (createError) {
+        logger.error(`Failed to create start script for ${name}: ${createError.message}`);
+        throw new Error(`Failed to create start script: ${createError.message}`);
       }
       
-      // If it's a cluster server, update the cluster config too
-      if (server.isClusterServer && server.clusterName && startScriptRegenerated) {
-        logger.info(`Step 2: Updating cluster config for ${name}`);
-        
-        try {
-          // Update the server settings in the cluster to ensure consistency
-          const updatedSettings = {
-            adminPassword: dbConfig?.adminPassword || server.adminPassword || 'King5252',
-            ...dbConfig
-          };
-          
-          const { ServerProvisioner } = await import('../services/server-provisioner.js');
-          const provisioner = new ServerProvisioner();
-          await provisioner.updateServerSettings(name, updatedSettings, {
-            regenerateConfigs: false,
-            regenerateScripts: false // Already done above
-          });
-          logger.info(`Successfully updated cluster config for ${name}`);
-        } catch (updateError) {
-          logger.warn(`Failed to update cluster config for ${name}: ${updateError.message}`);
-          // Don't fail the whole operation if cluster config update fails
-        }
-      }
-
+      // Step 3: Log success and provide instructions
+      logger.info(`Step 3: RCON fix completed for ${name}. Database updated with correct password.`);
+      
       return {
         success: true,
-        message: `RCON issues fixed for ${name}. Please restart the server to apply changes.`,
-        debug: debugInfo
+        message: `RCON fix completed for ${name}. Please restart the server to apply the new password.`,
+        debug: {
+          serverName: name,
+          databasePassword: dbConfig?.adminPassword,
+          serverPassword: server.adminPassword,
+          isClusterServer: server.isClusterServer,
+          clusterName: server.clusterName,
+          serverPath: serverPath,
+          passwordUpdated: true
+        }
       };
+
+
     } catch (error) {
       logger.error(`Error fixing RCON for ${request.params.name}:`, error);
       return reply.status(500).send({
