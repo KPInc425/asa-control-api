@@ -1166,6 +1166,185 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
+  // Debug cluster configuration
+  fastify.get('/api/native-servers/debug-clusters', {
+    preHandler: [requireRead],
+    schema: {
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            debug: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
+      
+      const debugInfo = {
+        clustersPath: clustersPath,
+        clustersPathExists: false,
+        clusterDirs: [],
+        clusterConfigs: {}
+      };
+      
+      try {
+        const exists = await fs.access(clustersPath).then(() => true).catch(() => false);
+        debugInfo.clustersPathExists = exists;
+        
+        if (exists) {
+          const clusterDirs = await fs.readdir(clustersPath);
+          debugInfo.clusterDirs = clusterDirs;
+          
+          for (const clusterDir of clusterDirs) {
+            try {
+              const clusterConfigPath = join(clustersPath, clusterDir, 'cluster.json');
+              const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+              const clusterConfig = JSON.parse(clusterConfigContent);
+              
+              debugInfo.clusterConfigs[clusterDir] = {
+                exists: true,
+                serverCount: clusterConfig.servers ? clusterConfig.servers.length : 0,
+                serverNames: clusterConfig.servers ? clusterConfig.servers.map(s => s.name) : [],
+                configPreview: JSON.stringify(clusterConfig, null, 2).substring(0, 1000) + '...'
+              };
+            } catch (error) {
+              debugInfo.clusterConfigs[clusterDir] = {
+                exists: false,
+                error: error.message
+              };
+            }
+          }
+        }
+      } catch (error) {
+        debugInfo.error = error.message;
+      }
+
+      return {
+        success: true,
+        debug: debugInfo
+      };
+    } catch (error) {
+      logger.error(`Error debugging clusters:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Debug start script and RCON configuration
+  fastify.get('/api/native-servers/:name/debug-rcon', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            debug: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      // Get server info
+      const servers = await serverManager.listServers();
+      const server = servers.find(s => s.name === name);
+      
+      if (!server) {
+        return reply.status(404).send({
+          success: false,
+          message: `Server ${name} not found`
+        });
+      }
+
+      // Get database config
+      const dbConfig = serverManager.getServerConfigFromDatabase(name);
+      
+      // Try to find and read the start.bat file
+      let startBatContent = null;
+      let startBatPath = null;
+      
+      try {
+        if (server.isClusterServer && server.clusterName) {
+          // Cluster server
+          const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
+          startBatPath = join(clustersPath, server.clusterName, name, 'start.bat');
+        } else {
+          // Standalone server
+          const serverPath = server.serverPath || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', name);
+          startBatPath = join(serverPath, 'start.bat');
+        }
+        
+        startBatContent = await fs.readFile(startBatPath, 'utf8');
+      } catch (fileError) {
+        logger.warn(`Could not read start.bat for ${name}: ${fileError.message}`);
+      }
+      
+      // Extract password from start.bat if it exists
+      let startBatPassword = null;
+      if (startBatContent) {
+        const passwordMatch = startBatContent.match(/AdminPassword="([^"]+)"/);
+        if (passwordMatch) {
+          startBatPassword = passwordMatch[1];
+        }
+      }
+      
+      const debugInfo = {
+        serverName: name,
+        serverInfo: {
+          adminPassword: server.adminPassword,
+          configAdminPassword: server.config?.adminPassword,
+          rconPort: server.rconPort,
+          gamePort: server.gamePort,
+          serverPath: server.serverPath,
+          isClusterServer: server.isClusterServer,
+          clusterName: server.clusterName
+        },
+        databaseConfig: dbConfig,
+        startBatInfo: {
+          path: startBatPath,
+          exists: !!startBatContent,
+          password: startBatPassword,
+          passwordLength: startBatPassword ? startBatPassword.length : 0,
+          contentPreview: startBatContent ? startBatContent.substring(0, 500) + '...' : null
+        },
+        passwordComparison: {
+          serverPassword: server.adminPassword,
+          databasePassword: dbConfig?.adminPassword,
+          startBatPassword: startBatPassword,
+          allMatch: server.adminPassword === dbConfig?.adminPassword && 
+                   dbConfig?.adminPassword === startBatPassword
+        }
+      };
+
+      return {
+        success: true,
+        debug: debugInfo
+      };
+    } catch (error) {
+      logger.error(`Error debugging RCON for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
   // Test RCON connection with debug info
   fastify.get('/api/native-servers/:name/test-rcon', {
     preHandler: [requireRead],
