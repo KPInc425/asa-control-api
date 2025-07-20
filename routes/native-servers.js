@@ -1024,36 +1024,38 @@ export default async function nativeServerRoutes(fastify, options) {
       
       logger.info(`Step 2: Creating start script directly from database config for ${name}`);
       
+      // Ensure the admin password is set correctly
+      const adminPassword = dbConfig?.adminPassword || serverConfig.adminPassword || 'King5252';
+      
+      // Update the server config with the correct password
+      const updatedServerConfig = {
+        ...serverConfig,
+        adminPassword: adminPassword,
+        rconPassword: adminPassword, // RCON password should always match admin password
+        customDynamicConfigUrl: dbConfig?.customDynamicConfigUrl || serverConfig.customDynamicConfigUrl || ''
+      };
+      
+      // Determine the server path
+      let serverPath;
+      if (server.isClusterServer && server.clusterName) {
+        // Cluster server
+        const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
+        serverPath = join(clustersPath, server.clusterName, name);
+        logger.info(`Creating start script for cluster server ${name} at: ${serverPath}`);
+      } else {
+        // Standalone server
+        serverPath = serverConfig.serverPath || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', name);
+        logger.info(`Creating start script for standalone server ${name} at: ${serverPath}`);
+      }
+      
       try {
         const { ServerProvisioner } = await import('../services/server-provisioner.js');
         const provisioner = new ServerProvisioner();
         
-        // Ensure the admin password is set correctly
-        const adminPassword = dbConfig?.adminPassword || serverConfig.adminPassword || 'King5252';
-        
-        // Update the server config with the correct password
-        const updatedServerConfig = {
-          ...serverConfig,
-          adminPassword: adminPassword,
-          rconPassword: adminPassword, // RCON password should always match admin password
-          customDynamicConfigUrl: dbConfig?.customDynamicConfigUrl || serverConfig.customDynamicConfigUrl || ''
-        };
-        
-        // Determine the server path
-        let serverPath;
         if (server.isClusterServer && server.clusterName) {
-          // Cluster server
-          const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
-          serverPath = join(clustersPath, server.clusterName, name);
-          logger.info(`Creating start script for cluster server ${name} at: ${serverPath}`);
-          
           // Create start script in cluster
           await provisioner.createStartScriptInCluster(server.clusterName, serverPath, updatedServerConfig);
         } else {
-          // Standalone server
-          serverPath = serverConfig.serverPath || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', name);
-          logger.info(`Creating start script for standalone server ${name} at: ${serverPath}`);
-          
           // Create start script for standalone server
           await provisioner.createStartScript(serverPath, updatedServerConfig);
         }
