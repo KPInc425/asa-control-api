@@ -1316,14 +1316,19 @@ export default async function nativeServerRoutes(fastify, options) {
       
       // Get server info
       const servers = await serverManager.listServers();
+      logger.info(`Debug RCON: Found ${servers.length} servers in list: ${servers.map(s => s.name).join(', ')}`);
+      
       const server = servers.find(s => s.name === name);
       
       if (!server) {
+        logger.warn(`Server ${name} not found in server list. Available servers: ${servers.map(s => s.name).join(', ')}`);
         return reply.status(404).send({
           success: false,
-          message: `Server ${name} not found`
+          message: `Server ${name} not found in server list. Available servers: ${servers.map(s => s.name).join(', ')}`
         });
       }
+      
+      logger.info(`Debug RCON: Found server ${name} with type ${server.type}, isClusterServer: ${server.isClusterServer}, clusterName: ${server.clusterName}`);
 
       // Get database config
       const dbConfig = serverManager.getServerConfigFromDatabase(name);
@@ -1390,13 +1395,14 @@ export default async function nativeServerRoutes(fastify, options) {
           SERVER_MODE: process.env.SERVER_MODE
         },
         serverInfo: {
-          adminPassword: server.adminPassword,
-          configAdminPassword: server.config?.adminPassword,
-          rconPort: server.rconPort,
-          gamePort: server.gamePort,
-          serverPath: server.serverPath,
-          isClusterServer: server.isClusterServer,
-          clusterName: server.clusterName
+          adminPassword: server?.adminPassword || 'undefined',
+          configAdminPassword: server?.config?.adminPassword || 'undefined',
+          rconPort: server?.rconPort || 'undefined',
+          gamePort: server?.gamePort || 'undefined',
+          serverPath: server?.serverPath || 'undefined',
+          isClusterServer: server?.isClusterServer || false,
+          clusterName: server?.clusterName || 'undefined',
+          serverType: server?.type || 'undefined'
         },
         databaseConfig: dbConfig,
         startBatInfo: {
@@ -1407,11 +1413,11 @@ export default async function nativeServerRoutes(fastify, options) {
           contentPreview: startBatContent ? startBatContent.substring(0, 500) + '...' : null
         },
         passwordComparison: {
-          serverPassword: server.adminPassword,
-          databasePassword: dbConfig?.adminPassword,
-          startBatPassword: startBatPassword,
-          allMatch: server.adminPassword === dbConfig?.adminPassword && 
-                   dbConfig?.adminPassword === startBatPassword
+          serverPassword: server?.adminPassword || 'undefined',
+          databasePassword: dbConfig?.adminPassword || 'undefined',
+          startBatPassword: startBatPassword || 'undefined',
+          allMatch: (server?.adminPassword === dbConfig?.adminPassword && 
+                   dbConfig?.adminPassword === startBatPassword) || false
         }
       };
 
