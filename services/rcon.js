@@ -169,9 +169,9 @@ class RconService {
     });
       
       const response = await new Promise((resolve, reject) => {
-        const connection = new Rcon(
-          options.host || 'localhost',
-          options.port,
+      const connection = new Rcon(
+        options.host || 'localhost',
+        options.port,
           options.password || config.rcon.password
         );
 
@@ -249,15 +249,15 @@ class RconService {
     }
 
     return new Promise((resolve, reject) => {
-      const connection = new Rcon(
-        safeOptions.host || 'localhost',
-        safeOptions.port || config.rcon.defaultPort,
+    const connection = new Rcon(
+      safeOptions.host || 'localhost',
+      safeOptions.port || config.rcon.defaultPort,
         safeOptions.password || config.rcon.password
-      );
+    );
 
       connection.on('auth', () => {
         logger.info(`RCON authenticated successfully for ${containerName}`);
-        this.connections.set(connectionKey, connection);
+      this.connections.set(connectionKey, connection);
         resolve(connection);
       });
 

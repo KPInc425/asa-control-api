@@ -1426,6 +1426,15 @@ export default async function nativeServerRoutes(fastify, options) {
         }
       };
 
+      logger.info(`Debug RCON: Returning debug info for ${name}:`, {
+        serverName: debugInfo.serverName,
+        serverInfoKeys: Object.keys(debugInfo.serverInfo),
+        databaseConfigExists: !!debugInfo.databaseConfig,
+        startBatExists: debugInfo.startBatInfo.exists,
+        environmentKeys: Object.keys(debugInfo.environment),
+        serverInfo: debugInfo.serverInfo
+      });
+
       return {
         success: true,
         debug: debugInfo
