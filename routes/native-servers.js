@@ -1290,6 +1290,30 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
+  // Test endpoint to check if debug is being called
+  fastify.get('/api/native-servers/:name/debug-test', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    logger.info(`[DEBUG-TEST] Test endpoint called for ${request.params.name}`);
+    return {
+      success: true,
+      debug: {
+        message: "Test endpoint working!",
+        serverName: request.params.name,
+        timestamp: new Date().toISOString()
+      }
+    };
+  });
+
   // Debug start script and RCON configuration
   fastify.get('/api/native-servers/:name/debug-rcon', {
     preHandler: [requireRead],
