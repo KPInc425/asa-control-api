@@ -934,10 +934,15 @@ export class NativeServerManager extends ServerManager {
 
   async listServers() {
     try {
+      logger.info(`[NativeServerManager] listServers() called. Base path: ${this.basePath}`);
+      logger.info(`[NativeServerManager] Servers path: ${this.serversPath}`);
+      logger.info(`[NativeServerManager] Clusters path: ${this.clustersPath}`);
+      
       const servers = [];
       
       // Get database configurations
       const dbConfigs = getAllServerConfigs();
+      logger.info(`[NativeServerManager] Found ${dbConfigs.length} database configs`);
       const dbConfigMap = new Map();
       dbConfigs.forEach(config => {
         try {
@@ -1007,7 +1012,9 @@ export class NativeServerManager extends ServerManager {
       // List cluster servers
       try {
         const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+        logger.info(`[NativeServerManager] Scanning clusters path: ${clustersPath}`);
         const clusterDirs = await fs.readdir(clustersPath);
+        logger.info(`[NativeServerManager] Found cluster directories: ${clusterDirs.join(', ')}`);
         
         for (const clusterDir of clusterDirs) {
           try {

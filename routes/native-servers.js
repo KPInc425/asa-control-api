@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import { getServerConfig, deleteServerConfig } from '../services/database.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { promises as fs } from 'fs';
 
 // Create native server manager instance (no Docker service)
 const serverManager = new NativeServerManager();
@@ -1315,6 +1316,10 @@ export default async function nativeServerRoutes(fastify, options) {
       const { name } = request.params;
       
       // Get server info
+      logger.info(`Debug RCON: Starting debug for server: ${name}`);
+      logger.info(`Debug RCON: Server manager base path: ${serverManager.basePath}`);
+      logger.info(`Debug RCON: Environment NATIVE_BASE_PATH: ${process.env.NATIVE_BASE_PATH}`);
+      
       const servers = await serverManager.listServers();
       logger.info(`Debug RCON: Found ${servers.length} servers in list: ${servers.map(s => s.name).join(', ')}`);
       
