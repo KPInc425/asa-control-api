@@ -1312,8 +1312,13 @@ export default async function nativeServerRoutes(fastify, options) {
       }
     }
   }, async (request, reply) => {
+    logger.info(`[DEBUG-RCON] Endpoint called with params:`, request.params);
+    logger.info(`[DEBUG-RCON] Request URL: ${request.url}`);
+    
     try {
       const { name } = request.params;
+      
+      logger.info(`[DEBUG-RCON] Processing debug request for server: ${name}`);
       
       // Get server info
       logger.info(`Debug RCON: Starting debug for server: ${name}`);
@@ -1440,7 +1445,8 @@ export default async function nativeServerRoutes(fastify, options) {
         debug: debugInfo
       };
     } catch (error) {
-      logger.error(`Error debugging RCON for ${request.params.name}:`, error);
+      logger.error(`[DEBUG-RCON] Error debugging RCON for ${request.params.name}:`, error);
+      logger.error(`[DEBUG-RCON] Error stack:`, error.stack);
       return reply.status(500).send({
         success: false,
         message: error.message
