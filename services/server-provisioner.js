@@ -575,7 +575,7 @@ export class ServerProvisioner {
         maxPlayers: serverConfig.maxPlayers || 70,
         adminPassword: serverConfig.adminPassword || 'admin123',
         serverPassword: serverConfig.serverPassword || '',
-        rconPassword: serverConfig.rconPassword || 'rcon123',
+        rconPassword: serverConfig.adminPassword || 'admin123', // RCON password is same as admin password
         clusterId: serverConfig.clusterId || '',
         clusterPassword: serverConfig.clusterPassword || '',
         created: new Date().toISOString(),
@@ -1053,7 +1053,7 @@ if %ERRORLEVEL% NEQ 0 (
         maxPlayers: serverConfig.maxPlayers || 70,
         adminPassword: serverConfig.adminPassword || 'admin123',
         serverPassword: serverConfig.password || serverConfig.serverPassword || '',
-        rconPassword: serverConfig.rconPassword || 'rcon123',
+        rconPassword: serverConfig.adminPassword || 'admin123', // RCON password is same as admin password
         clusterId: serverConfig.clusterId || clusterName,
         clusterPassword: serverConfig.clusterPassword || '',
         created: new Date().toISOString(),
@@ -3567,7 +3567,8 @@ ConfigOverridePath=./configs`;
         maxPlayers: newSettings.maxPlayers,
         adminPassword: newSettings.adminPassword,
         serverPassword: newSettings.serverPassword,
-        rconPassword: newSettings.rconPassword,
+        // RCON password should always be the same as admin password in ARK: Survival Ascended
+        rconPassword: newSettings.adminPassword,
         clusterId: newSettings.clusterId,
         clusterPassword: newSettings.clusterPassword,
         harvestMultiplier: newSettings.harvestMultiplier,

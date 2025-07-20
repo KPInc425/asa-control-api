@@ -285,7 +285,7 @@ class InteractiveConsole {
         maxPlayers,
         adminPassword,
         serverPassword,
-        rconPassword: 'rcon123',
+        rconPassword: adminPassword, // RCON password is same as admin password
         harvestMultiplier: 3.0,
         xpMultiplier: 3.0,
         tamingMultiplier: 5.0
@@ -333,7 +333,7 @@ class InteractiveConsole {
         maxPlayers,
         adminPassword,
         serverPassword: '',
-        rconPassword: 'rcon123',
+        rconPassword: adminPassword, // RCON password is same as admin password
         clusterPassword,
         harvestMultiplier: 3.0,
         xpMultiplier: 3.0,

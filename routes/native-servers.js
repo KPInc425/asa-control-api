@@ -130,9 +130,17 @@ export default async function nativeServerRoutes(fastify, options) {
         });
       }
       
+      const config = JSON.parse(serverConfig.config_data);
+      
+      // Ensure RCON password is set to admin password (ARK: Survival Ascended requirement)
+      if (config.adminPassword && (!config.rconPassword || config.rconPassword !== config.adminPassword)) {
+        config.rconPassword = config.adminPassword;
+        logger.info(`Updated RCON password to match admin password for server ${name}`);
+      }
+      
       return {
         success: true,
-        config: JSON.parse(serverConfig.config_data)
+        config: config
       };
     } catch (error) {
       fastify.log.error(`Error getting native server configuration for ${request.params.name}:`, error);
@@ -765,6 +773,16 @@ export default async function nativeServerRoutes(fastify, options) {
         });
       }
 
+      // Debug: Log the full server configuration
+      logger.info(`[RCON Debug] Full server config for ${name}:`, {
+        name: server.name,
+        rconPort: server.rconPort,
+        adminPassword: server.adminPassword,
+        config: server.config,
+        isClusterServer: server.isClusterServer,
+        clusterName: server.clusterName
+      });
+
       // Check if server is running
       const isRunning = await serverManager.isRunning(name);
       if (!isRunning) {
@@ -794,13 +812,18 @@ export default async function nativeServerRoutes(fastify, options) {
       const rconHost = '127.0.0.1';
       const rconPort = server.rconPort || 32330;
       // Use server-specific admin password or fall back to default admin password
+      // In ARK: Survival Ascended, RCON password is the same as admin password
       const rconPassword = server.adminPassword || server.config?.adminPassword || 'admin123';
       
       logger.info(`[RCON Debug] Server config for ${name}:`, {
         serverAdminPassword: server.adminPassword,
         configAdminPassword: server.config?.adminPassword,
         defaultAdminPassword: 'admin123',
-        finalPassword: rconPassword
+        finalPassword: rconPassword,
+        serverPath: server.serverPath,
+        rconPort: rconPort,
+        isClusterServer: server.isClusterServer,
+        clusterName: server.clusterName
       });
       
       // Create options object for RCON connection
@@ -821,6 +844,93 @@ export default async function nativeServerRoutes(fastify, options) {
       };
     } catch (error) {
       logger.error(`RCON command error for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
+  // Get server configuration debug info
+  fastify.get('/api/native-servers/:name/debug', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            debug: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      // Get server info to find RCON port
+      const servers = await serverManager.listServers();
+      const server = servers.find(s => s.name === name);
+      
+      if (!server) {
+        return reply.status(404).send({
+          success: false,
+          message: `Server ${name} not found`
+        });
+      }
+
+      // Check if server is running
+      const isRunning = await serverManager.isRunning(name);
+      
+      const debugInfo = {
+        serverName: name,
+        isRunning,
+        serverConfig: {
+          adminPassword: server.adminPassword,
+          configAdminPassword: server.config?.adminPassword,
+          rconPort: server.rconPort,
+          gamePort: server.gamePort,
+          serverPath: server.serverPath,
+          isClusterServer: server.isClusterServer,
+          clusterName: server.clusterName
+        },
+        rconConnection: {
+          host: '127.0.0.1',
+          port: server.rconPort || 32330,
+          password: server.adminPassword || server.config?.adminPassword || 'admin123'
+        },
+        processInfo: null
+      };
+
+      // Try to get process info if running
+      if (isRunning) {
+        try {
+          const { exec } = await import('child_process');
+          const { promisify } = await import('util');
+          const execAsync = promisify(exec);
+          
+          // Get process info
+          const { stdout } = await execAsync(`tasklist /FI "IMAGENAME eq ArkAscendedServer.exe" /FO CSV /NH`);
+          debugInfo.processInfo = stdout;
+        } catch (error) {
+          debugInfo.processInfo = `Error getting process info: ${error.message}`;
+        }
+      }
+
+      return {
+        success: true,
+        debug: debugInfo
+      };
+    } catch (error) {
+      logger.error(`Error getting debug info for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message

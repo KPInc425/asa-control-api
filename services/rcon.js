@@ -109,6 +109,37 @@ class RconService {
       logger.error(`[RconService] Invalid options passed to sendCommand:`, options);
       throw new Error('RCON options must include a host property.');
     }
+
+    // Test network connectivity first
+    try {
+      const net = await import('net');
+      const testConnection = () => {
+        return new Promise((resolve, reject) => {
+          const socket = new net.Socket();
+          const timeout = setTimeout(() => {
+            socket.destroy();
+            reject(new Error('Connection timeout'));
+          }, 5000);
+          
+          socket.connect(options.port, options.host, () => {
+            clearTimeout(timeout);
+            socket.destroy();
+            resolve(true);
+          });
+          
+          socket.on('error', (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          });
+        });
+      };
+      
+      await testConnection();
+      logger.info(`[RconService] Network connectivity test passed for ${options.host}:${options.port}`);
+    } catch (error) {
+      logger.error(`[RconService] Network connectivity test failed for ${options.host}:${options.port}:`, error.message);
+      throw new Error(`RCON connection failed: ${error.message}`);
+    }
     const startTime = Date.now();
     const commandType = this.getCommandType(command);
     
