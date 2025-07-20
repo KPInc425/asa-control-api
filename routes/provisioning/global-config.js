@@ -17,9 +17,11 @@ export default async function globalConfigRoutes(fastify) {
       const gameIniPath = path.join(globalConfigPath, 'Game.ini');
       const gameUserSettingsIniPath = path.join(globalConfigPath, 'GameUserSettings.ini');
       const exclusionsPath = path.join(globalConfigPath, 'exclusions.json');
+      const globalSettingsPath = path.join(globalConfigPath, 'global-settings.json');
       let gameIni = '';
       let gameUserSettingsIni = '';
       let excludedServers = [];
+      let customDynamicConfigUrl = '';
       try {
         gameIni = await fs.readFile(gameIniPath, 'utf8');
       } catch (error) {}
@@ -31,11 +33,17 @@ export default async function globalConfigRoutes(fastify) {
         const exclusionsConfig = JSON.parse(exclusionsData);
         excludedServers = exclusionsConfig.excludedServers || [];
       } catch (error) {}
+      try {
+        const globalSettingsData = await fs.readFile(globalSettingsPath, 'utf8');
+        const globalSettings = JSON.parse(globalSettingsData);
+        customDynamicConfigUrl = globalSettings.customDynamicConfigUrl || '';
+      } catch (error) {}
       return {
         success: true,
         gameIni,
         gameUserSettingsIni,
-        excludedServers
+        excludedServers,
+        customDynamicConfigUrl
       };
     } catch (error) {
       logger.error('Failed to get global configs:', error);
@@ -48,19 +56,26 @@ export default async function globalConfigRoutes(fastify) {
     preHandler: requirePermission('write')
   }, async (request, reply) => {
     try {
-      const { gameIni, gameUserSettingsIni } = request.body;
+      const { gameIni, gameUserSettingsIni, customDynamicConfigUrl } = request.body;
       const basePath = process.env.NATIVE_BASE_PATH || config.server.native.basePath;
       const globalConfigPath = path.join(basePath, 'global-configs');
       // Ensure directory exists
       await fs.mkdir(globalConfigPath, { recursive: true });
       const gameIniPath = path.join(globalConfigPath, 'Game.ini');
       const gameUserSettingsIniPath = path.join(globalConfigPath, 'GameUserSettings.ini');
+      const globalSettingsPath = path.join(globalConfigPath, 'global-settings.json');
       // Write config files
       if (gameIni !== undefined) {
         await fs.writeFile(gameIniPath, gameIni, 'utf8');
       }
       if (gameUserSettingsIni !== undefined) {
         await fs.writeFile(gameUserSettingsIniPath, gameUserSettingsIni, 'utf8');
+      }
+      if (customDynamicConfigUrl !== undefined) {
+        const globalSettings = {
+          customDynamicConfigUrl: customDynamicConfigUrl
+        };
+        await fs.writeFile(globalSettingsPath, JSON.stringify(globalSettings, null, 2), 'utf8');
       }
       return {
         success: true,

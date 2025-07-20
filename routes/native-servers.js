@@ -943,6 +943,102 @@ export default async function nativeServerRoutes(fastify, options) {
     }
   });
 
+  // Debug and fix RCON password issues
+  fastify.post('/api/native-servers/:name/fix-rcon', {
+    preHandler: [requireWrite],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' },
+            debug: { type: 'object' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      logger.info(`Fixing RCON issues for server: ${name}`);
+      
+      // Get server info
+      const servers = await serverManager.listServers();
+      const server = servers.find(s => s.name === name);
+      
+      if (!server) {
+        return reply.status(404).send({
+          success: false,
+          message: `Server ${name} not found`
+        });
+      }
+
+      // Get database config for comparison
+      const dbConfig = serverManager.getServerConfigFromDatabase(name);
+      
+      const debugInfo = {
+        serverName: name,
+        serverConfig: {
+          adminPassword: server.adminPassword,
+          configAdminPassword: server.config?.adminPassword,
+          rconPort: server.rconPort,
+          gamePort: server.gamePort,
+          serverPath: server.serverPath,
+          isClusterServer: server.isClusterServer,
+          clusterName: server.clusterName
+        },
+        databaseConfig: dbConfig
+      };
+
+      // Steps to fix RCON:
+      // 1. Regenerate start script with current database password
+      // 2. Update cluster config with database password
+      // 3. Restart server to use new password
+
+      logger.info(`Step 1: Regenerating start script for ${name}`);
+      await serverManager.regenerateServerStartScript(name);
+      
+      // If it's a cluster server, update the cluster config too
+      if (server.isClusterServer && server.clusterName) {
+        logger.info(`Step 2: Updating cluster config for ${name}`);
+        
+        // Update the server settings in the cluster to ensure consistency
+        const updatedSettings = {
+          adminPassword: dbConfig?.adminPassword || server.adminPassword || 'admin123',
+          ...dbConfig
+        };
+        
+        const { ServerProvisioner } = await import('../services/server-provisioner.js');
+        const provisioner = new ServerProvisioner();
+        await provisioner.updateServerSettings(name, updatedSettings, {
+          regenerateConfigs: false,
+          regenerateScripts: true
+        });
+      }
+
+      return {
+        success: true,
+        message: `RCON issues fixed for ${name}. Please restart the server to apply changes.`,
+        debug: debugInfo
+      };
+    } catch (error) {
+      logger.error(`Error fixing RCON for ${request.params.name}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: error.message
+      });
+    }
+  });
+
   // Regenerate start script for a server
   fastify.post('/api/native-servers/:name/regenerate-start-script', {
     preHandler: [requireWrite],
