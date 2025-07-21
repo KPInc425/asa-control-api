@@ -1330,7 +1330,18 @@ export default async function nativeServerRoutes(fastify, options) {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
-            debug: { type: 'object' }
+            debug: { 
+              type: 'object',
+              additionalProperties: true,
+              properties: {
+                serverName: { type: 'string' },
+                environment: { type: 'object', additionalProperties: true },
+                serverInfo: { type: 'object', additionalProperties: true },
+                databaseConfig: { type: 'object', additionalProperties: true },
+                startBatInfo: { type: 'object', additionalProperties: true },
+                passwordComparison: { type: 'object', additionalProperties: true }
+              }
+            }
           }
         }
       }
