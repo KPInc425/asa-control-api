@@ -622,14 +622,12 @@ export class ServerProvisioner {
 echo Starting ${serverName}...
 cd /d "${binariesPath}"
 
-REM Set server parameters
+REM Set server parameters (passwords are in config files)
 set MAP=${(serverConfig.map || 'TheIsland')}_WP
 set PORT=${serverConfig.gamePort || 7777}
 set QUERYPORT=${serverConfig.queryPort || 27015}
 set RCONPORT=${serverConfig.rconPort || 32330}
 set MAXPLAYERS=${serverConfig.maxPlayers || 70}
-set ADMINPASSWORD=${serverConfig.adminPassword || 'admin123'}
-set SERVERPASSWORD=${serverConfig.serverPassword || ''}
 set CLUSTERID=${serverConfig.clusterId || ''}
 set CLUSTERPASSWORD=${serverConfig.clusterPassword || ''}
 
@@ -638,12 +636,10 @@ set CONFIGPATH=${configsPath}
 set SAVEPATH=${savesPath}
 set LOGPATH=${logsPath}
 
-REM Start the server
+REM Start the server (passwords are in GameUserSettings.ini)
 "${path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" \\
   %MAP%?listen?Port=%PORT%?QueryPort=%QUERYPORT%?RCONPort=%RCONPORT% \\
   ?MaxPlayers=%MAXPLAYERS% \\
-  ?ServerAdminPassword=%ADMINPASSWORD% \\
-  ?ServerPassword=%SERVERPASSWORD% \\
   ?ClusterId=%CLUSTERID% \\
   ?ClusterPassword=%CLUSTERPASSWORD% \\
   ?AltSaveDirectoryName=%SAVEPATH% \\
@@ -1142,17 +1138,21 @@ if %ERRORLEVEL% NEQ 0 (
       // Add BattleEye flag based on cluster configuration
       const battleEyeArg = serverConfig.disableBattleEye ? ' -NoBattleEye' : '';
       
-      // Build the query string for the server parameters
+      // Build the query string for the server parameters (without passwords)
       let queryParams = [
         `SessionName=${serverName}`,
         `Port=${serverConfig.gamePort}`,
         `QueryPort=${serverConfig.queryPort}`,
         `RCONPort=${serverConfig.rconPort}`,
         `RCONEnabled=True`,
-        `MaxPlayers=${serverConfig.maxPlayers}`,
-        `ServerPassword=${serverConfig.password || serverConfig.serverPassword || ''}`,
-        `ServerAdminPassword=${serverConfig.adminPassword}`
+        `MaxPlayers=${serverConfig.maxPlayers}`
       ];
+      
+      // Only add server password if it's not empty (admin password is in config file)
+      if (serverConfig.password || serverConfig.serverPassword) {
+        queryParams.push(`ServerPassword=${serverConfig.password || serverConfig.serverPassword}`);
+      }
+      
       if (customUrl) {
         queryParams.push(`customdynamicconfigurl=\"${customUrl}\"`);
       }
@@ -2553,7 +2553,7 @@ PreventOfflinePvPUseStructurePreventionRadius=1000`;
   }
 
   /**
-   * Generate GameUserSettings.ini content
+   * Generate GameUserSettings.ini content with RCON configuration
    */
   generateGameUserSettings(serverConfig) {
     return `[ServerSettings]
@@ -2565,7 +2565,12 @@ ServerMap=${serverConfig.map || 'TheIsland'}
 ClusterId=${serverConfig.clusterId || ''}
 ClusterPassword=${serverConfig.clusterPassword || ''}
 AltSaveDirectoryName=${serverConfig.name}
-ConfigOverridePath=./configs`;
+ConfigOverridePath=./configs
+
+[RCON]
+RCONEnabled=True
+RCONPort=${serverConfig.rconPort || 32330}
+ServerAdminPassword=${serverConfig.adminPassword || 'admin123'}`;
   }
 
   /**

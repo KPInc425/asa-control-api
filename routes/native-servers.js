@@ -1079,22 +1079,27 @@ export default async function nativeServerRoutes(fastify, options) {
         const { ServerProvisioner } = await import('../services/server-provisioner.js');
         const provisioner = new ServerProvisioner();
         
+        // Regenerate both config files and start script
         if (server.isClusterServer && server.clusterName) {
-          // Create start script in cluster
+          // Regenerate config files in cluster
+          await provisioner.createServerConfigInCluster(server.clusterName, serverPath, updatedServerConfig);
+          // Create start script in cluster (without password args)
           await provisioner.createStartScriptInCluster(server.clusterName, serverPath, updatedServerConfig);
         } else {
-          // Create start script for standalone server
+          // Regenerate config files for standalone server
+          await provisioner.createServerConfig(serverPath, updatedServerConfig);
+          // Create start script for standalone server (without password args)
           await provisioner.createStartScript(serverPath, updatedServerConfig);
         }
         
         // Update the database with the corrected configuration
         await serverManager.addServerConfig(name, updatedServerConfig);
         
-        logger.info(`Successfully created start script for ${name} with password: ${adminPassword.substring(0, 3)}***`);
+        logger.info(`Successfully regenerated config files and start script for ${name} with password: ${adminPassword.substring(0, 3)}***`);
         
       } catch (createError) {
-        logger.error(`Failed to create start script for ${name}: ${createError.message}`);
-        throw new Error(`Failed to create start script: ${createError.message}`);
+        logger.error(`Failed to regenerate config files and start script for ${name}: ${createError.message}`);
+        throw new Error(`Failed to regenerate config files and start script: ${createError.message}`);
       }
       
       // Step 3: Log success and provide instructions
@@ -1431,6 +1436,56 @@ export default async function nativeServerRoutes(fastify, options) {
         }
       }
       
+      // Try to read config files
+      let gameUserSettingsContent = null;
+      let gameIniContent = null;
+      let configsPath = null;
+      
+      try {
+        if (server.isClusterServer && server.clusterName) {
+          // Cluster server
+          const clustersPath = process.env.NATIVE_CLUSTERS_PATH || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'clusters');
+          configsPath = join(clustersPath, server.clusterName, name, 'ShooterGame', 'Saved', 'Config', 'WindowsServer');
+        } else {
+          // Standalone server
+          const serverPath = server.serverPath || join(process.env.NATIVE_BASE_PATH || 'F:\\ARK', 'servers', name);
+          configsPath = join(serverPath, 'ShooterGame', 'Saved', 'Config', 'WindowsServer');
+        }
+        
+        // Try to read GameUserSettings.ini
+        try {
+          const gameUserSettingsPath = join(configsPath, 'GameUserSettings.ini');
+          gameUserSettingsContent = await fs.readFile(gameUserSettingsPath, 'utf8');
+        } catch (error) {
+          logger.warn(`Could not read GameUserSettings.ini for ${name}: ${error.message}`);
+        }
+        
+        // Try to read Game.ini
+        try {
+          const gameIniPath = join(configsPath, 'Game.ini');
+          gameIniContent = await fs.readFile(gameIniPath, 'utf8');
+        } catch (error) {
+          logger.warn(`Could not read Game.ini for ${name}: ${error.message}`);
+        }
+      } catch (configError) {
+        logger.warn(`Could not access config directory for ${name}: ${configError.message}`);
+      }
+      
+      // Extract RCON settings from GameUserSettings.ini
+      let rconEnabled = null;
+      let rconPort = null;
+      let configAdminPassword = null;
+      
+      if (gameUserSettingsContent) {
+        const rconEnabledMatch = gameUserSettingsContent.match(/RCONEnabled\s*=\s*(True|False)/i);
+        const rconPortMatch = gameUserSettingsContent.match(/RCONPort\s*=\s*(\d+)/);
+        const adminPasswordMatch = gameUserSettingsContent.match(/ServerAdminPassword\s*=\s*([^\r\n]+)/);
+        
+        rconEnabled = rconEnabledMatch ? rconEnabledMatch[1] : null;
+        rconPort = rconPortMatch ? rconPortMatch[1] : null;
+        configAdminPassword = adminPasswordMatch ? adminPasswordMatch[1].trim() : null;
+      }
+      
       const debugInfo = {
         serverName: name,
         environment: {
@@ -1461,8 +1516,19 @@ export default async function nativeServerRoutes(fastify, options) {
           serverPassword: server?.adminPassword || 'undefined',
           databasePassword: dbConfig?.adminPassword || 'undefined',
           startBatPassword: startBatPassword || 'undefined',
+          configAdminPassword: configAdminPassword || 'undefined',
           allMatch: (server?.adminPassword === dbConfig?.adminPassword && 
-                   dbConfig?.adminPassword === startBatPassword) || false
+                   dbConfig?.adminPassword === configAdminPassword) || false
+        },
+        configFiles: {
+          configsPath: configsPath,
+          gameUserSettingsExists: !!gameUserSettingsContent,
+          gameIniExists: !!gameIniContent,
+          rconEnabled: rconEnabled,
+          rconPort: rconPort,
+          configAdminPassword: configAdminPassword,
+          gameUserSettingsContent: gameUserSettingsContent ? gameUserSettingsContent.substring(0, 1000) + '...' : null,
+          gameIniContent: gameIniContent ? gameIniContent.substring(0, 500) + '...' : null
         }
       };
 
