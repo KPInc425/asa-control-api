@@ -1464,10 +1464,17 @@ export default async function nativeServerRoutes(fastify, options) {
         serverInfo: debugInfo.serverInfo
       });
 
-      return {
+      // Debug: Log the actual return object
+      const returnObject = {
         success: true,
         debug: debugInfo
       };
+      
+      logger.info(`Debug RCON: Return object keys:`, Object.keys(returnObject));
+      logger.info(`Debug RCON: Debug object keys:`, Object.keys(returnObject.debug));
+      logger.info(`Debug RCON: Full return object:`, JSON.stringify(returnObject, null, 2));
+
+      return returnObject;
     } catch (error) {
       logger.error(`[DEBUG-RCON] Error debugging RCON for ${request.params.name}:`, error);
       logger.error(`[DEBUG-RCON] Error stack:`, error.stack);
