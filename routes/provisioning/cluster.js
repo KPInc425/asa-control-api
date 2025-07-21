@@ -325,9 +325,41 @@ export default async function clusterRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const clusters = await provisioner.listClusters();
+      const serverManager = createServerManager();
+      
+      // Add server status for each cluster
+      const clustersWithStatus = await Promise.all(clusters.map(async (cluster) => {
+        if (cluster.config && cluster.config.servers) {
+          const serversWithStatus = await Promise.all(cluster.config.servers.map(async (server) => {
+            try {
+              const isRunning = await serverManager.isRunning(server.name);
+              return {
+                ...server,
+                status: isRunning ? 'running' : 'stopped'
+              };
+            } catch (error) {
+              logger.warn(`Failed to get status for server ${server.name}:`, error);
+              return {
+                ...server,
+                status: 'unknown'
+              };
+            }
+          }));
+          
+          return {
+            ...cluster,
+            config: {
+              ...cluster.config,
+              servers: serversWithStatus
+            }
+          };
+        }
+        return cluster;
+      }));
+      
       return {
         success: true,
-        clusters
+        clusters: clustersWithStatus
       };
     } catch (error) {
       logger.error('Failed to list clusters:', error);
