@@ -1489,9 +1489,9 @@ export default async function nativeServerRoutes(fastify, options) {
       const debugInfo = {
         serverName: name,
         environment: {
-          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
-          NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH,
-          NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH,
+          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH ? process.env.NATIVE_BASE_PATH.replace(/\\\\/g, '\\') : null,
+          NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH ? process.env.NATIVE_CLUSTERS_PATH.replace(/\\\\/g, '\\') : null,
+          NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH ? process.env.NATIVE_SERVERS_PATH.replace(/\\\\/g, '\\') : null,
           SERVER_MODE: process.env.SERVER_MODE
         },
         serverInfo: {
@@ -1499,14 +1499,14 @@ export default async function nativeServerRoutes(fastify, options) {
           configAdminPassword: server?.config?.adminPassword || 'undefined',
           rconPort: server?.rconPort || 'undefined',
           gamePort: server?.gamePort || 'undefined',
-          serverPath: server?.serverPath || 'undefined',
+          serverPath: server?.serverPath ? server.serverPath.replace(/\\\\/g, '\\') : 'undefined',
           isClusterServer: server?.isClusterServer || false,
           clusterName: server?.clusterName || 'undefined',
           serverType: server?.type || 'undefined'
         },
         databaseConfig: dbConfig,
         startBatInfo: {
-          path: startBatPath,
+          path: startBatPath ? startBatPath.replace(/\\\\/g, '\\') : null,
           exists: !!startBatContent,
           password: startBatPassword,
           passwordLength: startBatPassword ? startBatPassword.length : 0,
@@ -1521,7 +1521,7 @@ export default async function nativeServerRoutes(fastify, options) {
                    dbConfig?.adminPassword === configAdminPassword) || false
         },
         configFiles: {
-          configsPath: configsPath,
+          configsPath: configsPath ? configsPath.replace(/\\\\/g, '\\') : null,
           gameUserSettingsExists: !!gameUserSettingsContent,
           gameIniExists: !!gameIniContent,
           rconEnabled: rconEnabled,
