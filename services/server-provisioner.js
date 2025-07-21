@@ -202,11 +202,24 @@ export class ServerProvisioner {
    * Install SteamCMD
    */
   async installSteamCmd(foreground = false) {
+    const startTime = Date.now();
+    logger.info(`[SteamCMD] Starting installation (foreground: ${foreground})`);
+    logger.info(`[SteamCMD] Target directory: ${this.steamCmdPath}`);
+    
     try {
-      logger.info(`Installing SteamCMD (foreground: ${foreground})...`);
-      
+      // Check if already installed
+      const isInstalled = await this.isSteamCmdInstalled();
+      if (isInstalled) {
+        logger.info(`[SteamCMD] Already installed at ${this.steamCmdExe}`);
+        if (!foreground) {
+          return true;
+        }
+      }
+
       // Create SteamCMD directory
+      logger.info(`[SteamCMD] Creating directory: ${this.steamCmdPath}`);
       await fs.mkdir(this.steamCmdPath, { recursive: true });
+      logger.info(`[SteamCMD] Directory created successfully`);
       
       // Download SteamCMD
       const steamCmdUrl = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip';
@@ -215,39 +228,79 @@ export class ServerProvisioner {
       if (foreground) {
         console.log('\n=== Downloading SteamCMD ===');
       }
-      logger.info('Downloading SteamCMD...');
+      logger.info(`[SteamCMD] Downloading from: ${steamCmdUrl}`);
+      logger.info(`[SteamCMD] Download target: ${zipPath}`);
+      
+      const downloadStartTime = Date.now();
       await this.downloadFile(steamCmdUrl, zipPath);
+      const downloadDuration = Date.now() - downloadStartTime;
+      
+      // Log download completion with file size
+      try {
+        const stats = await fs.stat(zipPath);
+        const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        logger.info(`[SteamCMD] Download completed: ${fileSizeMB}MB in ${downloadDuration}ms`);
+      } catch (statError) {
+        logger.warn(`[SteamCMD] Could not read file stats: ${statError.message}`);
+      }
       
       // Extract SteamCMD
       if (foreground) {
         console.log('\n=== Extracting SteamCMD ===');
       }
-      logger.info('Extracting SteamCMD...');
+      logger.info(`[SteamCMD] Starting extraction to: ${this.steamCmdPath}`);
       
+      const extractStartTime = Date.now();
       const extractCommand = `powershell -command "Expand-Archive -Path '${zipPath}' -DestinationPath '${this.steamCmdPath}' -Force"`;
+      logger.info(`[SteamCMD] Extract command: ${extractCommand}`);
       
       if (foreground) {
         await this.execForeground(extractCommand);
       } else {
         const { execSync } = await import('child_process');
-        execSync(extractCommand, { stdio: 'inherit' });
+        const output = execSync(extractCommand, { encoding: 'utf8', stdio: 'pipe' });
+        logger.info(`[SteamCMD] Extract output: ${output}`);
       }
       
+      const extractDuration = Date.now() - extractStartTime;
+      logger.info(`[SteamCMD] Extraction completed in ${extractDuration}ms`);
+      
       // Clean up zip file
+      logger.info(`[SteamCMD] Cleaning up download file: ${zipPath}`);
       await fs.unlink(zipPath);
+      logger.info(`[SteamCMD] Download file removed`);
       
       // Verify installation
+      logger.info(`[SteamCMD] Verifying installation at: ${this.steamCmdExe}`);
       if (await this.isSteamCmdInstalled()) {
+        const totalDuration = Date.now() - startTime;
         if (foreground) {
           console.log('\n=== SteamCMD installed successfully ===');
         }
-      logger.info('SteamCMD installed successfully');
+        logger.info(`[SteamCMD] Installation completed successfully in ${totalDuration}ms`);
+        logger.info(`[SteamCMD] Executable verified at: ${this.steamCmdExe}`);
+        
+        // Log additional installation details
+        try {
+          const stats = await fs.stat(this.steamCmdExe);
+          const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+          logger.info(`[SteamCMD] Executable size: ${fileSizeMB}MB`);
+          logger.info(`[SteamCMD] Last modified: ${stats.mtime.toISOString()}`);
+        } catch (statError) {
+          logger.warn(`[SteamCMD] Could not read executable stats: ${statError.message}`);
+        }
+        
         return true;
       } else {
-        throw new Error('SteamCMD installation verification failed');
+        const error = new Error('SteamCMD installation verification failed');
+        logger.error(`[SteamCMD] ${error.message}`);
+        throw error;
       }
     } catch (error) {
-      logger.error('Failed to install SteamCMD:', error);
+      const totalDuration = Date.now() - startTime;
+      logger.error(`[SteamCMD] Installation failed after ${totalDuration}ms:`, error);
+      logger.error(`[SteamCMD] Error details: ${error.message}`);
+      logger.error(`[SteamCMD] Stack trace: ${error.stack}`);
       throw error;
     }
   }
@@ -318,10 +371,29 @@ export class ServerProvisioner {
    * Install ASA server binaries
    */
   async installASABinaries(foreground = false) {
+    const startTime = Date.now();
+    const appId = '2430930'; // ASA Dedicated Server App ID
+    
+    logger.info(`[ASA Install] Starting ASA server binaries installation (foreground: ${foreground})`);
+    logger.info(`[ASA Install] App ID: ${appId}`);
+    logger.info(`[ASA Install] Target directory: ${this.sharedBinariesPath}`);
+    logger.info(`[ASA Install] SteamCMD executable: ${this.steamCmdExe}`);
+    
     try {
-      logger.info(`Installing ASA server binaries (foreground: ${foreground})...`);
+      // Check if binaries already exist
+      try {
+        const existingBinaries = path.join(this.sharedBinariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+        await fs.access(existingBinaries);
+        logger.info(`[ASA Install] Existing binaries found at: ${existingBinaries}`);
+        
+        // Get existing binary info
+        const stats = await fs.stat(existingBinaries);
+        const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        logger.info(`[ASA Install] Existing binary size: ${fileSizeMB}MB, modified: ${stats.mtime.toISOString()}`);
+      } catch (accessError) {
+        logger.info(`[ASA Install] No existing binaries found, proceeding with fresh installation`);
+      }
       
-      const appId = '2430930'; // ASA Dedicated Server App ID
       const installScript = `
         @ShutdownOnFailedCommand 1
         @NoPromptForPassword 1
@@ -332,28 +404,71 @@ export class ServerProvisioner {
       `;
       
       const scriptPath = path.join(this.steamCmdPath, 'install_asa.txt');
+      logger.info(`[ASA Install] Creating SteamCMD script: ${scriptPath}`);
       await fs.writeFile(scriptPath, installScript);
+      logger.info(`[ASA Install] Script content written successfully`);
       
       const command = `"${this.steamCmdExe}" +runscript "${scriptPath}"`;
+      logger.info(`[ASA Install] Executing command: ${command}`);
       
       if (foreground) {
         console.log('\n=== Installing ASA Server Binaries ===');
         console.log('This may take several minutes depending on your internet connection...');
+        logger.info(`[ASA Install] Running in foreground mode`);
+        
+        const execStartTime = Date.now();
         await this.execForeground(command);
+        const execDuration = Date.now() - execStartTime;
+        logger.info(`[ASA Install] Foreground execution completed in ${execDuration}ms`);
       } else {
-      await execAsync(command);
+        logger.info(`[ASA Install] Running in background mode`);
+        const execStartTime = Date.now();
+        const { stdout, stderr } = await execAsync(command, { timeout: 1800000 }); // 30 minute timeout
+        const execDuration = Date.now() - execStartTime;
+        
+        logger.info(`[ASA Install] Background execution completed in ${execDuration}ms`);
+        if (stdout) {
+          logger.info(`[ASA Install] SteamCMD stdout: ${stdout.substring(0, 1000)}${stdout.length > 1000 ? '... (truncated)' : ''}`);
+        }
+        if (stderr) {
+          logger.warn(`[ASA Install] SteamCMD stderr: ${stderr.substring(0, 1000)}${stderr.length > 1000 ? '... (truncated)' : ''}`);
+        }
       }
       
       // Clean up script
+      logger.info(`[ASA Install] Cleaning up script file: ${scriptPath}`);
       await fs.unlink(scriptPath);
+      logger.info(`[ASA Install] Script file removed`);
       
-      if (foreground) {
-        console.log('\n=== ASA Server Binaries installed successfully ===');
+      // Verify installation
+      const serverExePath = path.join(this.sharedBinariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+      logger.info(`[ASA Install] Verifying installation at: ${serverExePath}`);
+      
+      try {
+        await fs.access(serverExePath);
+        const stats = await fs.stat(serverExePath);
+        const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        const totalDuration = Date.now() - startTime;
+        
+        logger.info(`[ASA Install] Installation verified successfully`);
+        logger.info(`[ASA Install] Server executable size: ${fileSizeMB}MB`);
+        logger.info(`[ASA Install] Total installation time: ${totalDuration}ms`);
+        
+        if (foreground) {
+          console.log('\n=== ASA Server Binaries installed successfully ===');
+        }
+        
+        return { success: true, message: 'ASA binaries installed', installationTime: totalDuration, binarySize: fileSizeMB };
+      } catch (verifyError) {
+        const error = new Error(`ASA installation verification failed: ${verifyError.message}`);
+        logger.error(`[ASA Install] ${error.message}`);
+        throw error;
       }
-      logger.info('ASA server binaries installed successfully');
-      return { success: true, message: 'ASA binaries installed' };
     } catch (error) {
-      logger.error('Failed to install ASA binaries:', error);
+      const totalDuration = Date.now() - startTime;
+      logger.error(`[ASA Install] Installation failed after ${totalDuration}ms:`, error);
+      logger.error(`[ASA Install] Error details: ${error.message}`);
+      logger.error(`[ASA Install] Stack trace: ${error.stack}`);
       throw error;
     }
   }
@@ -377,10 +492,31 @@ export class ServerProvisioner {
    * Update ASA server binaries
    */
   async updateASABinaries() {
+    const startTime = Date.now();
+    const appId = '2430930';
+    
+    logger.info(`[ASA Update] Starting ASA server binaries update`);
+    logger.info(`[ASA Update] App ID: ${appId}`);
+    logger.info(`[ASA Update] Target directory: ${this.sharedBinariesPath}`);
+    logger.info(`[ASA Update] SteamCMD executable: ${this.steamCmdExe}`);
+    
     try {
-      logger.info('Updating ASA server binaries...');
+      // Get current binary info before update
+      const serverExePath = path.join(this.sharedBinariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+      let beforeUpdateInfo = null;
       
-      const appId = '2430930';
+      try {
+        const beforeStats = await fs.stat(serverExePath);
+        beforeUpdateInfo = {
+          size: beforeStats.size,
+          sizeMB: (beforeStats.size / 1024 / 1024).toFixed(2),
+          modified: beforeStats.mtime.toISOString()
+        };
+        logger.info(`[ASA Update] Current binary info: ${beforeUpdateInfo.sizeMB}MB, modified: ${beforeUpdateInfo.modified}`);
+      } catch (statError) {
+        logger.warn(`[ASA Update] Could not read current binary info: ${statError.message}`);
+      }
+      
       const updateScript = `
         @ShutdownOnFailedCommand 1
         @NoPromptForPassword 1
@@ -390,18 +526,74 @@ export class ServerProvisioner {
       `;
       
       const scriptPath = path.join(this.steamCmdPath, 'update_asa.txt');
+      logger.info(`[ASA Update] Creating SteamCMD update script: ${scriptPath}`);
       await fs.writeFile(scriptPath, updateScript);
+      logger.info(`[ASA Update] Update script written successfully`);
       
       const command = `"${this.steamCmdExe}" +runscript "${scriptPath}"`;
-      await execAsync(command, { timeout: 900000 }); // 15 minute timeout
+      logger.info(`[ASA Update] Executing update command: ${command}`);
+      
+      const execStartTime = Date.now();
+      const { stdout, stderr } = await execAsync(command, { timeout: 900000 }); // 15 minute timeout
+      const execDuration = Date.now() - execStartTime;
+      
+      logger.info(`[ASA Update] Update execution completed in ${execDuration}ms`);
+      
+      if (stdout) {
+        logger.info(`[ASA Update] SteamCMD stdout: ${stdout.substring(0, 1000)}${stdout.length > 1000 ? '... (truncated)' : ''}`);
+      }
+      if (stderr) {
+        logger.warn(`[ASA Update] SteamCMD stderr: ${stderr.substring(0, 1000)}${stderr.length > 1000 ? '... (truncated)' : ''}`);
+      }
       
       // Clean up script
+      logger.info(`[ASA Update] Cleaning up update script: ${scriptPath}`);
       await fs.unlink(scriptPath);
+      logger.info(`[ASA Update] Script file removed`);
       
-      logger.info('ASA server binaries updated successfully');
-      return { success: true, message: 'ASA binaries updated' };
+      // Verify and compare update results
+      logger.info(`[ASA Update] Verifying update results`);
+      try {
+        const afterStats = await fs.stat(serverExePath);
+        const afterUpdateInfo = {
+          size: afterStats.size,
+          sizeMB: (afterStats.size / 1024 / 1024).toFixed(2),
+          modified: afterStats.mtime.toISOString()
+        };
+        
+        const totalDuration = Date.now() - startTime;
+        logger.info(`[ASA Update] Update completed successfully in ${totalDuration}ms`);
+        logger.info(`[ASA Update] Updated binary info: ${afterUpdateInfo.sizeMB}MB, modified: ${afterUpdateInfo.modified}`);
+        
+        if (beforeUpdateInfo) {
+          const sizeChange = afterStats.size - beforeUpdateInfo.size;
+          const sizeChangeMB = (sizeChange / 1024 / 1024).toFixed(2);
+          logger.info(`[ASA Update] Size change: ${sizeChangeMB}MB (${sizeChange > 0 ? '+' : ''}${sizeChange} bytes)`);
+          
+          if (beforeUpdateInfo.modified !== afterUpdateInfo.modified) {
+            logger.info(`[ASA Update] Binary was updated (modification time changed)`);
+          } else {
+            logger.info(`[ASA Update] Binary appears unchanged (same modification time)`);
+          }
+        }
+        
+        return { 
+          success: true, 
+          message: 'ASA binaries updated',
+          updateTime: totalDuration,
+          beforeUpdate: beforeUpdateInfo,
+          afterUpdate: afterUpdateInfo
+        };
+      } catch (verifyError) {
+        const error = new Error(`Update verification failed: ${verifyError.message}`);
+        logger.error(`[ASA Update] ${error.message}`);
+        throw error;
+      }
     } catch (error) {
-      logger.error('Failed to update ASA binaries:', error);
+      const totalDuration = Date.now() - startTime;
+      logger.error(`[ASA Update] Update failed after ${totalDuration}ms:`, error);
+      logger.error(`[ASA Update] Error details: ${error.message}`);
+      logger.error(`[ASA Update] Stack trace: ${error.stack}`);
       throw error;
     }
   }
