@@ -1476,14 +1476,20 @@ export default async function nativeServerRoutes(fastify, options) {
       // Test JSON serialization
       try {
         const jsonString = JSON.stringify(returnObject, null, 2);
-        logger.info(`Debug RCON: JSON string length:`, jsonString.length);
-        logger.info(`Debug RCON: JSON string preview:`, jsonString.substring(0, 500));
+        logger.info(`Debug RCON: JSON string length: ${jsonString.length}`);
+        logger.info(`Debug RCON: JSON string preview: ${jsonString.substring(0, 500)}`);
         
         // Test parsing back
         const parsed = JSON.parse(jsonString);
-        logger.info(`Debug RCON: Parsed back successfully, debug keys:`, Object.keys(parsed.debug || {}));
+        logger.info(`Debug RCON: Parsed back successfully, debug keys: ${Object.keys(parsed.debug || {}).join(', ')}`);
+        
+        // Log individual debug object properties
+        logger.info(`Debug RCON: serverName = ${parsed.debug?.serverName}`);
+        logger.info(`Debug RCON: serverInfo keys = ${Object.keys(parsed.debug?.serverInfo || {}).join(', ')}`);
+        logger.info(`Debug RCON: adminPassword = ${parsed.debug?.serverInfo?.adminPassword}`);
+        logger.info(`Debug RCON: rconPort = ${parsed.debug?.serverInfo?.rconPort}`);
       } catch (error) {
-        logger.error(`Debug RCON: JSON serialization error:`, error.message);
+        logger.error(`Debug RCON: JSON serialization error: ${error.message}`);
       }
 
       return returnObject;
