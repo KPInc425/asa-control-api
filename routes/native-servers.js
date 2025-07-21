@@ -442,10 +442,13 @@ export default async function nativeServerRoutes(fastify, options) {
       request.log.info(`[live-details] Handling request for ${name}`);
       // Always try asa-query first
       const asaStats = await getServerLiveStats(name);
+      console.log('[live-details] asaStats:', asaStats);
+      request.log.info(`[live-details] asaStats for ${name}:`, asaStats);
       if (asaStats) {
         request.log.info(`[live-details] asa-query stats found for ${name}:`, asaStats);
         // If asa-query says server is online (players/maxPlayers > 0 or started), treat as online
         const isOnline = asaStats.players > 0 || asaStats.started !== 'N/A';
+        console.log('[live-details] asaStats isOnline:', isOnline);
         if (isOnline) {
           const details = {
             name,
@@ -484,6 +487,9 @@ export default async function nativeServerRoutes(fastify, options) {
           request.log.info(`[live-details] Returning asa-query offline details for ${name}:`, details);
           return { success: true, details };
         }
+      } else {
+        console.log('[live-details] asaStats is falsy for', name);
+        request.log.info(`[live-details] asaStats is falsy for ${name}`);
       }
       // If asa-query fails, fallback to RCON/local stats if server is running
       let isRunning = false;
@@ -493,6 +499,8 @@ export default async function nativeServerRoutes(fastify, options) {
       } catch (err) {
         request.log.warn(`isRunning check failed for ${name}:`, err);
       }
+      console.log('[live-details] isRunning:', isRunning);
+      request.log.info(`[live-details] isRunning for ${name}:`, isRunning);
       if (isRunning) {
         try {
           stats = await serverManager.getStats(name) || {};
