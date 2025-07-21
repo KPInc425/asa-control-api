@@ -435,6 +435,8 @@ export default async function nativeServerRoutes(fastify, options) {
       }
     }
   }, async (request, reply) => {
+    console.log('[live-details] handler called for', request.params);
+    request.log.info(`[live-details] handler called for ${JSON.stringify(request.params)}`);
     try {
       const { name } = request.params;
       request.log.info(`[live-details] Handling request for ${name}`);
@@ -459,6 +461,7 @@ export default async function nativeServerRoutes(fastify, options) {
             memory: 0,
             lastUpdated: asaStats.lastUpdated || new Date().toISOString()
           };
+          console.log('[live-details] Returning asa-query online details:', details);
           request.log.info(`[live-details] Returning asa-query online details for ${name}:`, details);
           return { success: true, details };
         } else {
@@ -477,6 +480,7 @@ export default async function nativeServerRoutes(fastify, options) {
             memory: 0,
             lastUpdated: asaStats.lastUpdated || new Date().toISOString()
           };
+          console.log('[live-details] Returning asa-query offline details:', details);
           request.log.info(`[live-details] Returning asa-query offline details for ${name}:`, details);
           return { success: true, details };
         }
@@ -533,6 +537,7 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: stats.memory || 0,
           lastUpdated: new Date().toISOString()
         };
+        console.log('[live-details] Returning RCON/local details:', details);
         request.log.info(`[live-details] Returning RCON/local details for ${name}:`, details);
         return { success: true, details };
       } else {
@@ -551,11 +556,13 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: 0,
           lastUpdated: new Date().toISOString()
         };
+        console.log('[live-details] Returning default offline details:', details);
         request.log.info(`[live-details] Returning default offline details for ${name}:`, details);
         return { success: true, details };
       }
     } catch (error) {
-      request.log.error(`Error getting live details for ${request.params.name}:`, error);
+      console.error('[live-details] handler error:', error);
+      request.log.error(`[live-details] Error getting live details for ${request.params.name}:`, error);
       return reply.status(200).send({
         success: true,
         details: {
