@@ -36,28 +36,26 @@ export default async function nativeServerRoutes(fastify, options) {
       }
     }
   }, async (request, reply) => {
-    console.log('[live-details] handler called for', request.params);
-    request.log.info(`[live-details] handler called for ${JSON.stringify(request.params)}`);
+    request.log.info('[live-details] handler entered', request.params);
     try {
       const { name } = request.params;
       request.log.info(`[live-details] Handling request for ${name}`);
       // Always try asa-query first
       const asaStats = await getServerLiveStats(name);
-      console.log('[live-details] asaStats:', asaStats);
-      request.log.info(`[live-details] asaStats for ${name}:`, asaStats);
+      request.log.info('[live-details] asaStats:', asaStats);
       if (asaStats) {
         request.log.info(`[live-details] asa-query stats found for ${name}:`, asaStats);
-        // If asa-query says server is online (players/maxPlayers > 0 or started), treat as online
         const isOnline = asaStats.players > 0 || asaStats.started !== 'N/A';
-        console.log('[live-details] asaStats isOnline:', isOnline);
+        request.log.info('[live-details] asaStats isOnline:', isOnline);
+        let details;
         if (isOnline) {
-          const details = {
+          details = {
             name,
             status: 'online',
             players: asaStats.players ?? 0,
             maxPlayers: asaStats.maxPlayers ?? 0,
             day: asaStats.day ?? 0,
-            gameTime: '00:00', // asa-query does not provide time
+            gameTime: '00:00',
             version: asaStats.version ?? 'N/A',
             map: asaStats.map ?? 'N/A',
             uptime: 0,
@@ -65,14 +63,8 @@ export default async function nativeServerRoutes(fastify, options) {
             memory: 0,
             lastUpdated: asaStats.lastUpdated || new Date().toISOString()
           };
-          console.log('[live-details] Returning asa-query online details:', details);
-          request.log.info(`[live-details] Returning asa-query online details for ${name}:`, details);
-          console.log('Final response:', { success: true, details });
-          request.log.info('[live-details] Final response:', { success: true, details });
-          return { success: true, details };
         } else {
-          // Server is offline per asa-query, return asa-query stats as offline snapshot
-          const details = {
+          details = {
             name,
             status: 'offline',
             players: asaStats.players ?? 0,
@@ -86,15 +78,9 @@ export default async function nativeServerRoutes(fastify, options) {
             memory: 0,
             lastUpdated: asaStats.lastUpdated || new Date().toISOString()
           };
-          console.log('[live-details] Returning asa-query offline details:', details);
-          request.log.info(`[live-details] Returning asa-query offline details for ${name}:`, details);
-          console.log('Final response:', { success: true, details });
-          request.log.info('[live-details] Final response:', { success: true, details });
-          return { success: true, details };
         }
-      } else {
-        console.log('[live-details] asaStats is falsy for', name);
-        request.log.info(`[live-details] asaStats is falsy for ${name}`);
+        request.log.info('[live-details] about to return (asa-query)', { success: true, details });
+        return { success: true, details };
       }
       // If asa-query fails, fallback to RCON/local stats if server is running
       let isRunning = false;
@@ -104,8 +90,7 @@ export default async function nativeServerRoutes(fastify, options) {
       } catch (err) {
         request.log.warn(`isRunning check failed for ${name}:`, err);
       }
-      console.log('[live-details] isRunning:', isRunning);
-      request.log.info(`[live-details] isRunning for ${name}:`, isRunning);
+      request.log.info('[live-details] isRunning:', isRunning);
       if (isRunning) {
         try {
           stats = await serverManager.getStats(name) || {};
@@ -113,7 +98,6 @@ export default async function nativeServerRoutes(fastify, options) {
           request.log.warn(`getStats failed for ${name}:`, err);
           stats = {};
         }
-        // Try to get player count and game info via RCON
         let playerCount = 0;
         let maxPlayers = 70;
         let day = 0;
@@ -150,13 +134,9 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: stats.memory || 0,
           lastUpdated: new Date().toISOString()
         };
-        console.log('[live-details] Returning RCON/local details:', details);
-        request.log.info(`[live-details] Returning RCON/local details for ${name}:`, details);
-        console.log('Final response:', { success: true, details });
-        request.log.info('[live-details] Final response:', { success: true, details });
+        request.log.info('[live-details] about to return (RCON/local)', { success: true, details });
         return { success: true, details };
       } else {
-        // Server is offline and no asa-query stats, return default
         const details = {
           name,
           status: 'offline',
@@ -171,15 +151,11 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: 0,
           lastUpdated: new Date().toISOString()
         };
-        console.log('[live-details] Returning default offline details:', details);
-        request.log.info(`[live-details] Returning default offline details for ${name}:`, details);
-        console.log('Final response:', { success: true, details });
-        request.log.info('[live-details] Final response:', { success: true, details });
+        request.log.info('[live-details] about to return (offline default)', { success: true, details });
         return { success: true, details };
       }
     } catch (error) {
-      console.error('[live-details] handler error:', error);
-      request.log.error(`[live-details] Error getting live details for ${request.params.name}:`, error);
+      request.log.error('[live-details] error', { error: error.message, stack: error.stack });
       const details = {
         name: request.params.name,
         status: 'unknown',
@@ -194,8 +170,7 @@ export default async function nativeServerRoutes(fastify, options) {
         memory: 0,
         lastUpdated: new Date().toISOString()
       };
-      console.log('Final response (error):', { success: true, details });
-      request.log.info('[live-details] Final response (error):', { success: true, details });
+      request.log.info('[live-details] about to return (error)', { success: true, details });
       return reply.status(200).send({ success: true, details });
     }
   });
