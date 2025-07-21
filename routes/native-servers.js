@@ -1472,7 +1472,19 @@ export default async function nativeServerRoutes(fastify, options) {
       
       logger.info(`Debug RCON: Return object keys:`, Object.keys(returnObject));
       logger.info(`Debug RCON: Debug object keys:`, Object.keys(returnObject.debug));
-      logger.info(`Debug RCON: Full return object:`, JSON.stringify(returnObject, null, 2));
+      
+      // Test JSON serialization
+      try {
+        const jsonString = JSON.stringify(returnObject, null, 2);
+        logger.info(`Debug RCON: JSON string length:`, jsonString.length);
+        logger.info(`Debug RCON: JSON string preview:`, jsonString.substring(0, 500));
+        
+        // Test parsing back
+        const parsed = JSON.parse(jsonString);
+        logger.info(`Debug RCON: Parsed back successfully, debug keys:`, Object.keys(parsed.debug || {}));
+      } catch (error) {
+        logger.error(`Debug RCON: JSON serialization error:`, error.message);
+      }
 
       return returnObject;
     } catch (error) {
