@@ -5,7 +5,7 @@ import { getServerConfig, deleteServerConfig } from '../services/database.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { promises as fs } from 'fs';
-// import { getServerLiveStats } from '../services/asa-query.js';
+import { getServerLiveStats } from '../services/asa-query.js';
 
 // Create native server manager instance (no Docker service)
 const serverManager = new NativeServerManager();
@@ -437,6 +437,51 @@ export default async function nativeServerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
+      request.log.info(`[live-details] Handling request for ${name}`);
+      // Always try asa-query first
+      const asaStats = await getServerLiveStats(name);
+      if (asaStats) {
+        request.log.info(`[live-details] asa-query stats found for ${name}:`, asaStats);
+        // If asa-query says server is online (players/maxPlayers > 0 or started), treat as online
+        const isOnline = asaStats.players > 0 || asaStats.started !== 'N/A';
+        if (isOnline) {
+          const details = {
+            name,
+            status: 'online',
+            players: asaStats.players ?? 0,
+            maxPlayers: asaStats.maxPlayers ?? 0,
+            day: asaStats.day ?? 0,
+            gameTime: '00:00', // asa-query does not provide time
+            version: asaStats.version ?? 'N/A',
+            map: asaStats.map ?? 'N/A',
+            uptime: 0,
+            cpu: 0,
+            memory: 0,
+            lastUpdated: asaStats.lastUpdated || new Date().toISOString()
+          };
+          request.log.info(`[live-details] Returning asa-query online details for ${name}:`, details);
+          return { success: true, details };
+        } else {
+          // Server is offline per asa-query, return asa-query stats as offline snapshot
+          const details = {
+            name,
+            status: 'offline',
+            players: asaStats.players ?? 0,
+            maxPlayers: asaStats.maxPlayers ?? 0,
+            day: asaStats.day ?? 0,
+            gameTime: '00:00',
+            version: asaStats.version ?? 'N/A',
+            map: asaStats.map ?? 'N/A',
+            uptime: 0,
+            cpu: 0,
+            memory: 0,
+            lastUpdated: asaStats.lastUpdated || new Date().toISOString()
+          };
+          request.log.info(`[live-details] Returning asa-query offline details for ${name}:`, details);
+          return { success: true, details };
+        }
+      }
+      // If asa-query fails, fallback to RCON/local stats if server is running
       let isRunning = false;
       let stats = {};
       try {
@@ -444,82 +489,71 @@ export default async function nativeServerRoutes(fastify, options) {
       } catch (err) {
         request.log.warn(`isRunning check failed for ${name}:`, err);
       }
-      if (!isRunning) {
-        // TEMP: skip asa-query integration for debugging
-        // const asaStats = await getServerLiveStats(name);
+      if (isRunning) {
+        try {
+          stats = await serverManager.getStats(name) || {};
+        } catch (err) {
+          request.log.warn(`getStats failed for ${name}:`, err);
+          stats = {};
+        }
+        // Try to get player count and game info via RCON
+        let playerCount = 0;
+        let maxPlayers = 70;
+        let day = 0;
+        let gameTime = '00:00';
+        let version = 'N/A';
+        let map = 'N/A';
+        try {
+          const rconService = (await import('../services/rcon.js')).default;
+          const playerList = await rconService.getPlayerList(name);
+          playerCount = Array.isArray(playerList) ? playerList.length : 0;
+          const serverInfo = await rconService.getServerInfo(name);
+          if (serverInfo && serverInfo.Day) {
+            day = parseInt(serverInfo.Day) || 0;
+          }
+          if (day > 0) {
+            const hours = Math.floor((day * 24) % 24);
+            const minutes = Math.floor((day * 24 * 60) % 60);
+            gameTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+          }
+        } catch (rconError) {
+          request.log.warn(`RCON failed for ${name}, using fallback data:`, rconError.message);
+        }
+        const details = {
+          name,
+          status: 'online',
+          players: playerCount,
+          maxPlayers,
+          day,
+          gameTime,
+          version,
+          map,
+          uptime: stats.uptime || 0,
+          cpu: stats.cpu || 0,
+          memory: stats.memory || 0,
+          lastUpdated: new Date().toISOString()
+        };
+        request.log.info(`[live-details] Returning RCON/local details for ${name}:`, details);
+        return { success: true, details };
+      } else {
+        // Server is offline and no asa-query stats, return default
         const details = {
           name,
           status: 'offline',
           players: 0,
-          maxPlayers: 0, // asaStats?.maxPlayers || 0,
-          day: 0, // asaStats?.day || 0,
+          maxPlayers: 0,
+          day: 0,
           gameTime: '00:00',
-          version: 'N/A', // asaStats?.version || 'N/A',
-          map: 'N/A', // asaStats?.map || 'N/A',
+          version: 'N/A',
+          map: 'N/A',
           uptime: 0,
           cpu: 0,
           memory: 0,
           lastUpdated: new Date().toISOString()
         };
-        request.log.info(`[live-details] (offline) merged details:`, details);
+        request.log.info(`[live-details] Returning default offline details for ${name}:`, details);
         return { success: true, details };
       }
-      try {
-        stats = await serverManager.getStats(name) || {};
-      } catch (err) {
-        request.log.warn(`getStats failed for ${name}:`, err);
-        stats = {};
-      }
-      // Try to get player count and game info via RCON
-      let playerCount = 0;
-      let maxPlayers = 70;
-      let day = 0;
-      let gameTime = '00:00';
-      let version = 'N/A';
-      let map = 'N/A';
-      try {
-        const rconService = (await import('../services/rcon.js')).default;
-        const playerList = await rconService.getPlayerList(name);
-        playerCount = Array.isArray(playerList) ? playerList.length : 0;
-        const serverInfo = await rconService.getServerInfo(name);
-        if (serverInfo && serverInfo.Day) {
-          day = parseInt(serverInfo.Day) || 0;
-        }
-        if (day > 0) {
-          const hours = Math.floor((day * 24) % 24);
-          const minutes = Math.floor((day * 24 * 60) % 60);
-          gameTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-        }
-      } catch (rconError) {
-        request.log.warn(`RCON failed for ${name}, using fallback data:`, rconError.message);
-      }
-      // TEMP: skip asa-query integration for debugging
-      // const asaStats = await getServerLiveStats(name);
-      // if (asaStats) {
-      //   if (asaStats.day && (!day || day === 0)) day = asaStats.day;
-      //   if (asaStats.version) version = asaStats.version;
-      //   if (asaStats.map) map = asaStats.map;
-      //   if (asaStats.maxPlayers && (!maxPlayers || maxPlayers === 70)) maxPlayers = asaStats.maxPlayers;
-      // }
-      const details = {
-        name,
-        status: 'online',
-        players: playerCount,
-        maxPlayers,
-        day,
-        gameTime,
-        version,
-        map,
-        uptime: stats.uptime || 0,
-        cpu: stats.cpu || 0,
-        memory: stats.memory || 0,
-        lastUpdated: new Date().toISOString()
-      };
-      request.log.info(`[live-details] (online) merged details:`, details);
-      return {
-        success: true,
-        details
-      };
     } catch (error) {
       request.log.error(`Error getting live details for ${request.params.name}:`, error);
       return reply.status(200).send({
