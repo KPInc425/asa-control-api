@@ -22,3 +22,5 @@ Thumbs.db
 # Ignore test output
 /tests/*.log
 /tests/*.out
+
+cursor/

@@ -179,11 +179,9 @@ class AutoShutdownService extends EventEmitter {
   /**
    * Save world using RCON before shutdown
    */
-  async saveWorldBeforeShutdown(serverName, timeoutSeconds = 30) {
+  async saveWorldBeforeShutdown(serverName, timeoutSeconds = 30, maxAttempts = 3) {
     try {
       logger.info(`Saving world for ${serverName} before shutdown...`);
-      
-      // Send Discord notification about save
       const config = this.configs.get(serverName);
       if (config && config.discordNotifications) {
         await this.discordService.sendNotification({
@@ -191,49 +189,71 @@ class AutoShutdownService extends EventEmitter {
           serverName,
           message: '💾 Saving world before shutdown...',
           timestamp: new Date(),
-          data: {
-            status: 'saving'
-          }
+          data: { status: 'saving' }
         });
       }
-      
-      // Try to save using RCON
+      // Try to save using RCON and wait for 'World Saved' response
       try {
-        const result = await rconService.saveWorld(serverName);
-        logger.info(`World saved successfully for ${serverName}:`, result);
-        
-        // Wait a moment for save to complete
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        if (config && config.discordNotifications) {
-          await this.discordService.sendNotification({
-            type: 'server_status',
-            serverName,
-            message: '✅ World saved successfully',
-            timestamp: new Date(),
-            data: {
-              status: 'saved'
+        const rconService = (await import('./rcon.js')).default;
+        let worldSaved = false;
+        let lastResponse = '';
+        let attempt = 0;
+        const delay = Math.max(1000, Math.floor(timeoutSeconds * 1000 / maxAttempts));
+        while (attempt < maxAttempts && !worldSaved) {
+          attempt++;
+          logger.info(`[AutoShutdown] Attempt ${attempt}: Sending SaveWorld command to ${serverName}...`);
+          try {
+            const response = await rconService.sendRconCommand(serverName, 'SaveWorld');
+            lastResponse = response.response || response.message || '';
+            logger.info(`[AutoShutdown] SaveWorld RCON response for ${serverName} (attempt ${attempt}):`, lastResponse);
+            if (lastResponse.toLowerCase().includes('world saved')) {
+              worldSaved = true;
+              break;
             }
-          });
+          } catch (err) {
+            logger.warn(`[AutoShutdown] RCON error on SaveWorld attempt ${attempt} for ${serverName}:`, err);
+            lastResponse = err.message || String(err);
+          }
+          if (!worldSaved && attempt < maxAttempts) {
+            logger.info(`[AutoShutdown] Waiting ${delay}ms before next SaveWorld attempt for ${serverName}...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         }
-        
+        if (worldSaved) {
+          logger.info(`[AutoShutdown] 'World Saved' confirmed for ${serverName} after ${attempt} attempt(s). Proceeding with shutdown.`);
+          if (config && config.discordNotifications) {
+            await this.discordService.sendNotification({
+              type: 'server_status',
+              serverName,
+              message: '✅ World saved successfully',
+              timestamp: new Date(),
+              data: { status: 'saved', attempts: attempt }
+            });
+          }
+        } else {
+          logger.warn(`[AutoShutdown] Did not receive 'World Saved' after ${maxAttempts} attempts for ${serverName}. Proceeding with shutdown anyway.`);
+          if (config && config.discordNotifications) {
+            await this.discordService.sendNotification({
+              type: 'error',
+              serverName,
+              message: '⚠️ Did not receive world save confirmation via RCON, proceeding with shutdown',
+              timestamp: new Date(),
+              data: { error: 'no confirmation', lastResponse, attempts: attempt }
+            });
+          }
+        }
       } catch (rconError) {
         logger.warn(`RCON saveworld failed for ${serverName}:`, rconError);
-        
-        // Send warning notification
         if (config && config.discordNotifications) {
           await this.discordService.sendNotification({
             type: 'error',
             serverName,
             message: '⚠️ Failed to save world via RCON, proceeding with shutdown',
             timestamp: new Date(),
-            data: {
-              error: rconError.message
-            }
+            data: { error: rconError.message }
           });
         }
       }
-      
     } catch (error) {
       logger.error(`Error in saveWorldBeforeShutdown for ${serverName}:`, error);
     }
