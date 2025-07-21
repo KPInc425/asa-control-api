@@ -30,7 +30,7 @@ export default async function nativeServerRoutes(fastify, options) {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
-            details: { type: 'object' }
+            details: { type: 'object', additionalProperties: true }
           }
         }
       }
