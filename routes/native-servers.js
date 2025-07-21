@@ -5,7 +5,7 @@ import { getServerConfig, deleteServerConfig } from '../services/database.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { promises as fs } from 'fs';
-import { getServerLiveStats } from '../services/asa-query.js';
+// import { getServerLiveStats } from '../services/asa-query.js';
 
 // Create native server manager instance (no Docker service)
 const serverManager = new NativeServerManager();
@@ -445,17 +445,17 @@ export default async function nativeServerRoutes(fastify, options) {
         request.log.warn(`isRunning check failed for ${name}:`, err);
       }
       if (!isRunning) {
-        // Try asa-query for offline stats
-        const asaStats = await getServerLiveStats(name);
+        // TEMP: skip asa-query integration for debugging
+        // const asaStats = await getServerLiveStats(name);
         const details = {
           name,
           status: 'offline',
           players: 0,
-          maxPlayers: asaStats?.maxPlayers || 0,
-          day: asaStats?.day || 0,
+          maxPlayers: 0, // asaStats?.maxPlayers || 0,
+          day: 0, // asaStats?.day || 0,
           gameTime: '00:00',
-          version: asaStats?.version || 'N/A',
-          map: asaStats?.map || 'N/A',
+          version: 'N/A', // asaStats?.version || 'N/A',
+          map: 'N/A', // asaStats?.map || 'N/A',
           uptime: 0,
           cpu: 0,
           memory: 0,
@@ -493,15 +493,14 @@ export default async function nativeServerRoutes(fastify, options) {
       } catch (rconError) {
         request.log.warn(`RCON failed for ${name}, using fallback data:`, rconError.message);
       }
-      // Query asa-query for browser stats
-      const asaStats = await getServerLiveStats(name);
-      // Merge asa-query stats into details
-      if (asaStats) {
-        if (asaStats.day && (!day || day === 0)) day = asaStats.day;
-        if (asaStats.version) version = asaStats.version;
-        if (asaStats.map) map = asaStats.map;
-        if (asaStats.maxPlayers && (!maxPlayers || maxPlayers === 70)) maxPlayers = asaStats.maxPlayers;
-      }
+      // TEMP: skip asa-query integration for debugging
+      // const asaStats = await getServerLiveStats(name);
+      // if (asaStats) {
+      //   if (asaStats.day && (!day || day === 0)) day = asaStats.day;
+      //   if (asaStats.version) version = asaStats.version;
+      //   if (asaStats.map) map = asaStats.map;
+      //   if (asaStats.maxPlayers && (!maxPlayers || maxPlayers === 70)) maxPlayers = asaStats.maxPlayers;
+      // }
       const details = {
         name,
         status: 'online',

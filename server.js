@@ -604,7 +604,10 @@ const start = async () => {
       logger.info('  viewer/viewer123 (viewer role)');
     }
   } catch (err) {
-    logger.error('Error starting server:', err);
+    console.error('Top-level startup error:', err);
+    if (typeof logger !== 'undefined' && logger && logger.error) {
+      logger.error('Top-level startup error:', err);
+    }
     process.exit(1);
   }
 };
