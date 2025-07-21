@@ -24,11 +24,18 @@ export async function getServerLiveStats(sessionName) {
         // Extract useful stats
         const attrs = best.attributes || {};
         const settings = best.settings || {};
+        // --- Version as float string ---
+        let version = 'N/A';
+        if (attrs.BUILDID_s && attrs.MINORBUILDID_s) {
+          version = `${attrs.BUILDID_s}.${attrs.MINORBUILDID_s}`;
+        } else if (attrs.BUILDID_s) {
+          version = attrs.BUILDID_s;
+        }
         return {
           sessionName: attrs.SESSIONNAME_s || attrs.CUSTOMSERVERNAME_s || best.id,
           map: attrs.MAPNAME_s || attrs.FRIENDLYMAPNAME_s || 'N/A',
           day: attrs.DAYTIME_s || 'N/A',
-          version: attrs.BUILDID_s || 'N/A',
+          version,
           players: typeof best.totalPlayers === 'number' ? best.totalPlayers : (Array.isArray(best.publicPlayers) ? best.publicPlayers.length : 'N/A'),
           maxPlayers: settings.maxPublicPlayers || attrs.maxPublicPlayers || 'N/A',
           started: best.started || 'N/A',
