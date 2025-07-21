@@ -466,6 +466,8 @@ export default async function nativeServerRoutes(fastify, options) {
           };
           console.log('[live-details] Returning asa-query online details:', details);
           request.log.info(`[live-details] Returning asa-query online details for ${name}:`, details);
+          console.log('Final response:', { success: true, details });
+          request.log.info('[live-details] Final response:', { success: true, details });
           return { success: true, details };
         } else {
           // Server is offline per asa-query, return asa-query stats as offline snapshot
@@ -485,6 +487,8 @@ export default async function nativeServerRoutes(fastify, options) {
           };
           console.log('[live-details] Returning asa-query offline details:', details);
           request.log.info(`[live-details] Returning asa-query offline details for ${name}:`, details);
+          console.log('Final response:', { success: true, details });
+          request.log.info('[live-details] Final response:', { success: true, details });
           return { success: true, details };
         }
       } else {
@@ -547,6 +551,8 @@ export default async function nativeServerRoutes(fastify, options) {
         };
         console.log('[live-details] Returning RCON/local details:', details);
         request.log.info(`[live-details] Returning RCON/local details for ${name}:`, details);
+        console.log('Final response:', { success: true, details });
+        request.log.info('[live-details] Final response:', { success: true, details });
         return { success: true, details };
       } else {
         // Server is offline and no asa-query stats, return default
@@ -566,28 +572,30 @@ export default async function nativeServerRoutes(fastify, options) {
         };
         console.log('[live-details] Returning default offline details:', details);
         request.log.info(`[live-details] Returning default offline details for ${name}:`, details);
+        console.log('Final response:', { success: true, details });
+        request.log.info('[live-details] Final response:', { success: true, details });
         return { success: true, details };
       }
     } catch (error) {
       console.error('[live-details] handler error:', error);
       request.log.error(`[live-details] Error getting live details for ${request.params.name}:`, error);
-      return reply.status(200).send({
-        success: true,
-        details: {
-          name: request.params.name,
-          status: 'unknown',
-          players: 0,
-          maxPlayers: 0,
-          day: 0,
-          gameTime: '00:00',
-          version: 'N/A',
-          map: 'N/A',
-          uptime: 0,
-          cpu: 0,
-          memory: 0,
-          lastUpdated: new Date().toISOString()
-        }
-      });
+      const details = {
+        name: request.params.name,
+        status: 'unknown',
+        players: 0,
+        maxPlayers: 0,
+        day: 0,
+        gameTime: '00:00',
+        version: 'N/A',
+        map: 'N/A',
+        uptime: 0,
+        cpu: 0,
+        memory: 0,
+        lastUpdated: new Date().toISOString()
+      };
+      console.log('Final response (error):', { success: true, details });
+      request.log.info('[live-details] Final response (error):', { success: true, details });
+      return reply.status(200).send({ success: true, details });
     }
   });
 
