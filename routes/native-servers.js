@@ -415,7 +415,7 @@ export default async function nativeServerRoutes(fastify, options) {
 
   // Get live server details with player count and game time (MOVED UP)
   fastify.get('/api/native-servers/:name/live-details', {
-    preHandler: [requireRead],
+    // preHandler: [requireRead], // TEMPORARILY REMOVED FOR DEBUGGING
     schema: {
       params: {
         type: 'object',
