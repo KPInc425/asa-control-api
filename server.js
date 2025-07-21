@@ -112,6 +112,17 @@ fastify.addHook('onRequest', async (request, reply) => {
   logger.info(`[REQUEST] ${request.method} ${request.url}`);
 });
 
+// Response logging hook to debug response transformation
+fastify.addHook('onSend', async (request, reply, payload) => {
+  if (request.url.includes('/debug-rcon')) {
+    logger.info(`[RESPONSE] URL: ${request.url}`);
+    logger.info(`[RESPONSE] Status: ${reply.statusCode}`);
+    logger.info(`[RESPONSE] Payload type: ${typeof payload}`);
+    logger.info(`[RESPONSE] Payload length: ${payload ? payload.length : 0}`);
+    logger.info(`[RESPONSE] Payload preview: ${payload ? payload.substring(0, 200) : 'null'}`);
+  }
+});
+
 // Health check endpoint
 fastify.get('/health', async (request, reply) => {
   return {
