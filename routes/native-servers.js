@@ -36,17 +36,17 @@ export default async function nativeServerRoutes(fastify, options) {
       }
     }
   }, async (request, reply) => {
-    request.log.info('[live-details] handler entered', request.params);
+    logger.info('[live-details] handler entered', request.params);
     try {
       const { name } = request.params;
-      request.log.info(`[live-details] Handling request for ${name}`);
+      logger.info(`[live-details] Handling request for ${name}`);
       // Always try asa-query first
       const asaStats = await getServerLiveStats(name);
-      request.log.info('[live-details] asaStats:', asaStats);
+      logger.info('[live-details] asaStats:', asaStats);
       if (asaStats) {
-        request.log.info(`[live-details] asa-query stats found for ${name}:`, asaStats);
+        logger.info(`[live-details] asa-query stats found for ${name}:`, asaStats);
         const isOnline = asaStats.players > 0 || asaStats.started !== 'N/A';
-        request.log.info('[live-details] asaStats isOnline:', isOnline);
+        logger.info('[live-details] asaStats isOnline:', isOnline);
         let details;
         if (isOnline) {
           details = {
@@ -79,7 +79,7 @@ export default async function nativeServerRoutes(fastify, options) {
             lastUpdated: asaStats.lastUpdated || new Date().toISOString()
           };
         }
-        request.log.info('[live-details] about to return (asa-query)', { success: true, details });
+        logger.info('[live-details] about to return (asa-query)', { success: true, details });
         return { success: true, details };
       }
       // If asa-query fails, fallback to RCON/local stats if server is running
@@ -88,14 +88,14 @@ export default async function nativeServerRoutes(fastify, options) {
       try {
         isRunning = await serverManager.isRunning(name);
       } catch (err) {
-        request.log.warn(`isRunning check failed for ${name}:`, err);
+        logger.warn(`isRunning check failed for ${name}:`, err);
       }
-      request.log.info('[live-details] isRunning:', isRunning);
+      logger.info('[live-details] isRunning:', isRunning);
       if (isRunning) {
         try {
           stats = await serverManager.getStats(name) || {};
         } catch (err) {
-          request.log.warn(`getStats failed for ${name}:`, err);
+          logger.warn(`getStats failed for ${name}:`, err);
           stats = {};
         }
         let playerCount = 0;
@@ -118,7 +118,7 @@ export default async function nativeServerRoutes(fastify, options) {
             gameTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
           }
         } catch (rconError) {
-          request.log.warn(`RCON failed for ${name}, using fallback data:`, rconError.message);
+          logger.warn(`RCON failed for ${name}, using fallback data:`, rconError.message);
         }
         const details = {
           name,
@@ -134,7 +134,7 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: stats.memory || 0,
           lastUpdated: new Date().toISOString()
         };
-        request.log.info('[live-details] about to return (RCON/local)', { success: true, details });
+        logger.info('[live-details] about to return (RCON/local)', { success: true, details });
         return { success: true, details };
       } else {
         const details = {
@@ -151,11 +151,11 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: 0,
           lastUpdated: new Date().toISOString()
         };
-        request.log.info('[live-details] about to return (offline default)', { success: true, details });
+        logger.info('[live-details] about to return (offline default)', { success: true, details });
         return { success: true, details };
       }
     } catch (error) {
-      request.log.error('[live-details] error', { error: error.message, stack: error.stack });
+      logger.error('[live-details] error', { error: error.message, stack: error.stack });
       const details = {
         name: request.params.name,
         status: 'unknown',
@@ -170,7 +170,7 @@ export default async function nativeServerRoutes(fastify, options) {
         memory: 0,
         lastUpdated: new Date().toISOString()
       };
-      request.log.info('[live-details] about to return (error)', { success: true, details });
+      logger.info('[live-details] about to return (error)', { success: true, details });
       return reply.status(200).send({ success: true, details });
     }
   });
