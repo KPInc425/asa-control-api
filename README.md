@@ -1,54 +1,57 @@
 # ASA Docker Control API
 
-## Project Structure (2024)
+## Overview
 
-```
-asa-docker-control-api/
-├── config/         # Environment, NGINX, and .asa config files
-├── data/           # Persistent data (SQLite database, etc.)
-├── docker/         # Dockerfile and docker-compose files
-├── docs/           # Documentation
-├── logs/           # Log output (gitignored)
-├── metrics/        # Prometheus and monitoring configs
-├── middleware/     # Express/Fastify middleware
-├── routes/         # API route handlers
-├── scripts/        # PowerShell, batch, and shell scripts
-├── services/       # Service logic (move database.js here if desired)
-├── tests/          # Test scripts
-├── utils/          # Utility modules
-├── server.js       # Main API entry point
-├── package.json    # NPM dependencies
-└── ...             # Other supporting files
-```
+This is the backend API for the ASA Management Suite. It provides secure orchestration, configuration, and monitoring for ARK: Survival Ascended servers (both Docker and native Windows).
 
-## Persistent Data
-- **Database:** The SQLite database is now stored in `data/asa-data.sqlite`.
-- **Other runtime data** (sessions, user data, etc.) should also go in `data/`.
-- The `data/` directory and all database files are gitignored by default.
+- **Framework:** Node.js, Fastify
+- **Features:**
+  - REST API for server management
+  - RCON command support
+  - Config file management
+  - Real-time log streaming (Socket.IO)
+  - JWT authentication
+  - Prometheus metrics
+  - Modular route and service structure
 
-## Scripts
-- All setup, update, and utility scripts are in the `scripts/` directory.
-- Example: `scripts/update-service.bat`, `scripts/deploy-production.sh`, etc.
+## Setup
 
-## Docker
-- All Docker-related files are in the `docker/` directory.
-- Example: `docker/Dockerfile`, `docker/docker-compose.yml`, etc.
+1. Install dependencies:
+   ```sh
+   npm install
+   ```
+2. Copy and edit the environment file:
+   ```sh
+   cp env.example .env
+   # Edit .env as needed
+   ```
+3. Start the API:
+   ```sh
+   npm start
+   ```
 
-## Configuration
-- All environment files, NGINX configs, and .asa files are in the `config/` directory.
-- Example: `config/env.example`, `config/nginx-ark.ilgaming.xyz.conf`, etc.
+## API Endpoints
 
-## Tests
-- All test scripts are in the `tests/` directory.
+- `/api/containers` — Docker container management
+- `/api/rcon` — Send RCON commands
+- `/api/configs/:map` — Read/write config files
+- `/api/native-servers/:name/debug-rcon` — Debug server config and RCON
+- `/metrics` — Prometheus metrics
 
-## .gitignore
-- The `data/` directory and all SQLite/database files are ignored by default.
-- Log files, test output, and environment files are also ignored.
+See [API_INTERACTION_GUIDE.md](../docs/API_INTERACTION_GUIDE.md) for full details.
 
-## Recommendations
-- For best organization, consider moving `database.js` to `services/database.js` or `db/database.js`.
-- Keep only `server.js`, `package.json`, and essential files in the root.
+## Documentation Map
+
+- [RCON Authentication](./docs/RCON_AUTH.md)
+- [Password Migration Guide](../docs/PASSWORD_MIGRATION_GUIDE.md)
+- [Development Journey](../development-journey/README.md)
+- [Other Backend Docs](./docs/)
+
+## Security Notes
+- All sensitive data (e.g., RCON/admin passwords) is stored in `GameUserSettings.ini`.
+- All routes are protected by JWT authentication and permission checks.
+- Input is validated and sanitized at every endpoint.
 
 ---
 
-For more details, see the documentation in the `docs/` directory. 
+For migration stories and debugging adventures, see the [Development Journey](../development-journey/README.md). 
