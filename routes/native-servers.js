@@ -79,8 +79,10 @@ export default async function nativeServerRoutes(fastify, options) {
             lastUpdated: asaStats.lastUpdated || new Date().toISOString()
           };
         }
-        logger.info('[live-details] about to return (asa-query)', { success: true, details });
-        return { success: true, details };
+        const safeDetails = JSON.parse(JSON.stringify(details));
+        logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
+        logger.info('[live-details] about to return (asa-query)', { success: true, details: safeDetails });
+        return { success: true, details: safeDetails };
       }
       // If asa-query fails, fallback to RCON/local stats if server is running
       let isRunning = false;
@@ -134,8 +136,10 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: stats.memory || 0,
           lastUpdated: new Date().toISOString()
         };
-        logger.info('[live-details] about to return (RCON/local)', { success: true, details });
-        return { success: true, details };
+        const safeDetails = JSON.parse(JSON.stringify(details));
+        logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
+        logger.info('[live-details] about to return (RCON/local)', { success: true, details: safeDetails });
+        return { success: true, details: safeDetails };
       } else {
         const details = {
           name,
@@ -151,8 +155,10 @@ export default async function nativeServerRoutes(fastify, options) {
           memory: 0,
           lastUpdated: new Date().toISOString()
         };
-        logger.info('[live-details] about to return (offline default)', { success: true, details });
-        return { success: true, details };
+        const safeDetails = JSON.parse(JSON.stringify(details));
+        logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
+        logger.info('[live-details] about to return (offline default)', { success: true, details: safeDetails });
+        return { success: true, details: safeDetails };
       }
     } catch (error) {
       logger.error('[live-details] error', { error: error.message, stack: error.stack });
@@ -170,8 +176,10 @@ export default async function nativeServerRoutes(fastify, options) {
         memory: 0,
         lastUpdated: new Date().toISOString()
       };
-      logger.info('[live-details] about to return (error)', { success: true, details });
-      return reply.status(200).send({ success: true, details });
+      const safeDetails = JSON.parse(JSON.stringify(details));
+      logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
+      logger.info('[live-details] about to return (error)', { success: true, details: safeDetails });
+      return reply.status(200).send({ success: true, details: safeDetails });
     }
   });
 
