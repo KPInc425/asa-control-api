@@ -107,6 +107,11 @@ fastify.setErrorHandler(function (error, request, reply) {
 // Global hooks
 fastify.addHook('onRequest', metricsMiddleware);
 
+// Request logging hook
+fastify.addHook('onRequest', async (request, reply) => {
+  logger.info(`[REQUEST] ${request.method} ${request.url}`);
+});
+
 // Health check endpoint
 fastify.get('/health', async (request, reply) => {
   return {
@@ -132,23 +137,47 @@ fastify.get('/api/debug/auth', async (request, reply) => {
   };
 });
 
+// Debug endpoint to test route registration
+fastify.get('/api/debug/routes', async (request, reply) => {
+  logger.info('[DEBUG-ROUTES] Routes debug endpoint called');
+  return {
+    success: true,
+    message: 'Routes debug endpoint working!',
+    timestamp: new Date().toISOString(),
+    url: request.url,
+    method: request.method
+  };
+});
+
 // Metrics endpoint
 if (config.metrics.enabled) {
   fastify.get('/metrics', metricsHandler);
 }
 
 // Register routes
+logger.info('Registering routes...');
 await fastify.register(containerRoutes);
+logger.info('Container routes registered');
 await fastify.register(rconRoutes);
+logger.info('RCON routes registered');
 await fastify.register(configRoutes);
+logger.info('Config routes registered');
 await fastify.register(enhancedAuthRoutes);
+logger.info('Enhanced auth routes registered');
 await fastify.register(logsRoutes);
+logger.info('Logs routes registered');
 await fastify.register(environmentRoutes);
+logger.info('Environment routes registered');
 await fastify.register(nativeServerRoutes);
+logger.info('Native server routes registered');
 await fastify.register(saveFilesRoutes);
+logger.info('Save files routes registered');
 await fastify.register(discordRoutes);
+logger.info('Discord routes registered');
 await fastify.register(autoShutdownRoutes);
+logger.info('Auto shutdown routes registered');
 await fastify.register(provisioningRoutes);
+logger.info('Provisioning routes registered');
 
 // Make Socket.IO instance available to routes after it's created
 fastify.decorate('io', null);
