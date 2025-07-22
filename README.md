@@ -63,6 +63,34 @@ If you want to run the backend and frontend on different servers or containers:
 #### Frontend
 See [../asa-servers-dashboard/README.md](../asa-servers-dashboard/README.md) for frontend setup instructions.
 
+## Windows All-in-One Setup (PowerShell)
+
+For Windows 10/11 users running native ARK servers, you can use the provided PowerShell script for a one-click install and launch:
+
+1. Open PowerShell as Administrator.
+2. Navigate to the backend scripts directory:
+   ```powershell
+   cd asa-docker-control-api/scripts
+   ./install-all-in-one.ps1
+   ```
+   Or, from the dashboard scripts directory:
+   ```powershell
+   cd asa-servers-dashboard/scripts
+   ./install-all-in-one.ps1
+   ```
+3. This will install dependencies, build the frontend, and start both backend and frontend in new windows.
+4. Access the dashboard at [http://localhost:5173](http://localhost:5173) and the API at [http://localhost:4000](http://localhost:4000)
+
+## Linux All-in-One Setup (Bash)
+
+Linux users can use the bash script:
+
+```bash
+bash scripts/install-all-in-one.sh
+```
+
+Or use Docker Compose for containerized deployment (see `docker/` and documentation for details).
+
 ---
 
 For more details, see the frontend README and the documentation in the `docs/` folder.
