@@ -21,6 +21,7 @@ import discordRoutes from './routes/discord.js';
 import autoShutdownRoutes from './routes/auto-shutdown.js';
 import StaticServer from './services/static-server.js';
 import provisioningRoutes from './routes/provisioning/index.js';
+import { startChatPolling } from './services/chat-poller.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -583,6 +584,9 @@ const start = async () => {
 
     // Setup Socket.IO event handlers
     setupSocketIO();
+
+    // Start ARK chat polling
+    startChatPolling(io);
     
     logger.serviceEvent('info', `ASA Control API server started successfully`, {
       event: 'startup-complete',
