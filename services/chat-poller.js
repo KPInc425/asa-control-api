@@ -18,8 +18,14 @@ export function startChatPolling(io) {
       for (const server of servers) {
         if (server.status !== 'running') continue;
         try {
+          // Use the same RCON connection options as the API endpoint
+          const rconOptions = {
+            host: '127.0.0.1',
+            port: server.rconPort,
+            password: server.adminPassword || server.config?.adminPassword || 'admin123'
+          };
           // Get chat buffer via RCON
-          const response = await rconService.sendRconCommand(server.name, 'GetChat');
+          const response = await rconService.sendRconCommand(server.name, 'GetChat', rconOptions);
           if (!response.success || !response.response) continue;
           const chatBuffer = response.response.trim();
           const lastBuffer = lastChatBuffers.get(server.name) || '';
