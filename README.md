@@ -14,21 +14,58 @@ This is the backend API for the ASA Management Suite. It provides secure orchest
   - Prometheus metrics
   - Modular route and service structure
 
-## Setup
+## Deployment Options
 
-1. Install dependencies:
+### All-in-One (1-Click) Setup (Frontend + Backend on Same Server)
+
+If you want to run both the backend API and the dashboard on the same server (recommended for simple setups):
+
+1. Clone the repository and enter the project root:
+   ```sh
+   git clone <repo-url>
+   cd asa-management
+   ```
+2. Run the 1-click install script (proposed, see `scripts/install-all-in-one.sh`):
+   ```sh
+   ./scripts/install-all-in-one.sh
+   ```
+   This will:
+   - Install dependencies for both backend and frontend
+   - Copy example env files for both
+   - Build the frontend and backend
+   - Start both services (backend on port 4000, frontend on port 5173 or as static files)
+
+3. Access the dashboard at `http://localhost:5173` (or the port shown in the output).
+
+### Advanced Setup (Separate Frontend/Backend)
+
+If you want to run the backend and frontend on different servers or containers:
+
+#### Backend
+1. Enter the backend directory:
+   ```sh
+   cd asa-docker-control-api
+   ```
+2. Install dependencies:
    ```sh
    npm install
    ```
-2. Copy and edit the environment file:
+3. Copy and edit the environment file:
    ```sh
    cp env.example .env
    # Edit .env as needed
    ```
-3. Start the API:
+4. Start the API:
    ```sh
    npm start
    ```
+
+#### Frontend
+See [../asa-servers-dashboard/README.md](../asa-servers-dashboard/README.md) for frontend setup instructions.
+
+---
+
+For more details, see the frontend README and the documentation in the `docs/` folder.
 
 ## API Endpoints
 
