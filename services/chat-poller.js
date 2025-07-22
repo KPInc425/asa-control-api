@@ -45,6 +45,7 @@ export function startChatPolling(io) {
               }
               return { timestamp: '', sender: 'System', message: line };
             });
+            logger.info(`[ChatPoller] Emitting chat:update for ${server.name} with ${messages.length} messages`);
             io.emit('chat:update', { serverName: server.name, messages });
           }
         } catch (err) {
