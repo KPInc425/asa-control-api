@@ -1,10 +1,12 @@
 import rconService from './rcon.js';
-import serverManager from './server-manager.js';
+import { NativeServerManager } from './server-manager.js';
 import logger from '../utils/logger.js';
 
 const POLL_INTERVAL = 2000; // 2 seconds
 const lastChatBuffers = new Map(); // serverName -> last chat buffer string
 let pollerInterval = null;
+// Create server manager instance
+const serverManager = new NativeServerManager();
 
 export function startChatPolling(io) {
   if (pollerInterval) return; // Already running
