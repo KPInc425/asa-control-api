@@ -26,6 +26,7 @@ export function startChatPolling(io) {
           };
           // Get chat buffer via RCON
           const response = await rconService.sendRconCommand(server.name, 'GetChat', rconOptions);
+          logger.info(`[ChatPoller] Raw GetChat response for ${server.name}:`, response.response);
           if (!response.success || !response.response) continue;
           const chatBuffer = response.response.trim();
           const lastBuffer = lastChatBuffers.get(server.name) || '';
