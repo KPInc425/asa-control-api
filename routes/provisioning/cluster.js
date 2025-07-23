@@ -6,6 +6,9 @@ import config from '../../config/index.js';
 import { ServerProvisioner } from '../../services/server-provisioner.js';
 import { createServerManager } from '../../services/server-manager.js';
 import { createJob, updateJob, addJobProgress } from '../../services/job-manager.js';
+import archiver from 'archiver';
+import unzipper from 'unzipper';
+import os from 'os';
 
 // Register cluster-related provisioning routes
 export default async function clusterRoutes(fastify) {
@@ -319,6 +322,71 @@ export default async function clusterRoutes(fastify) {
     })();
   });
 
+  // Import cluster config from uploaded JSON
+  fastify.post('/api/provisioning/clusters/import', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const data = await request.file();
+      if (!data) {
+        return reply.status(400).send({
+          success: false,
+          message: 'No file uploaded'
+        });
+      }
+      let configContent = '';
+      for await (const chunk of data.file) {
+        configContent += chunk.toString();
+      }
+      let clusterConfig;
+      try {
+        clusterConfig = JSON.parse(configContent);
+      } catch (err) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Invalid JSON in uploaded file'
+        });
+      }
+      if (!clusterConfig.name) {
+        return reply.status(400).send({
+          success: false,
+          message: 'Cluster config must include a name'
+        });
+      }
+      // Check if cluster already exists
+      const clusterPath = path.join(provisioner.clustersPath, clusterConfig.name);
+      try {
+        await fs.access(clusterPath);
+        return reply.status(409).send({
+          success: false,
+          message: `Cluster with name '${clusterConfig.name}' already exists`
+        });
+      } catch {
+        // Not found, continue
+      }
+      // Provision the new cluster
+      try {
+        const result = await provisioner.createCluster(clusterConfig, false);
+        return reply.send({
+          success: true,
+          message: `Cluster '${clusterConfig.name}' imported successfully`,
+          data: result
+        });
+      } catch (err) {
+        return reply.status(500).send({
+          success: false,
+          message: `Failed to import cluster: ${err.message}`
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to import cluster config:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to import cluster config'
+      });
+    }
+  });
+
   // List clusters
   fastify.get('/api/provisioning/clusters', {
     preHandler: requirePermission('read')
@@ -416,6 +484,36 @@ export default async function clusterRoutes(fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to get cluster details'
+      });
+    }
+  });
+
+  // Export cluster config as downloadable JSON
+  fastify.get('/api/provisioning/clusters/:clusterName/export', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const clusterPath = path.join(provisioner.clustersPath, clusterName);
+      const configPath = path.join(clusterPath, 'cluster.json');
+      let configContent;
+      try {
+        configContent = await fs.readFile(configPath, 'utf8');
+      } catch (err) {
+        logger.warn(`Cluster config not found for export: ${clusterName}`);
+        return reply.status(404).send({
+          success: false,
+          message: `Cluster config not found for ${clusterName}`
+        });
+      }
+      reply.header('Content-Type', 'application/json');
+      reply.header('Content-Disposition', `attachment; filename="${clusterName}-cluster.json"`);
+      return reply.send(configContent);
+    } catch (error) {
+      logger.error(`Failed to export cluster config for ${request.params.clusterName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to export cluster config'
       });
     }
   });
@@ -801,6 +899,116 @@ export default async function clusterRoutes(fastify) {
     }
   });
 
+  // Restore cluster from backup ZIP
+  fastify.post('/api/provisioning/clusters/restore-backup', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const data = await request.parts();
+      let filePart = null;
+      let targetClusterName = null;
+      for await (const part of data) {
+        if (part.type === 'file' && part.fieldname === 'file') filePart = part;
+        if (part.type === 'field' && part.fieldname === 'targetClusterName') targetClusterName = part.value;
+      }
+      if (!filePart || !targetClusterName) {
+        return reply.status(400).send({ success: false, message: 'Missing file or targetClusterName' });
+      }
+      // Save uploaded ZIP to temp file
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cluster-restore-'));
+      const zipPath = path.join(tmpDir, 'backup.zip');
+      const out = await fs.open(zipPath, 'w');
+      for await (const chunk of filePart.file) {
+        await out.write(chunk);
+      }
+      await out.close();
+      // Extract ZIP
+      await fs.mkdir(path.join(tmpDir, 'extracted'));
+      await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(zipPath).pipe(unzipper.Extract({ path: path.join(tmpDir, 'extracted') }));
+        stream.on('close', resolve);
+        stream.on('error', reject);
+      });
+      // Read cluster-config.json from extracted
+      const extractedPath = path.join(tmpDir, 'extracted');
+      const configPath = path.join(extractedPath, 'cluster-config.json');
+      let backupConfig;
+      try {
+        const configContent = await fs.readFile(configPath, 'utf8');
+        backupConfig = JSON.parse(configContent);
+      } catch {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        return reply.status(400).send({ success: false, message: 'Invalid or missing cluster-config.json in backup' });
+      }
+      // Check if target cluster exists
+      const targetClusterPath = path.join(provisioner.clustersPath, targetClusterName);
+      let targetExists = false;
+      try {
+        await fs.access(targetClusterPath);
+        targetExists = true;
+      } catch {
+        targetExists = false;
+      }
+      if (targetExists) {
+        // Validate cluster name and server names/count
+        const targetConfigPath = path.join(targetClusterPath, 'cluster.json');
+        let targetConfig;
+        try {
+          const targetContent = await fs.readFile(targetConfigPath, 'utf8');
+          targetConfig = JSON.parse(targetContent);
+        } catch {
+          await fs.rm(tmpDir, { recursive: true, force: true });
+          return reply.status(400).send({ success: false, message: 'Target cluster config not found or invalid' });
+        }
+        if (backupConfig.name !== targetConfig.name) {
+          await fs.rm(tmpDir, { recursive: true, force: true });
+          return reply.status(400).send({ success: false, message: 'Cluster name in backup does not match target' });
+        }
+        const backupServers = (backupConfig.servers || []).map(s => s.name).sort();
+        const targetServers = (targetConfig.servers || []).map(s => s.name).sort();
+        if (backupServers.length !== targetServers.length || !backupServers.every((v, i) => v === targetServers[i])) {
+          await fs.rm(tmpDir, { recursive: true, force: true });
+          return reply.status(400).send({ success: false, message: 'Server names/count in backup do not match target cluster' });
+        }
+        // Overwrite saves/configs for matching servers
+        for (const serverName of backupServers) {
+          const src = path.join(extractedPath, serverName);
+          const dest = path.join(targetClusterPath, serverName);
+          // Overwrite Saved folder
+          const srcSaved = path.join(src, 'ShooterGame', 'Saved');
+          const destSaved = path.join(dest, 'ShooterGame', 'Saved');
+          try {
+            await fs.rm(destSaved, { recursive: true, force: true });
+          } catch {}
+          try {
+            await fs.cp(srcSaved, destSaved, { recursive: true });
+          } catch {}
+          // Optionally overwrite configs (Game.ini, etc.)
+          const srcConfig = path.join(src, 'ShooterGame', 'Config');
+          const destConfig = path.join(dest, 'ShooterGame', 'Config');
+          try {
+            await fs.cp(srcConfig, destConfig, { recursive: true });
+          } catch {}
+        }
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        return reply.send({ success: true, message: 'Cluster saves/configs restored to existing cluster' });
+      } else {
+        // Create new cluster from backup
+        try {
+          await fs.cp(extractedPath, targetClusterPath, { recursive: true });
+        } catch (err) {
+          await fs.rm(tmpDir, { recursive: true, force: true });
+          return reply.status(500).send({ success: false, message: 'Failed to create new cluster from backup' });
+        }
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        return reply.send({ success: true, message: 'Cluster restored from backup (new cluster created)' });
+      }
+    } catch (error) {
+      logger.error('Failed to restore cluster from backup:', error);
+      return reply.status(500).send({ success: false, message: 'Failed to restore cluster from backup' });
+    }
+  });
+
   // Backup individual server
   fastify.post('/api/provisioning/servers/:serverName/backup', {
     preHandler: requirePermission('write')
@@ -899,6 +1107,39 @@ export default async function clusterRoutes(fastify) {
         success: false,
         message: error.message
       });
+    }
+  });
+
+  // Download cluster backup as ZIP
+  fastify.get('/api/provisioning/clusters/:clusterName/download-backup', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { clusterName } = request.params;
+      const { backup } = request.query;
+      if (!backup) {
+        return reply.status(400).send({ success: false, message: 'Missing backup parameter' });
+      }
+      // Backups are stored in ../backups/<backup>
+      const backupsRoot = path.join(provisioner.clustersPath, '..', 'backups');
+      const backupPath = path.join(backupsRoot, backup);
+      // Check if backup folder exists
+      try {
+        await fs.access(backupPath);
+      } catch {
+        return reply.status(404).send({ success: false, message: 'Backup not found' });
+      }
+      // Set headers for ZIP download
+      reply.header('Content-Type', 'application/zip');
+      reply.header('Content-Disposition', `attachment; filename="${backup}.zip"`);
+      // Stream ZIP
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      archive.directory(backupPath, false);
+      archive.finalize();
+      return reply.send(archive);
+    } catch (error) {
+      logger.error('Failed to download cluster backup:', error);
+      return reply.status(500).send({ success: false, message: 'Failed to download cluster backup' });
     }
   });
 
