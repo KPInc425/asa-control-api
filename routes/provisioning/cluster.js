@@ -853,11 +853,11 @@ export default async function clusterRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { clusterName } = request.params;
-      const { destination } = request.body;
+      const { destination, saves = true, configs = true, logs = true, mods = true } = request.body;
       
-      logger.info(`Backing up cluster: ${clusterName}`, { destination });
+      logger.info(`Backing up cluster: ${clusterName}`, { destination, saves, configs, logs, mods });
       
-      const result = await provisioner.backupCluster(clusterName, destination);
+      const result = await provisioner.backupCluster(clusterName, destination, { saves, configs, logs, mods });
       
       return {
         success: true,
@@ -879,11 +879,11 @@ export default async function clusterRoutes(fastify) {
   }, async (request, reply) => {
     try {
       const { clusterName } = request.params;
-      const { source } = request.body;
+      const { source, saves = true, configs = true, logs = true, mods = true } = request.body;
       
-      logger.info(`Restoring cluster: ${clusterName}`, { source });
+      logger.info(`Restoring cluster: ${clusterName}`, { source, saves, configs, logs, mods });
       
-      const result = await provisioner.restoreCluster(clusterName, source);
+      const result = await provisioner.restoreCluster(clusterName, source, { saves, configs, logs, mods });
       
       return {
         success: true,
