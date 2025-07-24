@@ -1143,6 +1143,111 @@ export default async function clusterRoutes(fastify) {
     }
   });
 
+  // Download server backup as ZIP
+  fastify.get('/api/provisioning/servers/:serverName/download-backup', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { backup } = request.query;
+      if (!backup) {
+        return reply.status(400).send({ success: false, message: 'Missing backup parameter' });
+      }
+      // Server backups are stored in ../backups/servers/<backup>
+      const backupsRoot = path.join(provisioner.clustersPath, '..', 'backups', 'servers');
+      const backupPath = path.join(backupsRoot, backup);
+      // Check if backup folder exists
+      try {
+        await fs.access(backupPath);
+      } catch {
+        return reply.status(404).send({ success: false, message: 'Backup not found' });
+      }
+      // Set headers for ZIP download
+      reply.header('Content-Type', 'application/zip');
+      reply.header('Content-Disposition', `attachment; filename="${backup}.zip"`);
+      // Stream ZIP
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      archive.directory(backupPath, false);
+      archive.finalize();
+      return reply.send(archive);
+    } catch (error) {
+      logger.error('Failed to download server backup:', error);
+      return reply.status(500).send({ success: false, message: 'Failed to download server backup' });
+    }
+  });
+
+  // Restore server from backup ZIP
+  fastify.post('/api/provisioning/servers/:serverName/restore-backup', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const data = await request.parts();
+      let filePart = null;
+      for await (const part of data) {
+        if (part.type === 'file' && part.fieldname === 'file') filePart = part;
+      }
+      if (!filePart) {
+        return reply.status(400).send({ success: false, message: 'Missing file' });
+      }
+      // Save uploaded ZIP to temp file
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'server-restore-'));
+      const zipPath = path.join(tmpDir, 'backup.zip');
+      const out = await fs.open(zipPath, 'w');
+      for await (const chunk of filePart.file) {
+        await out.write(chunk);
+      }
+      await out.close();
+      // Extract ZIP
+      await fs.mkdir(path.join(tmpDir, 'extracted'));
+      await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(zipPath).pipe(unzipper.Extract({ path: path.join(tmpDir, 'extracted') }));
+        stream.on('close', resolve);
+        stream.on('error', reject);
+      });
+      // Find the server in clusters
+      const clusters = await provisioner.listClusters();
+      let targetServerPath = null;
+      let targetClusterName = null;
+      for (const cluster of clusters) {
+        if (cluster.config && cluster.config.servers) {
+          const server = cluster.config.servers.find(s => s.name === serverName);
+          if (server) {
+            targetServerPath = path.join(provisioner.clustersPath, cluster.name, serverName);
+            targetClusterName = cluster.name;
+            break;
+          }
+        }
+      }
+      if (!targetServerPath) {
+        await fs.rm(tmpDir, { recursive: true, force: true });
+        return reply.status(404).send({ success: false, message: 'Target server not found' });
+      }
+      // Overwrite saves/configs from backup
+      const extractedPath = path.join(tmpDir, 'extracted');
+      const srcSaved = path.join(extractedPath, 'ShooterGame', 'Saved');
+      const destSaved = path.join(targetServerPath, 'ShooterGame', 'Saved');
+      const srcConfig = path.join(extractedPath, 'ShooterGame', 'Config');
+      const destConfig = path.join(targetServerPath, 'ShooterGame', 'Config');
+      // Overwrite Saved folder
+      try {
+        await fs.rm(destSaved, { recursive: true, force: true });
+      } catch {}
+      try {
+        await fs.cp(srcSaved, destSaved, { recursive: true });
+      } catch {}
+      // Overwrite configs
+      try {
+        await fs.cp(srcConfig, destConfig, { recursive: true });
+      } catch {}
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      return reply.send({ success: true, message: 'Server saves/configs restored successfully' });
+    } catch (error) {
+      logger.error('Failed to restore server from backup:', error);
+      return reply.status(500).send({ success: false, message: 'Failed to restore server from backup' });
+    }
+  });
+
   // Debug endpoint for troubleshooting
   fastify.get('/api/provisioning/debug', {
     preHandler: requirePermission('read')
