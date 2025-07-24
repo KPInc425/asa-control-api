@@ -25,6 +25,7 @@
     "@fastify/multipart": "^8.3.1",
     "@fastify/rate-limit": "^8.0.0",
     "@fastify/websocket": "^8.3.1",
+    "archiver": "^7.0.1",
     "asa-query": "^0.1.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.2.0",
@@ -37,6 +38,7 @@
     "prom-client": "^15.0.0",
     "rcon": "^1.1.0",
     "socket.io": "^4.8.1",
+    "unzipper": "^0.12.3",
     "winston": "^3.11.0"
   },
   "devDependencies": {
