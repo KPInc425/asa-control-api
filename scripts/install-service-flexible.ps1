@@ -202,6 +202,16 @@ if (!$nssmPath) {
         
         $nssmPath = "C:\nssm\nssm.exe"
         Write-Host "NSSM downloaded and installed successfully" -ForegroundColor Green
+        # Wait for NSSM to be available
+        $retries = 5
+        while (-Not (Test-Path $nssmPath) -and $retries -gt 0) {
+            Start-Sleep -Seconds 1
+            $retries--
+        }
+        if (-Not (Test-Path $nssmPath)) {
+            Write-Host "NSSM was not found at $nssmPath after download. Please check permissions or download manually." -ForegroundColor Red
+            exit 1
+        }
     } catch {
         Write-Host "Failed to download NSSM: $($_.Exception.Message)" -ForegroundColor Red
         Read-Host "Press Enter to exit"
@@ -340,6 +350,21 @@ if ($installMethod -eq "current") {
 Write-Host ""
 Write-Host "The service should now respond properly to start/stop commands." -ForegroundColor Green
 Write-Host "NSSM is much more reliable than custom service wrappers!" -ForegroundColor Green
+
+# Ensure the service is running at the end
+$service = Get-Service $serviceName
+if ($service.Status -ne "Running") {
+    Write-Host "Starting service to complete installation..." -ForegroundColor Yellow
+    Start-Service $serviceName
+    Start-Sleep -Seconds 3
+    $service = Get-Service $serviceName
+    Write-Host "Service status after final start: $($service.Status)" -ForegroundColor Cyan
+    if ($service.Status -eq "Running") {
+        Write-Host "Service is now running." -ForegroundColor Green
+    } else {
+        Write-Host "Service could not be started automatically. Please start it manually." -ForegroundColor Red
+    }
+}
 
 Write-Host ""
 Read-Host "Press Enter to exit" 
