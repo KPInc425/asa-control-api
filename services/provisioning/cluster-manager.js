@@ -129,13 +129,37 @@ export class ClusterManager {
         const serverPath = path.join(clusterPath, serverName);
         // Pass progress callback to sub-managers
         this.asaBinariesManager.setProgressCallback((progress) => {
-          emit(progress.message || `Installing ASA binaries for ${serverName}`, 2);
+          let msg = progress && typeof progress === 'object' && 'message' in progress ? progress.message : progress;
+          if (typeof msg !== 'string') {
+            if (msg && typeof msg === 'object' && 'message' in msg && typeof msg.message === 'string') {
+              msg = msg.message;
+            } else {
+              msg = JSON.stringify(msg);
+            }
+          }
+          emit(msg || `Installing ASA binaries for ${serverName}`, 2);
         });
         this.configGenerator.setProgressCallback?.((progress) => {
-          emit(progress.message || `Writing config for ${serverName}`, 3);
+          let msg = progress && typeof progress === 'object' && 'message' in progress ? progress.message : progress;
+          if (typeof msg !== 'string') {
+            if (msg && typeof msg === 'object' && 'message' in msg && typeof msg.message === 'string') {
+              msg = msg.message;
+            } else {
+              msg = JSON.stringify(msg);
+            }
+          }
+          emit(msg || `Writing config for ${serverName}`, 3);
         });
         this.scriptGenerator.setProgressCallback?.((progress) => {
-          emit(progress.message || `Creating scripts for ${serverName}`, 4);
+          let msg = progress && typeof progress === 'object' && 'message' in progress ? progress.message : progress;
+          if (typeof msg !== 'string') {
+            if (msg && typeof msg === 'object' && 'message' in msg && typeof msg.message === 'string') {
+              msg = msg.message;
+            } else {
+              msg = JSON.stringify(msg);
+            }
+          }
+          emit(msg || `Creating scripts for ${serverName}`, 4);
         });
 
         // Step 2: Installing ASA binaries
