@@ -7,6 +7,8 @@ import { pipeline } from 'stream/promises';
 import https from 'https';
 import logger from '../utils/logger.js';
 import config from '../config/index.js';
+import os from 'os';
+import { existsSync, statSync } from 'fs';
 
 const execAsync = promisify(exec);
 
@@ -2631,5 +2633,64 @@ pause`;
       logger.error(`Failed to start cluster ${clusterName}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Get system information (disk, memory, SteamCMD, ASA, platform, etc.)
+   */
+  async getSystemInfo() {
+    // Disk space (Windows: use drive letter from basePath)
+    let diskSpace = { total: 0, free: 0, used: 0, usagePercent: 0, drive: '' };
+    try {
+      const basePath = this.basePath || 'C:\\';
+      const drive = path.parse(basePath).root;
+      // Try to use statSync for free/total (fallback, not as accurate as check-disk-space)
+      // If you have check-disk-space or similar, use it here for better accuracy
+      // Example: const { free, size } = await checkDiskSpace(drive);
+      // diskSpace = { total: size, free, used: size - free, usagePercent: Math.round(((size - free) / size) * 100), drive };
+      // Fallback: just show drive letter
+      diskSpace.drive = drive;
+    } catch {}
+    // Memory
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    // SteamCMD/ASA checks
+    const steamCmdInstalled = existsSync(this.steamCmdExe);
+    let asaBinariesInstalled = false;
+    try {
+      // Check for ASA server binary in clusters and servers
+      const clusterDirs = existsSync(this.clustersPath) ? await fs.readdir(this.clustersPath) : [];
+      for (const clusterName of clusterDirs) {
+        const serverDirs = existsSync(path.join(this.clustersPath, clusterName)) ? await fs.readdir(path.join(this.clustersPath, clusterName)) : [];
+        for (const serverName of serverDirs) {
+          const exePath = path.join(this.clustersPath, clusterName, serverName, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+          if (existsSync(exePath)) asaBinariesInstalled = true;
+        }
+      }
+      const serverDirs = existsSync(this.serversPath) ? await fs.readdir(this.serversPath) : [];
+      for (const serverName of serverDirs) {
+        const exePath = path.join(this.serversPath, serverName, 'binaries', 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+        if (existsSync(exePath)) asaBinariesInstalled = true;
+      }
+    } catch {}
+    return {
+      diskSpace,
+      memory: { total: totalMem, free: freeMem, used: totalMem - freeMem, usagePercent: Math.round(((totalMem - freeMem) / totalMem) * 100) },
+      steamCmdInstalled,
+      steamCmdPath: this.steamCmdExe,
+      asaBinariesInstalled,
+      basePath: this.basePath,
+      platform: os.platform(),
+      arch: os.arch(),
+      nodeVersion: process.version,
+      cpuCores: os.cpus().length
+    };
+  }
+
+  /**
+   * Set a progress callback for real-time feedback (used by routes for frontend progress)
+   */
+  setProgressCallback(cb) {
+    this.emitProgress = cb;
   }
 }
