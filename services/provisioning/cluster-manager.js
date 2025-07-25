@@ -418,7 +418,25 @@ export class ClusterManager {
         const savedPath = path.join(serverPath, 'ShooterGame', 'Saved');
         if (existsSync(savedPath)) {
           const destSaved = path.join(backupPath, serverDir, 'ShooterGame', 'Saved');
-          await this.copyDirectory(savedPath, destSaved);
+          // Only copy the latest 5 .ark files
+          await fs.mkdir(destSaved, { recursive: true });
+          const entries = await fs.readdir(savedPath, { withFileTypes: true });
+          // Filter for .ark files only
+          const arkFiles = entries.filter(e => e.isFile() && e.name.endsWith('.ark'));
+          // Get stats and sort by mtime descending
+          const arkFilesWithStats = await Promise.all(
+            arkFiles.map(async e => {
+              const filePath = path.join(savedPath, e.name);
+              const stat = await fs.stat(filePath);
+              return { name: e.name, mtime: stat.mtime, path: filePath };
+            })
+          );
+          arkFilesWithStats.sort((a, b) => b.mtime - a.mtime);
+          // Take only the latest 5
+          const latestArkFiles = arkFilesWithStats.slice(0, 5);
+          for (const file of latestArkFiles) {
+            await fs.copyFile(file.path, path.join(destSaved, file.name));
+          }
         }
       }
 

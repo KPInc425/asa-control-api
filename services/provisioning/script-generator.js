@@ -290,8 +290,28 @@ pause`;
       }
       
       if (!serverConfig) {
-        logger.warn(`[regenerateServerStartScript] Server config not found for: ${serverName}`);
-        throw new Error(`Server "${serverName}" not found`);
+        // Try to find the server config in the DB and check for clusterId/clusterName
+        const allServerConfigs = typeof getAllServerConfigs === 'function' ? getAllServerConfigs() : [];
+        let dbConfig = allServerConfigs.find(cfg => {
+          try {
+            const parsed = JSON.parse(cfg.config_data);
+            return parsed.name === serverName;
+          } catch { return false; }
+        });
+        let foundClusterId = null;
+        if (dbConfig) {
+          try {
+            const parsed = JSON.parse(dbConfig.config_data);
+            foundClusterId = parsed.clusterId || parsed.clusterName || (parsed.config && (parsed.config.clusterId || parsed.config.clusterName));
+          } catch {}
+        }
+        if (foundClusterId) {
+          logger.warn(`[regenerateServerStartScript] Server ${serverName} found in DB with clusterId/clusterName: ${foundClusterId}, but not in any cluster config. Likely a cluster config/DB mismatch.`);
+          throw new Error(`Server "${serverName}" found in DB with clusterId/clusterName (${foundClusterId}) but not in any cluster config. Please check for cluster/DB mismatch.`);
+        } else {
+          logger.warn(`[regenerateServerStartScript] Server config not found for: ${serverName}`);
+          throw new Error(`Server "${serverName}" not found in any cluster or DB config.`);
+        }
       }
       
       logger.info(`[regenerateServerStartScript] Found server in cluster: ${clusterName}`);
