@@ -1037,8 +1037,8 @@ pause`;
    * Install ASA binaries for a specific server in a cluster
    */
   async installASABinariesForServerInCluster(clusterName, serverName, foreground = false) {
+    const serverPath = path.join(this.clustersPath, clusterName, serverName); // Moved here for catch block scope
     try {
-      const serverPath = path.join(this.clustersPath, clusterName, serverName);
       logger.info(`Installing ASA binaries for server: ${serverName} in cluster ${clusterName} (foreground: ${foreground})`);
       await fs.mkdir(serverPath, { recursive: true });
       logger.info(`Created server directory: ${serverPath}`);
