@@ -1161,6 +1161,8 @@ export default async function clusterRoutes(fastify) {
       // Backups are stored in ../backups/<backup>
       const backupsRoot = path.join(provisioner.clustersPath, '..', 'backups');
       const backupPath = path.join(backupsRoot, backup);
+      // Add debug log for the exact path being checked
+      request.log.info(`[Download Backup] Checking path: ${backupPath}`);
       // Check if backup folder exists
       try {
         await fs.access(backupPath);
