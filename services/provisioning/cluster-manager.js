@@ -341,7 +341,8 @@ export class ClusterManager {
 
       // Create backup directory structure
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupName = `${clusterName}_backup_${timestamp}`;
+      // Use dash, not _backup_
+      const backupName = `${clusterName}-${timestamp}`;
       
       const backupDestination = customDestination || path.join(this.basePath, 'backups', 'clusters');
       await fs.mkdir(backupDestination, { recursive: true });
@@ -537,7 +538,8 @@ export class ClusterManager {
       const backupDirs = await fs.readdir(backupsPath);
       logger.info(`[listClusterBackups] Found backupDirs: ${JSON.stringify(backupDirs)}`);
       for (const backupDir of backupDirs) {
-        if (!backupDir.startsWith(clusterName + '_backup_')) continue;
+        // Match clusterName-... (not requiring _backup_)
+        if (!backupDir.startsWith(clusterName + '-')) continue;
         try {
           const backupPath = path.join(backupsPath, backupDir);
           const stat = await fs.stat(backupPath);
