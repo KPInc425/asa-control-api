@@ -50,9 +50,12 @@ async function debugDatabasePath() {
     
     console.log('\n6. Testing provisioner import...');
     try {
-      const { default: provisioner } = await import('./services/server-provisioner.js');
+      const { ServerProvisioner } = await import('./services/server-provisioner.js');
       console.log('   ✅ Provisioner imported successfully');
-      console.log(`   Provisioner type: ${typeof provisioner}`);
+      console.log(`   Provisioner type: ${typeof ServerProvisioner}`);
+      
+      const provisioner = new ServerProvisioner();
+      console.log('   ✅ Provisioner instance created');
       
       console.log('\n7. Testing createStartScriptInCluster...');
       await provisioner.createStartScriptInCluster(clusterId, serverPath, dbServerConfig);
