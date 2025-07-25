@@ -32,67 +32,124 @@ export class ClusterManager {
     const clusterName = clusterConfig.name;
     const clusterPath = path.join(this.clustersPath, clusterName);
 
-    try {
-      logger.info(`Creating cluster: ${clusterName} with ${clusterConfig.servers.length} servers`);
-      this.emitProgress?.(`Creating cluster: ${clusterName}`);
+    // Define step sequence
+    const steps = [
+      'Validating configuration',
+      'Creating cluster directory',
+      'Installing ASA binaries',
+      'Writing config files',
+      'Creating scripts',
+      'Finalizing'
+    ];
+    let currentStep = 0;
+    const emit = (msg, stepOverride) => {
+      const step = stepOverride !== undefined ? stepOverride : currentStep;
+      this.emitProgress?.({
+        step,
+        stepName: steps[step],
+        percent: Math.round((step / (steps.length - 1)) * 100),
+        message: msg
+      });
+    };
 
-      // Create cluster directory
+    try {
+      emit('Validating configuration...');
+      // Check required fields
+      if (!clusterConfig.name || !clusterConfig.name.trim()) {
+        emit('Cluster name is required', 0);
+        throw new Error('Cluster name is required');
+      }
+
+      // Check name format
+      if (clusterConfig.name && !/^[a-zA-Z0-9_-]+$/.test(clusterConfig.name)) {
+        emit('Cluster name can only contain letters, numbers, underscores, and hyphens', 0);
+        throw new Error('Cluster name can only contain letters, numbers, underscores, and hyphens');
+      }
+
+      // Check server count
+      if (clusterConfig.serverCount && (clusterConfig.serverCount < 1 || clusterConfig.serverCount > 10)) {
+        emit('Server count must be between 1 and 10', 0);
+        throw new Error('Server count must be between 1 and 10');
+      }
+
+      // Check base port
+      if (clusterConfig.basePort && (clusterConfig.basePort < 1024 || clusterConfig.basePort > 65535)) {
+        emit('Base port must be between 1024 and 65535', 0);
+        throw new Error('Base port must be between 1024 and 65535');
+      }
+
+      // Check if cluster already exists
+      if (clusterConfig.name) {
+        try {
+          const clusterPath = path.join(this.clustersPath, clusterConfig.name);
+          await fs.access(clusterPath);
+          emit(`Cluster "${clusterConfig.name}" already exists`, 0);
+          throw new Error(`Cluster "${clusterConfig.name}" already exists`);
+        } catch {
+          // Cluster doesn't exist, which is good
+        }
+      }
+
+      // Step 1: Create cluster directory
+      currentStep = 1;
+      emit(`Creating cluster directory: ${clusterPath}`);
       await fs.mkdir(clusterPath, { recursive: true });
 
-      // Create cluster configuration file
+      // Patch: Build servers array with correct port logic
+      const servers = clusterConfig.servers.map((server, index) => ({
+        ...server,
+        gamePort: server.gamePort ?? (clusterConfig.basePort + (index * 100)),
+        queryPort: server.queryPort ?? (clusterConfig.basePort + 1 + (index * 100)),
+        rconPort: server.rconPort ?? (clusterConfig.basePort + 2 + (index * 100)),
+      }));
+
+      // Save cluster config with correct ports
       const clusterConfigFile = {
+        ...clusterConfig,
         name: clusterName,
         created: new Date().toISOString(),
-        servers: clusterConfig.servers.map((server, index) => ({
-          name: server.name,
-          map: server.map || 'TheIsland',
-          gamePort: clusterConfig.basePort + (index * 100),
-          queryPort: clusterConfig.basePort + 1 + (index * 100),
-          rconPort: clusterConfig.basePort + 2 + (index * 100),
-          maxPlayers: server.maxPlayers || clusterConfig.maxPlayers || 70,
-          adminPassword: clusterConfig.adminPassword || 'admin123',
-          password: server.password || clusterConfig.password || '',
-          clusterId: clusterConfig.clusterId || clusterName,
-          clusterPassword: clusterConfig.clusterPassword || '',
-          customDynamicConfigUrl: server.customDynamicConfigUrl || clusterConfig.customDynamicConfigUrl || '',
-          disableBattleEye: server.disableBattleEye !== undefined ? server.disableBattleEye : (clusterConfig.disableBattleEye || false),
-          gameUserSettings: server.gameUserSettings,
-          gameIni: server.gameIni,
-          mods: server.mods || clusterConfig.mods || []
-        }))
+        servers
       };
-
       await fs.writeFile(
         path.join(clusterPath, 'cluster.json'),
         JSON.stringify(clusterConfigFile, null, 2)
       );
 
-      this.emitProgress?.(`Cluster configuration saved: ${clusterName}`);
-
-      // Install ASA binaries and create configurations for each server
-      for (const serverConfig of clusterConfigFile.servers) {
+      // Step 2: Install ASA binaries and create configs/scripts for each server
+      for (const [i, serverConfig] of servers.entries()) {
         const serverName = serverConfig.name;
-        logger.info(`Setting up server: ${serverName} in cluster ${clusterName}`);
-        this.emitProgress?.(`Setting up server: ${serverName}`);
+        const serverPath = path.join(clusterPath, serverName);
+        // Pass progress callback to sub-managers
+        this.asaBinariesManager.setProgressCallback((progress) => {
+          emit(progress.message || `Installing ASA binaries for ${serverName}`, 2);
+        });
+        this.configGenerator.setProgressCallback?.((progress) => {
+          emit(progress.message || `Writing config for ${serverName}`, 3);
+        });
+        this.scriptGenerator.setProgressCallback?.((progress) => {
+          emit(progress.message || `Creating scripts for ${serverName}`, 4);
+        });
 
-        // Install ASA binaries for this server
+        // Step 2: Installing ASA binaries
+        currentStep = 2;
+        emit(`Installing ASA binaries for ${serverName}`);
         await this.asaBinariesManager.installForServerInCluster(clusterName, serverName, foreground);
 
-        // Create server path
-        const serverPath = path.join(clusterPath, serverName);
-
-        // Create server configuration files
+        // Step 3: Writing config files
+        currentStep = 3;
+        emit(`Writing config files for ${serverName}`);
         await this.configGenerator.createServerConfigInCluster(clusterName, serverPath, serverConfig);
 
-        // Create start and stop scripts
+        // Step 4: Creating scripts
+        currentStep = 4;
+        emit(`Creating scripts for ${serverName}`);
         await this.scriptGenerator.createStartScriptInCluster(clusterName, serverPath, serverConfig);
         await this.scriptGenerator.createStopScriptInCluster(clusterName, serverPath, serverName);
-
-        this.emitProgress?.(`Server ${serverName} setup completed`);
       }
 
-      logger.info(`Cluster ${clusterName} created successfully with ${clusterConfigFile.servers.length} servers`);
-      this.emitProgress?.(`Cluster ${clusterName} created successfully`);
+      // Step 5: Finalizing
+      currentStep = 5;
+      emit(`Cluster ${clusterName} created successfully!`);
 
       return {
         success: true,
@@ -100,8 +157,8 @@ export class ClusterManager {
         cluster: clusterConfigFile
       };
     } catch (error) {
+      emit(`Failed to create cluster: ${error.message}`);
       logger.error(`Failed to create cluster ${clusterName}:`, error);
-      this.emitProgress?.(`Failed to create cluster ${clusterName}: ${error.message}`);
       throw new Error(error.message);
     }
   }

@@ -223,6 +223,10 @@ export class ServerProvisioner {
     return await this.configGenerator.getFinalConfigsForServer(serverName);
   }
 
+  async updateServerSettings(serverName, newSettings, options = {}) {
+    return await this.configGenerator.updateServerSettings(serverName, newSettings, options);
+  }
+
   // ========================================
   // SCRIPT GENERATION DELEGATIONS
   // ========================================
