@@ -202,7 +202,7 @@ export class ClusterManager {
     try {
       // Get all server configs from the DB
       const dbConfigs = getAllServerConfigs();
-      // Group servers by clusterId
+      // Group servers by clusterId/clusterName (ignore 'standalone')
       const clustersMap = new Map();
       for (const config of dbConfigs) {
         let serverConfig;
@@ -211,7 +211,8 @@ export class ClusterManager {
         } catch {
           continue;
         }
-        const clusterId = serverConfig.clusterId || 'standalone';
+        const clusterId = serverConfig.clusterId || serverConfig.clusterName;
+        if (!clusterId) continue; // Only group servers with a clusterId/clusterName
         if (!clustersMap.has(clusterId)) {
           clustersMap.set(clusterId, {
             name: clusterId,
@@ -221,7 +222,7 @@ export class ClusterManager {
         }
         clustersMap.get(clusterId).servers.push(serverConfig);
       }
-      // Convert to array and add metadata
+      // Only return clusters with 1+ servers (or 2+ if you want to hide single-server clusters)
       const clusters = Array.from(clustersMap.values()).map(cluster => ({
         name: cluster.name,
         created: cluster.created,
