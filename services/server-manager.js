@@ -943,7 +943,28 @@ export class NativeServerManager extends ServerManager {
       // Get database configurations only
       const dbConfigs = getAllServerConfigs();
       logger.info(`[NativeServerManager] Found ${dbConfigs.length} database configs`);
-      // Patch: fetch status for each server
+      // Patch: fetch status and cluster info for each server
+      // First, build a map of serverName -> clusterName
+      const clusterMap = {};
+      try {
+        const clusterDirs = await fs.readdir(this.clustersPath);
+        for (const clusterDir of clusterDirs) {
+          const clusterConfigPath = path.join(this.clustersPath, clusterDir, 'cluster.json');
+          if (existsSync(clusterConfigPath)) {
+            const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+            const clusterConfig = JSON.parse(clusterConfigContent);
+            if (Array.isArray(clusterConfig.servers)) {
+              for (const s of clusterConfig.servers) {
+                if (s.name) {
+                  clusterMap[s.name] = clusterDir;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn('Failed to build cluster map:', e.message);
+      }
       const servers = await Promise.all(dbConfigs.map(async config => {
         try {
           const serverConfig = JSON.parse(config.config_data);
@@ -955,13 +976,17 @@ export class NativeServerManager extends ServerManager {
           } catch (e) {
             logger.warn(`Failed to get status for ${config.name}:`, e.message);
           }
+          // Patch: set clusterName and isClusterServer
+          const clusterName = clusterMap[config.name] || null;
+          const isClusterServer = !!clusterName;
           return {
             name: config.name,
             ...serverConfig,
             status,
             type: 'native',
             config: serverConfig,
-            isClusterServer: !!serverConfig.clusterId,
+            isClusterServer,
+            clusterName,
             serverPath: serverConfig.serverPath || '',
             created: serverConfig.created || '',
           };
