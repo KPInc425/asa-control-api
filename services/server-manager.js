@@ -943,14 +943,22 @@ export class NativeServerManager extends ServerManager {
       // Get database configurations only
       const dbConfigs = getAllServerConfigs();
       logger.info(`[NativeServerManager] Found ${dbConfigs.length} database configs`);
-      const servers = dbConfigs.map(config => {
+      // Patch: fetch status for each server
+      const servers = await Promise.all(dbConfigs.map(async config => {
         try {
           const serverConfig = JSON.parse(config.config_data);
+          // Fetch status using getServerStatus
+          let status = 'unknown';
+          try {
+            const statusObj = await this.getServerStatus(config.name);
+            status = statusObj.status;
+          } catch (e) {
+            logger.warn(`Failed to get status for ${config.name}:`, e.message);
+          }
           return {
             name: config.name,
             ...serverConfig,
-            // Add any computed fields here (status, type, etc.)
-            status: 'unknown', // You can add status logic if needed
+            status,
             type: 'native',
             config: serverConfig,
             isClusterServer: !!serverConfig.clusterId,
@@ -961,8 +969,8 @@ export class NativeServerManager extends ServerManager {
           logger.warn(`Failed to parse database config for ${config.name}:`, error.message);
           return null;
         }
-      }).filter(Boolean);
-      return servers;
+      }));
+      return servers.filter(Boolean);
     } catch (error) {
       logger.error('Failed to list servers:', error);
       throw error;
