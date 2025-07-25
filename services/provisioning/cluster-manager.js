@@ -416,9 +416,13 @@ export class ClusterManager {
   }
 
   /**
-   * Backup a cluster
+   * Backup a cluster, keeping only the main save and N most recent backups per server
+   * @param {string} clusterName
+   * @param {string|null} customDestination
+   * @param {object} options - { maxBackupsPerServer: number }
    */
-  async backupCluster(clusterName, customDestination = null) {
+  async backupCluster(clusterName, customDestination = null, options = {}) {
+    const maxBackupsPerServer = options.maxBackupsPerServer ?? 2; // Default: 2 backups + main
     if (inProgressBackups.has(clusterName)) {
       throw new Error(`Backup already in progress for cluster "${clusterName}"`);
     }
@@ -436,7 +440,7 @@ export class ClusterManager {
       const backupPath = path.join(backupDestination, backupName);
       await fs.mkdir(backupPath, { recursive: true });
 
-      // Patch: Only backup ShooterGame/Saved/* for each server
+      // Only backup ShooterGame/Saved/* for each server
       const serverDirs = await fs.readdir(clusterPath);
       for (const serverDir of serverDirs) {
         const serverPath = path.join(clusterPath, serverDir);
@@ -445,7 +449,6 @@ export class ClusterManager {
         const savedPath = path.join(serverPath, 'ShooterGame', 'Saved');
         if (existsSync(savedPath)) {
           const destSaved = path.join(backupPath, serverDir, 'ShooterGame', 'Saved');
-          // Only copy the latest 5 .ark files
           await fs.mkdir(destSaved, { recursive: true });
           const entries = await fs.readdir(savedPath, { withFileTypes: true });
           // Filter for .ark files only
@@ -459,9 +462,12 @@ export class ClusterManager {
             })
           );
           arkFilesWithStats.sort((a, b) => b.mtime - a.mtime);
-          // Take only the latest 5
-          const latestArkFiles = arkFilesWithStats.slice(0, 5);
-          for (const file of latestArkFiles) {
+          // Always include the main save (e.g., TheIsland.ark)
+          const mainSave = arkFilesWithStats.find(f => /^[^.]+\.ark$/i.test(f.name));
+          // Take only the latest N backup saves (excluding the main save)
+          const backupSaves = arkFilesWithStats.filter(f => !/^[^.]+\.ark$/i.test(f.name)).slice(0, maxBackupsPerServer);
+          const filesToCopy = [mainSave, ...backupSaves].filter(Boolean);
+          for (const file of filesToCopy) {
             await fs.copyFile(file.path, path.join(destSaved, file.name));
           }
         }
@@ -475,7 +481,8 @@ export class ClusterManager {
         originalPath: clusterPath,
         backupPath: backupPath,
         type: 'cluster',
-        note: 'Only ShooterGame/Saved/* was backed up for each server.'
+        note: `Only ShooterGame/Saved/* was backed up for each server. Main save + up to ${maxBackupsPerServer} backup saves per server.`,
+        maxBackupsPerServer
       };
       await fs.writeFile(
         path.join(backupPath, 'backup-info.json'),

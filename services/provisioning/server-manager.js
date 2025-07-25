@@ -177,14 +177,17 @@ export class ServerManager {
   }
 
   /**
-   * Backup a standalone server
+   * Backup a server, keeping only the main save and N most recent backups
+   * @param {string} serverName
+   * @param {object} options - { maxBackups: number, ... }
    */
   async backupServer(serverName, options = {}) {
-    const { 
-      includeConfigs = true, 
-      includeBinaries = false, 
+    const {
+      includeConfigs = true,
+      includeBinaries = false,
       customDestination = null,
-      compressionLevel = 'fast' 
+      compressionLevel = 'fast',
+      maxBackups = 2 // Default: 2 backups + main
     } = options;
 
     const serverPath = path.join(this.serversPath, serverName);
@@ -207,10 +210,31 @@ export class ServerManager {
       const backupPath = path.join(backupDestination, backupName);
       await fs.mkdir(backupPath, { recursive: true });
 
-      // Backup saves (always included)
+      // Backup saves (only main + N most recent backups)
       const savesPath = path.join(serverPath, 'saves');
       if (existsSync(savesPath)) {
-        await this.copyDirectory(savesPath, path.join(backupPath, 'saves'));
+        const destSaves = path.join(backupPath, 'saves');
+        await fs.mkdir(destSaves, { recursive: true });
+        const entries = await fs.readdir(savesPath, { withFileTypes: true });
+        // Filter for .ark files only
+        const arkFiles = entries.filter(e => e.isFile() && e.name.endsWith('.ark'));
+        // Get stats and sort by mtime descending
+        const arkFilesWithStats = await Promise.all(
+          arkFiles.map(async e => {
+            const filePath = path.join(savesPath, e.name);
+            const stat = await fs.stat(filePath);
+            return { name: e.name, mtime: stat.mtime, path: filePath };
+          })
+        );
+        arkFilesWithStats.sort((a, b) => b.mtime - a.mtime);
+        // Always include the main save (e.g., TheIsland.ark)
+        const mainSave = arkFilesWithStats.find(f => /^[^.]+\.ark$/i.test(f.name));
+        // Take only the latest N backup saves (excluding the main save)
+        const backupSaves = arkFilesWithStats.filter(f => !/^[^.]+\.ark$/i.test(f.name)).slice(0, maxBackups);
+        const filesToCopy = [mainSave, ...backupSaves].filter(Boolean);
+        for (const file of filesToCopy) {
+          await fs.copyFile(file.path, path.join(destSaves, file.name));
+        }
       }
 
       // Backup configs if requested
@@ -245,9 +269,11 @@ export class ServerManager {
         options: {
           includeConfigs,
           includeBinaries,
-          compressionLevel
+          compressionLevel,
+          maxBackups
         },
-        type: 'server'
+        type: 'server',
+        note: `Only main save and up to ${maxBackups} backup saves were included in the backup.`
       };
 
       await fs.writeFile(
