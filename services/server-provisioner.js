@@ -184,7 +184,7 @@ export class ServerProvisioner {
   }
 
   async ensureASABinaries() {
-    return await this.installASABinaries();
+      return await this.installASABinaries();
   }
 
   async updateASABinaries() {

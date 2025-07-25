@@ -105,7 +105,13 @@ export default async function modRoutes(fastify) {
     try {
       const { serverName } = request.params;
       let serverModsData = getServerMods(serverName);
-      let additionalMods = serverModsData.filter(mod => mod.enabled === 1).map(mod => parseInt(mod.mod_id));
+      
+      // Filter out null mod_ids and parse valid ones, then filter out NaN results
+      let additionalMods = serverModsData
+        .filter(mod => mod.enabled === 1 && mod.mod_id !== null && mod.mod_id !== undefined && mod.mod_id !== '')
+        .map(mod => parseInt(mod.mod_id))
+        .filter(modId => !isNaN(modId));
+      
       let excludeSharedMods = false;
       
       // Get server settings (excludeSharedMods flag)
@@ -153,17 +159,20 @@ export default async function modRoutes(fastify) {
       const { serverName } = request.params;
       const { additionalMods, excludeSharedMods } = request.body;
       
+      // Filter out null/undefined values from additionalMods
+      let cleanAdditionalMods = [];
+      if (Array.isArray(additionalMods)) {
+        cleanAdditionalMods = additionalMods.filter(modId => 
+          modId !== null && modId !== undefined && modId !== '' && !isNaN(modId)
+        );
+      }
+      
       // Update server mods in DB
       deleteAllServerMods(serverName);
       
-      // Add each mod (with validation to prevent NULL modId)
-      for (const modId of additionalMods) {
-        // Validate modId before inserting
-        if (modId !== null && modId !== undefined && modId !== '' && !isNaN(modId)) {
-          upsertServerMod(serverName, modId.toString(), null, true, false);
-        } else {
-          logger.warn(`Skipping invalid modId for server ${serverName}: ${modId}`);
-        }
+      // Add each mod (using cleaned array)
+      for (const modId of cleanAdditionalMods) {
+        upsertServerMod(serverName, modId.toString(), null, true, false);
       }
       
       // Store server settings (excludeSharedMods flag)
