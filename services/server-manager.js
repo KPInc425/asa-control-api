@@ -557,6 +557,14 @@ export class NativeServerManager extends ServerManager {
       const dbConfig = this.getServerConfigFromDatabase(name);
       if (dbConfig) {
         logger.info(`Found server ${name} in database`);
+        
+        // Add serverPath to database config for compatibility with start process
+        const clusterId = dbConfig.clusterId || dbConfig.clusterName;
+        if (clusterId) {
+          const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+          dbConfig.serverPath = path.join(clustersPath, clusterId, name);
+        }
+        
         return dbConfig;
       }
       
@@ -1383,12 +1391,15 @@ export class NativeServerManager extends ServerManager {
             const finalMods = await this.getFinalModListForServer(serverName);
             let excludeSharedMods = dbServerConfig.excludeSharedMods === true;
             
+            // Filter out null values from finalMods
+            const cleanMods = finalMods.filter(modId => modId !== null && modId !== undefined && modId !== '');
+
             // Update server config with new mods and preserve excludeSharedMods flag
-            dbServerConfig.mods = finalMods;
+            dbServerConfig.mods = cleanMods;
             dbServerConfig.excludeSharedMods = excludeSharedMods;
             
             logger.info(`[regenerateServerStartScript][DB] Updated server config for ${serverName}:`, {
-              mods: finalMods,
+              mods: cleanMods,
               excludeSharedMods: excludeSharedMods
             });
             
@@ -1397,7 +1408,8 @@ export class NativeServerManager extends ServerManager {
             const serverPath = path.join(clustersPath, clusterId, serverName);
             
             // Import the provisioner dynamically to avoid circular dependencies
-            const { default: provisioner } = await import('./services/server-provisioner.js');
+            const { ServerProvisioner } = await import('./services/server-provisioner.js');
+            const provisioner = new ServerProvisioner();
             await provisioner.createStartScriptInCluster(clusterId, serverPath, dbServerConfig);
             
             logger.info(`[regenerateServerStartScript][DB] Regenerated start.bat for server ${serverName} in cluster ${clusterId}`);
@@ -1422,18 +1434,21 @@ export class NativeServerManager extends ServerManager {
           if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
             const serverConfig = clusterConfig.servers.find(s => s.name === serverName);
             if (serverConfig) {
-              // Get mod configuration for this server
-              const finalMods = await this.getFinalModListForServer(serverName);
-              
-              // Preserve the excludeSharedMods flag from the database
-              let excludeSharedMods = false;
-              if (dbServerConfig) {
-                excludeSharedMods = dbServerConfig.excludeSharedMods === true;
-              }
-              
-              // Update server config with new mods and preserve excludeSharedMods flag
-              serverConfig.mods = finalMods;
-              serverConfig.excludeSharedMods = excludeSharedMods;
+                                           // Get mod configuration for this server
+                             const finalMods = await this.getFinalModListForServer(serverName);
+
+                             // Filter out null values from finalMods
+                             const cleanMods = finalMods.filter(modId => modId !== null && modId !== undefined && modId !== '');
+
+                             // Preserve the excludeSharedMods flag from the database
+                             let excludeSharedMods = false;
+                             if (dbServerConfig) {
+                               excludeSharedMods = dbServerConfig.excludeSharedMods === true;
+                             }
+
+                             // Update server config with new mods and preserve excludeSharedMods flag
+                             serverConfig.mods = cleanMods;
+                             serverConfig.excludeSharedMods = excludeSharedMods;
               
               logger.info(`[regenerateServerStartScript] Updated server config for ${serverName}:`, {
                 mods: finalMods,
