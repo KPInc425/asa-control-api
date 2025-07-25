@@ -971,7 +971,9 @@ pause`;
         // Merge globalMods into each server's mods array unless excludeSharedMods is true
         const globalMods = Array.isArray(clusterConfig.globalMods) ? clusterConfig.globalMods : [];
         for (let i = 0; i < clusterConfig.servers.length; i++) {
-          const serverConfig = { ...clusterConfig.servers[i] };
+          // Remove any incoming serverPath property to avoid confusion
+          const { serverPath: _ignored, ...restServerConfig } = clusterConfig.servers[i];
+          const serverConfig = { ...restServerConfig };
           // Exclude global mods for Club ARK or if excludeSharedMods is set
           const isClubArk = serverConfig.name && (serverConfig.name.toLowerCase().includes('club') || serverConfig.name.toLowerCase().includes('bobs'));
           const excludeSharedMods = serverConfig.excludeSharedMods === true || isClubArk;
