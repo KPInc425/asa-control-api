@@ -1159,7 +1159,7 @@ export default async function clusterRoutes(fastify) {
         return reply.status(400).send({ success: false, message: 'Missing backup parameter' });
       }
       // Backups are stored in ../backups/<backup>
-      const backupsRoot = path.join(provisioner.clustersPath, '..', 'backups');
+      const backupsRoot = path.join(provisioner.clustersPath, '..', 'backups', 'clusters');
       const backupPath = path.join(backupsRoot, backup);
       // Add debug log for the exact path being checked
       logger.info(`[Download Backup] Checking path: ${backupPath}`);
