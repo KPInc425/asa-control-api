@@ -1373,20 +1373,19 @@ export class NativeServerManager extends ServerManager {
   async regenerateServerStartScript(serverName) {
     try {
       // First, try to get server config from database (primary source)
-      const dbServerConfig = getServerConfig(serverName);
-      if (dbServerConfig && dbServerConfig.config_data) {
+      const dbServerConfig = this.getServerConfigFromDatabase(serverName);
+      if (dbServerConfig) {
         try {
-          const parsedConfig = JSON.parse(dbServerConfig.config_data);
-          const clusterId = parsedConfig.clusterId || parsedConfig.clusterName;
+          const clusterId = dbServerConfig.clusterId || dbServerConfig.clusterName;
           
           if (clusterId) {
             // Get mod configuration for this server
             const finalMods = await this.getFinalModListForServer(serverName);
-            let excludeSharedMods = parsedConfig.excludeSharedMods === true;
+            let excludeSharedMods = dbServerConfig.excludeSharedMods === true;
             
             // Update server config with new mods and preserve excludeSharedMods flag
-            parsedConfig.mods = finalMods;
-            parsedConfig.excludeSharedMods = excludeSharedMods;
+            dbServerConfig.mods = finalMods;
+            dbServerConfig.excludeSharedMods = excludeSharedMods;
             
             logger.info(`[regenerateServerStartScript][DB] Updated server config for ${serverName}:`, {
               mods: finalMods,
@@ -1399,13 +1398,13 @@ export class NativeServerManager extends ServerManager {
             
             // Import the provisioner dynamically to avoid circular dependencies
             const { default: provisioner } = await import('./server-provisioner.js');
-            await provisioner.createStartScriptInCluster(clusterId, serverPath, parsedConfig);
+            await provisioner.createStartScriptInCluster(clusterId, serverPath, dbServerConfig);
             
             logger.info(`[regenerateServerStartScript][DB] Regenerated start.bat for server ${serverName} in cluster ${clusterId}`);
             return;
           }
         } catch (err) {
-          logger.warn(`[regenerateServerStartScript][DB] Failed to parse config_data for ${serverName}:`, err.message);
+          logger.warn(`[regenerateServerStartScript][DB] Failed to process config for ${serverName}:`, err.message);
         }
       }
       
@@ -1428,13 +1427,8 @@ export class NativeServerManager extends ServerManager {
               
               // Preserve the excludeSharedMods flag from the database
               let excludeSharedMods = false;
-              if (dbServerConfig && dbServerConfig.config_data) {
-                try {
-                  const parsedConfig = JSON.parse(dbServerConfig.config_data);
-                  excludeSharedMods = parsedConfig.excludeSharedMods === true;
-                } catch (error) {
-                  logger.warn(`Failed to parse server config for ${serverName}:`, error.message);
-                }
+              if (dbServerConfig) {
+                excludeSharedMods = dbServerConfig.excludeSharedMods === true;
               }
               
               // Update server config with new mods and preserve excludeSharedMods flag
