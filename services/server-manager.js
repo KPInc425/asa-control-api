@@ -578,7 +578,10 @@ export class NativeServerManager extends ServerManager {
             }
           }
         } catch (error) {
-          logger.warn(`Error reading cluster ${clusterDir}:`, error.message);
+          logger.warn(`Error reading cluster ${clusterDir}:`, error && (error.stack || error.message || error));
+          // Graceful fallback: if error is file not found, just continue
+          if (error.code === 'ENOENT') continue;
+          // If error is something else, try to continue, but log it
         }
       }
       
