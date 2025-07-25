@@ -233,6 +233,15 @@ export default async function clusterRoutes(fastify) {
         tamingMultiplier,
         disableBattleEye
       };
+      // Check if SteamCMD is installed before creating cluster
+      const steamCmdStatus = await provisioner.checkSteamCmdAvailability();
+      if (!steamCmdStatus.success) {
+        return reply.status(400).send({
+          success: false,
+          message: 'SteamCMD is not installed. Please initialize the system before creating a cluster.',
+          details: steamCmdStatus.message
+        });
+      }
       const result = await provisioner.createCluster(clusterConfig, foreground);
       return {
         success: true,
@@ -262,6 +271,35 @@ export default async function clusterRoutes(fastify) {
     });
     const job = createJob('create-cluster', { clusterName: clusterConfig.name });
     logger.info(`Created job ${job.id} for cluster creation`);
+    
+    // Check if SteamCMD is installed before starting cluster creation job
+    try {
+      const steamCmdStatus = await provisioner.checkSteamCmdAvailability();
+      if (!steamCmdStatus.success) {
+        updateJob(job.id, { 
+          status: 'failed', 
+          error: 'SteamCMD is not installed. Please initialize the system before creating a cluster.',
+          details: steamCmdStatus.message
+        });
+        return reply.status(400).send({
+          success: false,
+          message: 'SteamCMD is not installed. Please initialize the system before creating a cluster.',
+          details: steamCmdStatus.message,
+          jobId: job.id
+        });
+      }
+    } catch (error) {
+      updateJob(job.id, { 
+        status: 'failed', 
+        error: 'Failed to check system requirements'
+      });
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to check system requirements',
+        jobId: job.id
+      });
+    }
+    
     // Respond immediately with job ID
     reply.send({ success: true, jobId: job.id });
     // Start cluster creation in background
