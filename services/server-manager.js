@@ -616,8 +616,15 @@ export class NativeServerManager extends ServerManager {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', name);
+        // Fallback to cluster-based path structure
+        const clusterId = serverInfo?.clusterId || serverInfo?.clusterName;
+        if (clusterId) {
+          const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+          serverPath = path.join(clustersPath, clusterId, name);
+        } else {
+          // Final fallback to old structure
+          serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', name);
+        }
       }
 
       const logFiles = [];
@@ -1002,8 +1009,15 @@ export class NativeServerManager extends ServerManager {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Fallback to default path
-        serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', name);
+        // Fallback to cluster-based path structure
+        const clusterId = serverInfo?.clusterId || serverInfo?.clusterName;
+        if (clusterId) {
+          const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+          serverPath = path.join(clustersPath, clusterId, name);
+        } else {
+          // Final fallback to old structure
+          serverPath = path.join(process.env.NATIVE_BASE_PATH || 'C:\\ARK', 'servers', name);
+        }
       }
 
       // Look for logs in the Saved directory structure
@@ -1011,12 +1025,16 @@ export class NativeServerManager extends ServerManager {
         // ARK server logs in Saved/Logs
         path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'ShooterGame.log'),
         path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'ShooterGame_*.log'),
+        // Windows server logs
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'WindowsServer.log'),
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'WindowsServer_*.log'),
         // Alternative log locations
         path.join(serverPath, 'logs', `${name}.log`),
         path.join(serverPath, 'ShooterGame.log'),
-        // Windows server logs
-        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'WindowsServer.log'),
-        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', 'WindowsServer_*.log')
+        // Additional ARK log locations
+        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', '*.log'),
+        path.join(serverPath, 'Saved', 'Logs', 'ShooterGame.log'),
+        path.join(serverPath, 'Saved', 'Logs', '*.log')
       ];
 
       let logContent = '';
@@ -1028,15 +1046,38 @@ export class NativeServerManager extends ServerManager {
             // Handle wildcard patterns
             const logDir = path.dirname(logPath);
             const logFiles = await fs.readdir(logDir);
-            const matchingFiles = logFiles.filter(file => file.startsWith('ShooterGame') || file.startsWith('WindowsServer'));
+            let matchingFiles = [];
+            
+            if (logPath.includes('ShooterGame_*.log')) {
+              matchingFiles = logFiles.filter(file => file.startsWith('ShooterGame') && file.endsWith('.log'));
+            } else if (logPath.includes('WindowsServer_*.log')) {
+              matchingFiles = logFiles.filter(file => file.startsWith('WindowsServer') && file.endsWith('.log'));
+            } else if (logPath.includes('*.log')) {
+              matchingFiles = logFiles.filter(file => file.endsWith('.log'));
+            } else {
+              matchingFiles = logFiles.filter(file => file.startsWith('ShooterGame') || file.startsWith('WindowsServer'));
+            }
             
             if (matchingFiles.length > 0) {
-              // Get the most recent log file
-              const latestLogFile = matchingFiles.sort().pop();
-              const fullLogPath = path.join(logDir, latestLogFile);
-              logContent = await fs.readFile(fullLogPath, 'utf8');
+              // Get the most recent log file by modification time
+              const logFilesWithStats = await Promise.all(
+                matchingFiles.map(async (file) => {
+                  const fullPath = path.join(logDir, file);
+                  try {
+                    const stat = await fs.stat(fullPath);
+                    return { file, fullPath, mtime: stat.mtime };
+                  } catch (error) {
+                    return { file, fullPath, mtime: new Date(0) };
+                  }
+                })
+              );
+              
+              const latestLogFile = logFilesWithStats
+                .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())[0];
+              
+              logContent = await fs.readFile(latestLogFile.fullPath, 'utf8');
               foundLog = true;
-              logger.info(`Found log file for ${name}: ${fullLogPath}`);
+              logger.info(`Found most recent log file for ${name}: ${latestLogFile.fullPath} (modified: ${latestLogFile.mtime})`);
               break;
             }
           } else {
