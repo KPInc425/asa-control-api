@@ -943,27 +943,17 @@ export class NativeServerManager extends ServerManager {
       // Get database configurations only
       const dbConfigs = getAllServerConfigs();
       logger.info(`[NativeServerManager] Found ${dbConfigs.length} database configs`);
-      // Patch: fetch status and cluster info for each server
-      // First, build a map of serverName -> clusterName
+      // Build clusterMap from DB configs only
       const clusterMap = {};
-      try {
-        const clusterDirs = await fs.readdir(this.clustersPath);
-        for (const clusterDir of clusterDirs) {
-          const clusterConfigPath = path.join(this.clustersPath, clusterDir, 'cluster.json');
-          if (existsSync(clusterConfigPath)) {
-            const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
-            const clusterConfig = JSON.parse(clusterConfigContent);
-            if (Array.isArray(clusterConfig.servers)) {
-              for (const s of clusterConfig.servers) {
-                if (s.name) {
-                  clusterMap[s.name] = clusterDir;
-                }
-              }
-            }
+      for (const config of dbConfigs) {
+        try {
+          const serverConfig = JSON.parse(config.config_data);
+          if (serverConfig.clusterName) {
+            clusterMap[config.name] = serverConfig.clusterName;
           }
+        } catch (e) {
+          logger.warn(`Failed to parse config for cluster mapping: ${config.name}`, e.message);
         }
-      } catch (e) {
-        logger.warn('Failed to build cluster map:', e.message);
       }
       const servers = await Promise.all(dbConfigs.map(async config => {
         try {
@@ -976,7 +966,7 @@ export class NativeServerManager extends ServerManager {
           } catch (e) {
             logger.warn(`Failed to get status for ${config.name}:`, e.message);
           }
-          // Patch: set clusterName and isClusterServer
+          // Set clusterName and isClusterServer from DB config only
           const clusterName = clusterMap[config.name] || null;
           const isClusterServer = !!clusterName;
           return {
