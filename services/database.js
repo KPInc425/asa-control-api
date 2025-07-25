@@ -644,6 +644,15 @@ function deleteSharedMod(modId) {
  * @param {boolean} [excludeSharedMods]
  */
 function upsertServerMod(serverName, modId, modName = null, enabled = true, excludeSharedMods = false) {
+  // Validate inputs to prevent NULL modId
+  if (!modId || modId === null || modId === undefined || modId === '') {
+    throw new Error(`Invalid modId: ${modId}. modId cannot be null, undefined, or empty.`);
+  }
+  
+  if (!serverName || serverName === null || serverName === undefined || serverName === '') {
+    throw new Error(`Invalid serverName: ${serverName}. serverName cannot be null, undefined, or empty.`);
+  }
+  
   const stmt = db.prepare(`
     INSERT INTO server_mods (server_name, mod_id, mod_name, enabled, excludeSharedMods) 
     VALUES (?, ?, ?, ?, ?) 

@@ -148,7 +148,12 @@ export class ClusterManager {
         if (server.mods && Array.isArray(server.mods)) {
           logger.info(`[createCluster] Importing ${server.mods.length} server mods for ${server.name}`);
           for (const modId of server.mods) {
-            await upsertServerMod(server.name, modId.toString(), null, true, server.excludeSharedMods || false);
+            // Validate modId before inserting
+            if (modId !== null && modId !== undefined && modId !== '' && !isNaN(modId)) {
+              await upsertServerMod(server.name, modId.toString(), null, true, server.excludeSharedMods || false);
+            } else {
+              logger.warn(`[createCluster] Skipping invalid modId for server ${server.name}: ${modId}`);
+            }
           }
         }
         

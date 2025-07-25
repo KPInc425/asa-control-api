@@ -156,9 +156,14 @@ export default async function modRoutes(fastify) {
       // Update server mods in DB
       deleteAllServerMods(serverName);
       
-      // Add each mod
+      // Add each mod (with validation to prevent NULL modId)
       for (const modId of additionalMods) {
-        upsertServerMod(serverName, modId.toString(), null, true, false);
+        // Validate modId before inserting
+        if (modId !== null && modId !== undefined && modId !== '' && !isNaN(modId)) {
+          upsertServerMod(serverName, modId.toString(), null, true, false);
+        } else {
+          logger.warn(`Skipping invalid modId for server ${serverName}: ${modId}`);
+        }
       }
       
       // Store server settings (excludeSharedMods flag)
