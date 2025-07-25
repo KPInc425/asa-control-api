@@ -943,13 +943,22 @@ export class NativeServerManager extends ServerManager {
       // Get database configurations only
       const dbConfigs = getAllServerConfigs();
       logger.info(`[NativeServerManager] Found ${dbConfigs.length} database configs`);
-      // Build clusterMap from DB configs only
+      // Build clusterMap from DB configs only, robust to legacy shapes
       const clusterMap = {};
+      function getClusterId(config) {
+        return (
+          config.clusterId ||
+          config.clusterName ||
+          (config.config && (config.config.clusterId || config.config.clusterName)) ||
+          null
+        );
+      }
       for (const config of dbConfigs) {
         try {
           const serverConfig = JSON.parse(config.config_data);
-          if (serverConfig.clusterName) {
-            clusterMap[config.name] = serverConfig.clusterName;
+          const clusterId = getClusterId(serverConfig);
+          if (clusterId) {
+            clusterMap[config.name] = clusterId;
           }
         } catch (e) {
           logger.warn(`Failed to parse config for cluster mapping: ${config.name}`, e.message);
@@ -966,8 +975,8 @@ export class NativeServerManager extends ServerManager {
           } catch (e) {
             logger.warn(`Failed to get status for ${config.name}:`, e.message);
           }
-          // Set clusterName and isClusterServer from DB config only
-          const clusterName = clusterMap[config.name] || null;
+          // Set clusterName and isClusterServer robustly
+          const clusterName = getClusterId(serverConfig);
           const isClusterServer = !!clusterName;
           return {
             name: config.name,
