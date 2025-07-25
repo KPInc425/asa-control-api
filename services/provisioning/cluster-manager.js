@@ -524,4 +524,50 @@ export class ClusterManager {
     this.clustersPath = clustersPath;
     this.serversPath = serversPath;
   }
+
+  /**
+   * List backups for a cluster
+   */
+  async listClusterBackups(clusterName) {
+    try {
+      const backups = [];
+      const backupsPath = path.join(this.basePath, 'backups', 'clusters');
+      if (!existsSync(backupsPath)) {
+        return backups;
+      }
+      const backupDirs = await fs.readdir(backupsPath);
+      for (const backupDir of backupDirs) {
+        if (!backupDir.startsWith(clusterName + '_backup_')) continue;
+        try {
+          const backupPath = path.join(backupsPath, backupDir);
+          const stat = await fs.stat(backupPath);
+          if (stat.isDirectory()) {
+            const backupInfoPath = path.join(backupPath, 'backup-info.json');
+            let backupInfo = {
+              clusterName,
+              backupName: backupDir,
+              created: stat.birthtime.toISOString(),
+              backupPath,
+              size: stat.size,
+              type: 'cluster',
+              hasMetadata: false
+            };
+            if (existsSync(backupInfoPath)) {
+              try {
+                const infoContent = await fs.readFile(backupInfoPath, 'utf8');
+                Object.assign(backupInfo, JSON.parse(infoContent), { hasMetadata: true });
+              } catch {}
+            }
+            backups.push(backupInfo);
+          }
+        } catch (error) {
+          logger.error(`Error reading cluster backup ${backupDir}:`, error);
+        }
+      }
+      return backups.sort((a, b) => new Date(b.created) - new Date(a.created));
+    } catch (error) {
+      logger.error('Failed to list cluster backups:', error);
+      return [];
+    }
+  }
 } 
