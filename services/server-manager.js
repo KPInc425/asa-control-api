@@ -1219,6 +1219,37 @@ export class NativeServerManager extends ServerManager {
       }
       
       throw new Error(`Server ${serverName} not found in any cluster`);
+      // --- DB-driven fallback ---
+      // Try to find the server config in the DB
+      const dbServerConfig = getServerConfig(serverName);
+      if (dbServerConfig && dbServerConfig.config_data) {
+        try {
+          const parsedConfig = JSON.parse(dbServerConfig.config_data);
+          const clusterId = parsedConfig.clusterId || parsedConfig.clusterName || (parsedConfig.config && (parsedConfig.config.clusterId || parsedConfig.config.clusterName));
+          if (clusterId) {
+            // Get mod configuration for this server
+            const finalMods = await this.getFinalModListForServer(serverName);
+            let excludeSharedMods = parsedConfig.excludeSharedMods === true;
+            // Update server config with new mods and preserve excludeSharedMods flag
+            parsedConfig.mods = finalMods;
+            parsedConfig.excludeSharedMods = excludeSharedMods;
+            logger.info(`[regenerateServerStartScript][DB] Updated server config for ${serverName}:`, {
+              mods: finalMods,
+              excludeSharedMods: excludeSharedMods
+            });
+            // Regenerate start.bat file using the provisioner
+            const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+            const serverPath = path.join(clustersPath, clusterId, serverName);
+            const { default: provisioner } = await import('./server-provisioner.js');
+            await provisioner.createStartScriptInCluster(clusterId, serverPath, parsedConfig);
+            logger.info(`[regenerateServerStartScript][DB] Regenerated start.bat for server ${serverName} in cluster ${clusterId}`);
+            return;
+          }
+        } catch (err) {
+          logger.warn(`[regenerateServerStartScript][DB] Failed to parse config_data for ${serverName}:`, err.message);
+        }
+      }
+      // --- End DB-driven fallback ---
     } catch (error) {
       logger.error(`Failed to regenerate start script for ${serverName}:`, error);
       throw error;
