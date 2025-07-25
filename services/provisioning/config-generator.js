@@ -309,68 +309,36 @@ OverrideOfficialDifficulty=5.0
    */
   async updateServerSettings(serverName, newSettings, options = {}) {
     const { regenerateConfigs = true, regenerateScripts = true } = options;
-    
     try {
-      logger.info(`Updating server settings for ${serverName}`, { 
+      logger.info(`Updating server settings for ${serverName}`, {
         disableBattleEye: newSettings.disableBattleEye,
         regenerateConfigs,
         regenerateScripts
       });
-      
-      // Find server configuration file
-      let serverConfigPath = null;
-      let serverConfig = null;
-      
-      // Check standalone servers first
+      // Try standalone servers first
       const standaloneServerPath = path.join(this.serversPath, serverName, 'server-config.json');
-      try {
-        await fs.access(standaloneServerPath);
-        serverConfigPath = standaloneServerPath;
-        const configContent = await fs.readFile(serverConfigPath, 'utf8');
-        serverConfig = JSON.parse(configContent);
-        logger.info(`Found standalone server config: ${serverConfigPath}`);
-      } catch {
-        // Not a standalone server, check clusters
+      if (existsSync(standaloneServerPath)) {
+        let configContent = await fs.readFile(standaloneServerPath, 'utf8');
+        let serverConfig = JSON.parse(configContent);
+        const updatedConfig = { ...serverConfig, ...newSettings };
+        await fs.writeFile(standaloneServerPath, JSON.stringify(updatedConfig, null, 2));
+        logger.info(`Standalone server configuration updated for ${serverName}`);
+        return { success: true, message: `Server settings updated for ${serverName}`, updatedConfig };
       }
-      
-      // If not found in standalone servers, check clusters
-      if (!serverConfigPath) {
-        const clusters = await this.listClusters();
-        for (const cluster of clusters) {
-          if (cluster.config && cluster.config.servers) {
-            const server = cluster.config.servers.find(s => s.name === serverName);
-            if (server) {
-              const clusterServerPath = path.join(this.clustersPath, cluster.name, serverName, 'server-config.json');
-              try {
-                await fs.access(clusterServerPath);
-                serverConfigPath = clusterServerPath;
-                const configContent = await fs.readFile(serverConfigPath, 'utf8');
-                serverConfig = JSON.parse(configContent);
-                logger.info(`Found cluster server config: ${serverConfigPath}`);
-                break;
-              } catch {
-                continue;
-              }
-            }
-          }
+      // Try clusters
+      const clusterDirs = await fs.readdir(this.clustersPath);
+      for (const clusterName of clusterDirs) {
+        const clusterServerPath = path.join(this.clustersPath, clusterName, serverName, 'server-config.json');
+        if (existsSync(clusterServerPath)) {
+          let configContent = await fs.readFile(clusterServerPath, 'utf8');
+          let serverConfig = JSON.parse(configContent);
+          const updatedConfig = { ...serverConfig, ...newSettings };
+          await fs.writeFile(clusterServerPath, JSON.stringify(updatedConfig, null, 2));
+          logger.info(`Cluster server configuration updated for ${serverName} in cluster ${clusterName}`);
+          return { success: true, message: `Server settings updated for ${serverName} in cluster ${clusterName}`, updatedConfig };
         }
       }
-      
-      if (!serverConfigPath || !serverConfig) {
-        throw new Error(`Server configuration not found for ${serverName}`);
-      }
-      
-      // Update server configuration
-      const updatedConfig = { ...serverConfig, ...newSettings };
-      await fs.writeFile(serverConfigPath, JSON.stringify(updatedConfig, null, 2));
-      
-      logger.info(`Server configuration updated for ${serverName}`);
-      
-      return {
-        success: true,
-        message: `Server settings updated for ${serverName}`,
-        updatedConfig
-      };
+      throw new Error(`Server configuration not found for ${serverName}`);
     } catch (error) {
       logger.error(`Failed to update server settings for ${serverName}:`, error);
       throw error;
