@@ -16,15 +16,24 @@ function broadcastJobUpdate(jobId, job) {
     // Get the Socket.IO instance from the global scope
     const io = global.io || global.fastify?.io;
     if (io) {
+      // Patch: calculate progress percent from latest progress message if available
+      let progressPercent = 50;
+      let latestMsg = job.progress && job.progress.length > 0 ? job.progress[job.progress.length - 1].message : 'Processing...';
+      if (job.status === 'completed') {
+        progressPercent = 100;
+      } else if (job.status === 'failed') {
+        progressPercent = 0;
+      } else if (typeof latestMsg === 'object' && latestMsg !== null && typeof latestMsg.percent === 'number') {
+        progressPercent = latestMsg.percent;
+      }
       const progressData = {
         jobId: job.id,
         status: job.status,
-        progress: job.status === 'completed' ? 100 : job.status === 'failed' ? 0 : 50,
-        message: job.progress && job.progress.length > 0 ? job.progress[job.progress.length - 1].message : 'Processing...',
+        progress: progressPercent,
+        message: latestMsg,
         error: job.error,
         result: job.result
       };
-      
       logger.debug(`Broadcasting job progress for ${jobId}:`, progressData);
       io.emit('job-progress', progressData);
     } else {

@@ -8,6 +8,8 @@ import { upsertServerConfig, getAllServerConfigs, deleteServerConfig } from '../
  * Cluster Manager
  * Handles all cluster-related operations: create, delete, list, start, backup, restore
  */
+const inProgressBackups = new Set();
+
 export class ClusterManager {
   constructor(basePath, clustersPath, serversPath, asaBinariesManager, configGenerator, scriptGenerator) {
     this.basePath = basePath;
@@ -32,6 +34,15 @@ export class ClusterManager {
   async createCluster(clusterConfig, foreground = false) {
     const clusterName = clusterConfig.name;
     const clusterPath = path.join(this.clustersPath, clusterName);
+
+    // Patch: Ensure every server has clusterId and clusterName
+    if (Array.isArray(clusterConfig.servers)) {
+      clusterConfig.servers = clusterConfig.servers.map(server => ({
+        ...server,
+        clusterId: clusterName,
+        clusterName: clusterName
+      }));
+    }
 
     // Define step sequence
     const steps = [
@@ -381,28 +392,35 @@ export class ClusterManager {
    * Backup a cluster
    */
   async backupCluster(clusterName, customDestination = null) {
+    if (inProgressBackups.has(clusterName)) {
+      throw new Error(`Backup already in progress for cluster "${clusterName}"`);
+    }
+    inProgressBackups.add(clusterName);
     const clusterPath = path.join(this.clustersPath, clusterName);
-
     try {
       logger.info(`Creating backup for cluster: ${clusterName}`);
-
-      // Check if cluster exists
       if (!existsSync(clusterPath)) {
         throw new Error(`Cluster "${clusterName}" does not exist`);
       }
-
-      // Create backup directory structure
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      // Use dash, not _backup_
       const backupName = `${clusterName}-${timestamp}`;
-      
       const backupDestination = customDestination || path.join(this.basePath, 'backups', 'clusters');
       await fs.mkdir(backupDestination, { recursive: true });
-
       const backupPath = path.join(backupDestination, backupName);
+      await fs.mkdir(backupPath, { recursive: true });
 
-      // Copy cluster directory to backup location
-      await this.copyDirectory(clusterPath, backupPath);
+      // Patch: Only backup ShooterGame/Saved/* for each server
+      const serverDirs = await fs.readdir(clusterPath);
+      for (const serverDir of serverDirs) {
+        const serverPath = path.join(clusterPath, serverDir);
+        const stat = await fs.stat(serverPath);
+        if (!stat.isDirectory()) continue;
+        const savedPath = path.join(serverPath, 'ShooterGame', 'Saved');
+        if (existsSync(savedPath)) {
+          const destSaved = path.join(backupPath, serverDir, 'ShooterGame', 'Saved');
+          await this.copyDirectory(savedPath, destSaved);
+        }
+      }
 
       // Create backup metadata
       const backupInfo = {
@@ -411,14 +429,13 @@ export class ClusterManager {
         created: new Date().toISOString(),
         originalPath: clusterPath,
         backupPath: backupPath,
-        type: 'cluster'
+        type: 'cluster',
+        note: 'Only ShooterGame/Saved/* was backed up for each server.'
       };
-
       await fs.writeFile(
         path.join(backupPath, 'backup-info.json'),
         JSON.stringify(backupInfo, null, 2)
       );
-
       logger.info(`Cluster backup created: ${backupPath}`);
       return {
         success: true,
@@ -429,6 +446,8 @@ export class ClusterManager {
     } catch (error) {
       logger.error(`Failed to backup cluster ${clusterName}:`, error);
       throw error;
+    } finally {
+      inProgressBackups.delete(clusterName);
     }
   }
 
