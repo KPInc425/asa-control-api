@@ -2,7 +2,14 @@ import fs from 'fs/promises';
 import path from 'path';
 import { existsSync } from 'fs';
 import logger from '../../utils/logger.js';
-import { upsertServerConfig, getAllServerConfigs, deleteServerConfig } from '../database.js';
+import { 
+  upsertServerConfig, 
+  getAllServerConfigs, 
+  deleteServerConfig,
+  upsertSharedMod,
+  upsertServerMod,
+  upsertServerSettings
+} from '../database.js';
 
 /**
  * Cluster Manager
@@ -126,6 +133,31 @@ export class ClusterManager {
       for (const server of servers) {
         await upsertServerConfig(server.name, JSON.stringify(server));
       }
+      
+      // Import global mods from cluster config
+      if (clusterConfig.globalMods && Array.isArray(clusterConfig.globalMods)) {
+        logger.info(`[createCluster] Importing ${clusterConfig.globalMods.length} global mods for cluster ${clusterName}`);
+        for (const modId of clusterConfig.globalMods) {
+          await upsertSharedMod(modId.toString(), null, true);
+        }
+      }
+      
+      // Import server-specific mods and settings
+      for (const server of servers) {
+        // Import server mods
+        if (server.mods && Array.isArray(server.mods)) {
+          logger.info(`[createCluster] Importing ${server.mods.length} server mods for ${server.name}`);
+          for (const modId of server.mods) {
+            await upsertServerMod(server.name, modId.toString(), null, true, server.excludeSharedMods || false);
+          }
+        }
+        
+        // Import server settings (excludeSharedMods, etc.)
+        if (server.excludeSharedMods !== undefined) {
+          await upsertServerSettings(server.name, server.excludeSharedMods);
+        }
+      }
+      
       // --- Optionally: upsert cluster metadata to DB here (future) ---
       // await upsertCluster(clusterName, JSON.stringify(clusterConfigFile));
       // --- Remove JSON file write (DB is now source of truth) ---
