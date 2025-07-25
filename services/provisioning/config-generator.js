@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { existsSync } from 'fs';
 import logger from '../../utils/logger.js';
+import { upsertServerConfig } from '../database.js';
 
 /**
  * Configuration Generator
@@ -322,6 +323,7 @@ OverrideOfficialDifficulty=5.0
         let serverConfig = JSON.parse(configContent);
         const updatedConfig = { ...serverConfig, ...newSettings };
         await fs.writeFile(standaloneServerPath, JSON.stringify(updatedConfig, null, 2));
+        await upsertServerConfig(serverName, JSON.stringify(updatedConfig));
         logger.info(`Standalone server configuration updated for ${serverName}`);
         return { success: true, message: `Server settings updated for ${serverName}`, updatedConfig };
       }
@@ -334,7 +336,23 @@ OverrideOfficialDifficulty=5.0
           let serverConfig = JSON.parse(configContent);
           const updatedConfig = { ...serverConfig, ...newSettings };
           await fs.writeFile(clusterServerPath, JSON.stringify(updatedConfig, null, 2));
+          await upsertServerConfig(serverName, JSON.stringify(updatedConfig));
           logger.info(`Cluster server configuration updated for ${serverName} in cluster ${clusterName}`);
+
+          // PATCH: Also update the cluster.json
+          const clusterJsonPath = path.join(this.clustersPath, clusterName, 'cluster.json');
+          if (existsSync(clusterJsonPath)) {
+            let clusterConfig = JSON.parse(await fs.readFile(clusterJsonPath, 'utf8'));
+            if (Array.isArray(clusterConfig.servers)) {
+              const idx = clusterConfig.servers.findIndex(s => s.name === serverName);
+              if (idx !== -1) {
+                clusterConfig.servers[idx] = { ...clusterConfig.servers[idx], ...newSettings };
+                await fs.writeFile(clusterJsonPath, JSON.stringify(clusterConfig, null, 2));
+                logger.info(`Cluster config updated for server ${serverName} in cluster ${clusterName}`);
+              }
+            }
+          }
+
           return { success: true, message: `Server settings updated for ${serverName} in cluster ${clusterName}`, updatedConfig };
         }
       }

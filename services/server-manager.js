@@ -939,150 +939,29 @@ export class NativeServerManager extends ServerManager {
       logger.info(`[NativeServerManager] listServers() called. Base path: ${this.basePath}`);
       logger.info(`[NativeServerManager] Servers path: ${this.serversPath}`);
       logger.info(`[NativeServerManager] Clusters path: ${this.clustersPath}`);
-      
-      const servers = [];
-      
-      // Get database configurations
+
+      // Get database configurations only
       const dbConfigs = getAllServerConfigs();
       logger.info(`[NativeServerManager] Found ${dbConfigs.length} database configs`);
-      const dbConfigMap = new Map();
-      dbConfigs.forEach(config => {
+      const servers = dbConfigs.map(config => {
         try {
-          const parsedConfig = JSON.parse(config.config_data);
-          dbConfigMap.set(config.name, parsedConfig);
+          const serverConfig = JSON.parse(config.config_data);
+          return {
+            name: config.name,
+            ...serverConfig,
+            // Add any computed fields here (status, type, etc.)
+            status: 'unknown', // You can add status logic if needed
+            type: 'native',
+            config: serverConfig,
+            isClusterServer: !!serverConfig.clusterId,
+            serverPath: serverConfig.serverPath || '',
+            created: serverConfig.created || '',
+          };
         } catch (error) {
           logger.warn(`Failed to parse database config for ${config.name}:`, error.message);
+          return null;
         }
-      });
-      
-      // List individual servers
-      try {
-        const serverDirs = await fs.readdir(this.serversPath);
-        for (const serverName of serverDirs) {
-          try {
-            const serverPath = path.join(this.serversPath, serverName);
-            const stat = await fs.stat(serverPath);
-            
-            if (stat.isDirectory()) {
-              const configPath = path.join(serverPath, 'server-config.json');
-              let serverConfig = {};
-              
-              try {
-                const configContent = await fs.readFile(configPath, 'utf8');
-                serverConfig = JSON.parse(configContent);
-              } catch {
-                // Use defaults if config not found
-              }
-              
-              // Merge with database config (database takes precedence)
-              const dbConfig = dbConfigMap.get(serverName);
-              if (dbConfig) {
-                serverConfig = { ...serverConfig, ...dbConfig };
-                logger.info(`Merged database config for server ${serverName}`, { 
-                  disableBattleEye: serverConfig.disableBattleEye 
-                });
-              }
-              
-              const isRunning = await this.isRunning(serverName);
-              
-              servers.push({
-                name: serverName,
-                status: isRunning ? 'running' : 'stopped',
-                image: 'ASA Server',
-                created: serverConfig.created || stat.birthtime.toISOString(),
-                type: 'native', // These are native servers
-                map: serverConfig.map || 'TheIsland',
-                gamePort: serverConfig.gamePort || 7777, // Use gamePort consistently
-                queryPort: serverConfig.queryPort || 27015,
-                rconPort: serverConfig.rconPort || 32330,
-                maxPlayers: serverConfig.maxPlayers || 70,
-                serverPath: serverPath,
-                config: serverConfig,
-                isClusterServer: false,
-                // Include BattleEye setting
-                disableBattleEye: serverConfig.disableBattleEye || false
-              });
-            }
-          } catch (error) {
-            logger.warn(`Error reading server ${serverName}:`, error.message);
-          }
-        }
-      } catch (error) {
-        logger.warn(`Could not read servers directory:`, error.message);
-      }
-      
-      // List cluster servers
-      try {
-        const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
-        logger.info(`[NativeServerManager] Scanning clusters path: ${clustersPath}`);
-        const clusterDirs = await fs.readdir(clustersPath);
-        logger.info(`[NativeServerManager] Found cluster directories: ${clusterDirs.join(', ')}`);
-        
-        for (const clusterDir of clusterDirs) {
-          try {
-            const clusterConfigPath = path.join(clustersPath, clusterDir, 'cluster.json');
-            const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
-            const clusterConfig = JSON.parse(clusterConfigContent);
-            
-            if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
-              for (const server of clusterConfig.servers) {
-                // Merge with database config (database takes precedence)
-                const dbConfig = dbConfigMap.get(server.name);
-                if (dbConfig) {
-                  Object.assign(server, dbConfig);
-                  logger.info(`Merged database config for cluster server ${server.name}`, { 
-                    disableBattleEye: server.disableBattleEye 
-                  });
-                }
-                
-                const isRunning = await this.isRunning(server.name);
-                const serverInfo = {
-                  name: server.name,
-                  status: isRunning ? 'running' : 'stopped',
-                  image: 'ASA Cluster Server',
-                  created: new Date().toISOString(),
-                  type: 'native', // These are native servers, not cluster-server type
-                  clusterName: clusterConfig.name || clusterDir,
-                  map: server.map || 'TheIsland',
-                  gamePort: server.gamePort || 7777, // Use gamePort consistently
-                  queryPort: server.queryPort || 27015,
-                  rconPort: server.rconPort || 32330,
-                  maxPlayers: server.maxPlayers || 70,
-                  serverPath: server.serverPath || path.join(clustersPath, clusterDir, server.name),
-                  config: server,
-                  isClusterServer: true,
-                  // Include BattleEye setting
-                  disableBattleEye: server.disableBattleEye || false,
-                  // Additional fields from enhanced format
-                  password: server.serverPassword || '',
-                  adminPassword: server.adminPassword || '',
-                  clusterId: server.clusterId || clusterConfig.name,
-                  clusterPassword: server.clusterPassword || '',
-                  clusterOwner: server.clusterOwner || 'Admin',
-                  gameUserSettings: server.gameUserSettings || {},
-                  gameIni: server.gameIni || {},
-                  // Enhanced mod management
-                  modManagement: clusterConfig.modManagement || {
-                    sharedMods: clusterConfig.globalMods || [],
-                    serverMods: {},
-                    excludedServers: []
-                  }
-                };
-                
-                logger.info(`Adding cluster server to servers list: ${server.name}`, { 
-                  disableBattleEye: serverInfo.disableBattleEye 
-                });
-                servers.push(serverInfo);
-              }
-            }
-          } catch (error) {
-            logger.warn(`Error reading cluster ${clusterDir}:`, error.message);
-          }
-        }
-      } catch (error) {
-        logger.warn(`Could not read clusters directory:`, error.message);
-      }
-      
+      }).filter(Boolean);
       return servers;
     } catch (error) {
       logger.error('Failed to list servers:', error);

@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { existsSync } from 'fs';
 import logger from '../../utils/logger.js';
+import { upsertServerConfig } from '../database.js';
 
 /**
  * Cluster Manager
@@ -110,10 +111,17 @@ export class ClusterManager {
         created: new Date().toISOString(),
         servers
       };
-      await fs.writeFile(
-        path.join(clusterPath, 'cluster.json'),
-        JSON.stringify(clusterConfigFile, null, 2)
-      );
+      // --- DB-native: upsert each server config into the DB ---
+      for (const server of servers) {
+        await upsertServerConfig(server.name, JSON.stringify(server));
+      }
+      // --- Optionally: upsert cluster metadata to DB here (future) ---
+      // await upsertCluster(clusterName, JSON.stringify(clusterConfigFile));
+      // --- Remove JSON file write (DB is now source of truth) ---
+      // await fs.writeFile(
+      //   path.join(clusterPath, 'cluster.json'),
+      //   JSON.stringify(clusterConfigFile, null, 2)
+      // );
 
       // Step 2: Install ASA binaries and create configs/scripts for each server
       for (const [i, serverConfig] of servers.entries()) {
