@@ -1046,6 +1046,7 @@ pause`;
       await fs.mkdir(clusterDir, { recursive: true });
       await fs.mkdir(serverPath, { recursive: true });
       logger.info(`Installing ASA binaries for server: ${serverName} in cluster ${clusterName} (foreground: ${foreground})`);
+      this.emitProgress?.(`Created server directory: ${serverPath}`);
       await fs.mkdir(serverPath, { recursive: true });
       logger.info(`Created server directory: ${serverPath}`);
       this.emitProgress?.(`Created server directory: ${serverPath}`);
