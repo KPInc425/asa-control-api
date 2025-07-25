@@ -3,20 +3,12 @@ import { db } from './services/database.js';
 async function autoCleanupDatabase() {
   console.log('=== Auto Database Cleanup ===\n');
   
-  // Check for server_mods with null values
-  const nullServerMods = db.prepare('SELECT * FROM server_mods WHERE server_name IS NULL OR mod_id IS NULL').all();
-  console.log(`Found ${nullServerMods.length} server mods with NULL values`);
+  // Check for server_mods with null mod_id (this is the problematic one)
+  const nullServerMods = db.prepare('SELECT * FROM server_mods WHERE mod_id IS NULL').all();
+  console.log(`Found ${nullServerMods.length} server mods with NULL mod_id`);
   
   for (const mod of nullServerMods) {
     console.log(`  - ID: ${mod.id}, Server: ${mod.server_name}, Mod: ${mod.mod_id}`);
-  }
-  
-  // Check for shared_mods with null mod_id
-  const nullSharedMods = db.prepare('SELECT * FROM shared_mods WHERE mod_id IS NULL').all();
-  console.log(`Found ${nullSharedMods.length} shared mods with NULL mod_id`);
-  
-  for (const mod of nullSharedMods) {
-    console.log(`  - ID: ${mod.id}, Mod: ${mod.mod_id}, Name: ${mod.mod_name}`);
   }
   
   // Check for server_configs with null server_name
@@ -26,26 +18,37 @@ async function autoCleanupDatabase() {
   for (const config of nullServerConfigs) {
     console.log(`  - ID: ${config.id}, Name: ${config.server_name}`);
   }
+  
+  // Check for shared_mods with null mod_id
+  const nullSharedMods = db.prepare('SELECT * FROM shared_mods WHERE mod_id IS NULL').all();
+  console.log(`Found ${nullSharedMods.length} shared mods with NULL mod_id`);
+  
+  for (const mod of nullSharedMods) {
+    console.log(`  - ID: ${mod.id}, Mod: ${mod.mod_id}, Name: ${mod.mod_name}`);
+  }
   console.log();
   
   // Perform cleanup
   let totalRemoved = 0;
   
+  // Remove server mods with NULL mod_id (this is the main issue)
   if (nullServerMods.length > 0) {
-    const result = db.prepare('DELETE FROM server_mods WHERE server_name IS NULL OR mod_id IS NULL').run();
-    console.log(`✓ Removed ${result.changes} NULL server mods`);
+    const result = db.prepare('DELETE FROM server_mods WHERE mod_id IS NULL').run();
+    console.log(`✓ Removed ${result.changes} server mods with NULL mod_id`);
     totalRemoved += result.changes;
   }
   
-  if (nullSharedMods.length > 0) {
-    const result = db.prepare('DELETE FROM shared_mods WHERE mod_id IS NULL').run();
-    console.log(`✓ Removed ${result.changes} NULL shared mods`);
-    totalRemoved += result.changes;
-  }
-  
+  // Remove server configs with NULL server_name
   if (nullServerConfigs.length > 0) {
     const result = db.prepare('DELETE FROM server_configs WHERE server_name IS NULL').run();
-    console.log(`✓ Removed ${result.changes} NULL server configs`);
+    console.log(`✓ Removed ${result.changes} server configs with NULL server_name`);
+    totalRemoved += result.changes;
+  }
+  
+  // Remove shared mods with NULL mod_id
+  if (nullSharedMods.length > 0) {
+    const result = db.prepare('DELETE FROM shared_mods WHERE mod_id IS NULL').run();
+    console.log(`✓ Removed ${result.changes} shared mods with NULL mod_id`);
     totalRemoved += result.changes;
   }
   
@@ -54,6 +57,16 @@ async function autoCleanupDatabase() {
   } else {
     console.log(`\n✓ Total entries removed: ${totalRemoved}`);
   }
+  
+  // Verify cleanup
+  console.log('\n--- Verification ---');
+  const remainingNullServerMods = db.prepare('SELECT * FROM server_mods WHERE mod_id IS NULL').all();
+  const remainingNullServerConfigs = db.prepare('SELECT * FROM server_configs WHERE server_name IS NULL').all();
+  const remainingNullSharedMods = db.prepare('SELECT * FROM shared_mods WHERE mod_id IS NULL').all();
+  
+  console.log(`Remaining server mods with NULL mod_id: ${remainingNullServerMods.length}`);
+  console.log(`Remaining server configs with NULL server_name: ${remainingNullServerConfigs.length}`);
+  console.log(`Remaining shared mods with NULL mod_id: ${remainingNullSharedMods.length}`);
   
   console.log('\n=== Cleanup Complete ===');
 }
