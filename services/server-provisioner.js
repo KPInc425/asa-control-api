@@ -971,22 +971,9 @@ pause`;
         // Merge globalMods into each server's mods array unless excludeSharedMods is true
         const globalMods = Array.isArray(clusterConfig.globalMods) ? clusterConfig.globalMods : [];
         for (let i = 0; i < clusterConfig.servers.length; i++) {
-          // Remove any incoming serverPath property to avoid confusion
-          const { serverPath: _ignored, ...restServerConfig } = clusterConfig.servers[i];
-          const serverConfig = { ...restServerConfig };
-          // Exclude global mods for Club ARK or if excludeSharedMods is set
-          const isClubArk = serverConfig.name && (serverConfig.name.toLowerCase().includes('club') || serverConfig.name.toLowerCase().includes('bobs'));
-          const excludeSharedMods = serverConfig.excludeSharedMods === true || isClubArk;
-          if (!excludeSharedMods) {
-            serverConfig.mods = Array.isArray(serverConfig.mods) ? Array.from(new Set([...globalMods, ...serverConfig.mods])) : [...globalMods];
-          }
-          // Create server in cluster directory instead of servers directory
+          const serverConfig = clusterConfig.servers[i];
           const serverName = serverConfig.name;
-          const serverPath = path.join(clusterPath, serverName);
-          this.emitProgress?.(`Installing ASA server files for server ${i + 1}/${clusterConfig.servers.length}: ${serverName}`);
-          if (foreground) {
-            console.log(`\n--- Installing Server ${i + 1}/${clusterConfig.servers.length}: ${serverName} ---`);
-          }
+          const serverPath = path.join(clusterPath, serverName); // PATCH: Define serverPath before use
           logger.info(`Creating server: ${serverName} in cluster ${clusterName}`);
           await fs.mkdir(clusterPath, { recursive: true });
           await this.installASABinariesForServerInCluster(clusterName, serverName, foreground);
