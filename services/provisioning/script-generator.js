@@ -272,12 +272,10 @@ pause`;
   async regenerateServerStartScript(serverName) {
     try {
       logger.info(`[regenerateServerStartScript] Regenerating start script for server: ${serverName}`);
-      
       // Find the server in clusters
       const clusters = await this.listClusters();
       let serverConfig = null;
       let clusterName = null;
-      
       for (const cluster of clusters) {
         if (cluster.config && cluster.config.servers) {
           const server = cluster.config.servers.find(s => s.name === serverName);
@@ -288,7 +286,6 @@ pause`;
           }
         }
       }
-      
       if (!serverConfig) {
         // Try to find the server config in the DB and check for clusterId/clusterName
         const allServerConfigs = typeof getAllServerConfigs === 'function' ? getAllServerConfigs() : [];
@@ -303,32 +300,81 @@ pause`;
           try {
             const parsed = JSON.parse(dbConfig.config_data);
             foundClusterId = parsed.clusterId || parsed.clusterName || (parsed.config && (parsed.config.clusterId || parsed.config.clusterName));
+            serverConfig = parsed;
+            clusterName = foundClusterId || null;
           } catch {}
         }
-        if (foundClusterId) {
-          logger.warn(`[regenerateServerStartScript] Server ${serverName} found in DB with clusterId/clusterName: ${foundClusterId}, but not in any cluster config. Likely a cluster config/DB mismatch.`);
-          throw new Error(`Server "${serverName}" found in DB with clusterId/clusterName (${foundClusterId}) but not in any cluster config. Please check for cluster/DB mismatch.`);
-        } else {
-          logger.warn(`[regenerateServerStartScript] Server config not found for: ${serverName}`);
-          throw new Error(`Server "${serverName}" not found in any cluster or DB config.`);
+      }
+      // Fallback: scan clusters and servers directories for start.bat
+      if (!serverConfig) {
+        const { parseStartBat } = await import('../../utils/parse-start-bat.js');
+        // Scan clusters
+        if (this.clustersPath && existsSync(this.clustersPath)) {
+          const clusterDirs = await fs.readdir(this.clustersPath);
+          for (const cName of clusterDirs) {
+            const clusterPath = path.join(this.clustersPath, cName);
+            if (!existsSync(clusterPath) || !(await fs.stat(clusterPath)).isDirectory()) continue;
+            const serverDirs = await fs.readdir(clusterPath);
+            for (const sDir of serverDirs) {
+              const serverPath = path.join(clusterPath, sDir);
+              if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+              const startBatPath = path.join(serverPath, 'start.bat');
+              if (existsSync(startBatPath)) {
+                try {
+                  const parsed = await parseStartBat(startBatPath);
+                  if (parsed.name === serverName) {
+                    logger.warn(`[regenerateServerStartScript] Fallback: found server on disk not in DB or cluster config: ${parsed.name} (cluster: ${cName})`);
+                    serverConfig = parsed;
+                    clusterName = cName;
+                    break;
+                  }
+                } catch (e) {
+                  logger.warn(`[regenerateServerStartScript] Failed to parse start.bat for fallback server in cluster ${cName}: ${e.message}`);
+                }
+              }
+            }
+            if (serverConfig) break;
+          }
+        }
+        // Scan serversPath for standalone servers
+        if (!serverConfig && this.serversPath && existsSync(this.serversPath)) {
+          const serverDirs = await fs.readdir(this.serversPath);
+          for (const sDir of serverDirs) {
+            const serverPath = path.join(this.serversPath, sDir);
+            if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+            const startBatPath = path.join(serverPath, 'start.bat');
+            if (existsSync(startBatPath)) {
+              try {
+                const parsed = await parseStartBat(startBatPath);
+                if (parsed.name === serverName) {
+                  logger.warn(`[regenerateServerStartScript] Fallback: found standalone server on disk not in DB or cluster config: ${parsed.name}`);
+                  serverConfig = parsed;
+                  clusterName = null;
+                  break;
+                }
+              } catch (e) {
+                logger.warn(`[regenerateServerStartScript] Failed to parse start.bat for fallback standalone server: ${e.message}`);
+              }
+            }
+          }
         }
       }
-      
+      if (!serverConfig) {
+        logger.warn(`[regenerateServerStartScript] Server config not found for: ${serverName}`);
+        throw new Error(`Server "${serverName}" not found in any cluster, DB, or on disk.`);
+      }
       logger.info(`[regenerateServerStartScript] Found server in cluster: ${clusterName}`);
       logger.info(`[regenerateServerStartScript] Server config: ${JSON.stringify(serverConfig, null, 2)}`);
-      
       // Get the server path
       const serverPath = clusterName 
         ? path.join(this.clustersPath, clusterName, serverName)
         : path.join(this.serversPath, serverName);
-      
       // Regenerate start script
       if (clusterName) {
         await this.createStartScriptInCluster(clusterName, serverPath, serverConfig);
       } else {
         await this.createStartScript(serverPath, serverConfig);
       }
-      
       logger.info(`[regenerateServerStartScript] Regenerating start script at path: ${serverPath}`);
       logger.info(`[regenerateServerStartScript] Start script regenerated for server: ${serverName}`);
       return { success: true, message: `Start script regenerated for ${serverName}` };

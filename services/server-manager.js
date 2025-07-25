@@ -997,6 +997,82 @@ export class NativeServerManager extends ServerManager {
           return null;
         }
       }));
+      // Fallback: scan clusters and servers directories for start.bat files not in DB
+      const foundNames = new Set(dbConfigs.map(cfg => {
+        try {
+          return JSON.parse(cfg.config_data).name;
+        } catch { return null; }
+      }).filter(Boolean));
+      const { parseStartBat } = await import('../utils/parse-start-bat.js');
+      // Scan clusters
+      if (this.clustersPath && existsSync(this.clustersPath)) {
+        const clusterDirs = await fs.readdir(this.clustersPath);
+        for (const clusterName of clusterDirs) {
+          const clusterPath = path.join(this.clustersPath, clusterName);
+          if (!existsSync(clusterPath) || !(await fs.stat(clusterPath)).isDirectory()) continue;
+          const serverDirs = await fs.readdir(clusterPath);
+          for (const serverDir of serverDirs) {
+            const serverPath = path.join(clusterPath, serverDir);
+            if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+            const startBatPath = path.join(serverPath, 'start.bat');
+            if (existsSync(startBatPath)) {
+              try {
+                const parsed = await parseStartBat(startBatPath);
+                if (!foundNames.has(parsed.name)) {
+                  logger.warn(`[NativeServerManager] Fallback: found server on disk not in DB: ${parsed.name} (cluster: ${clusterName})`);
+                  servers.push({
+                    name: parsed.name,
+                    ...parsed,
+                    status: 'unknown',
+                    type: 'native',
+                    config: parsed,
+                    isClusterServer: true,
+                    clusterName,
+                    serverPath,
+                    created: '',
+                    fallback: true
+                  });
+                  foundNames.add(parsed.name);
+                }
+              } catch (e) {
+                logger.warn(`[NativeServerManager] Failed to parse start.bat for fallback server in cluster ${clusterName}: ${e.message}`);
+              }
+            }
+          }
+        }
+      }
+      // Scan serversPath for standalone servers
+      if (this.serversPath && existsSync(this.serversPath)) {
+        const serverDirs = await fs.readdir(this.serversPath);
+        for (const serverDir of serverDirs) {
+          const serverPath = path.join(this.serversPath, serverDir);
+          if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+          const startBatPath = path.join(serverPath, 'start.bat');
+          if (existsSync(startBatPath)) {
+            try {
+              const parsed = await parseStartBat(startBatPath);
+              if (!foundNames.has(parsed.name)) {
+                logger.warn(`[NativeServerManager] Fallback: found standalone server on disk not in DB: ${parsed.name}`);
+                servers.push({
+                  name: parsed.name,
+                  ...parsed,
+                  status: 'unknown',
+                  type: 'native',
+                  config: parsed,
+                  isClusterServer: false,
+                  clusterName: null,
+                  serverPath,
+                  created: '',
+                  fallback: true
+                });
+                foundNames.add(parsed.name);
+              }
+            } catch (e) {
+              logger.warn(`[NativeServerManager] Failed to parse start.bat for fallback standalone server: ${e.message}`);
+            }
+          }
+        }
+      }
       return servers.filter(Boolean);
     } catch (error) {
       logger.error('Failed to list servers:', error);
