@@ -1397,7 +1397,7 @@ export class NativeServerManager extends ServerManager {
             const serverPath = path.join(clustersPath, clusterId, serverName);
             
             // Import the provisioner dynamically to avoid circular dependencies
-            const { default: provisioner } = await import('./server-provisioner.js');
+            const { default: provisioner } = await import('./services/server-provisioner.js');
             await provisioner.createStartScriptInCluster(clusterId, serverPath, dbServerConfig);
             
             logger.info(`[regenerateServerStartScript][DB] Regenerated start.bat for server ${serverName} in cluster ${clusterId}`);
@@ -1447,7 +1447,7 @@ export class NativeServerManager extends ServerManager {
               const serverPath = path.join(clustersPath, clusterDir, serverName);
               
               // Import the provisioner dynamically to avoid circular dependencies
-              const { default: provisioner } = await import('./server-provisioner.js');
+              const { default: provisioner } = await import('./services/server-provisioner.js');
               await provisioner.createStartScriptInCluster(clusterDir, serverPath, serverConfig);
               
               logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterDir}`);

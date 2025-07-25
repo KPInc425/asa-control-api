@@ -50,7 +50,7 @@ async function debugDatabasePath() {
     
     console.log('\n6. Testing provisioner import...');
     try {
-      const { default: provisioner } = await import('./server-provisioner.js');
+      const { default: provisioner } = await import('./services/server-provisioner.js');
       console.log('   ✅ Provisioner imported successfully');
       console.log(`   Provisioner type: ${typeof provisioner}`);
       
