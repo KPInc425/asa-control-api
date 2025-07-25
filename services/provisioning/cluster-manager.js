@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { existsSync } from 'fs';
 import logger from '../../utils/logger.js';
-import { upsertServerConfig } from '../database.js';
+import { upsertServerConfig, getAllServerConfigs } from '../database.js';
 
 /**
  * Cluster Manager
@@ -172,74 +172,42 @@ export class ClusterManager {
   }
 
   /**
-   * List all clusters
+   * List all clusters (DB-native)
    */
   async listClusters() {
     try {
-      const clusters = [];
-      if (!existsSync(this.clustersPath)) {
-        return clusters;
-      }
-
-      const clusterDirs = await fs.readdir(this.clustersPath);
-
-      for (const clusterName of clusterDirs) {
+      // Get all server configs from the DB
+      const dbConfigs = getAllServerConfigs();
+      // Group servers by clusterId
+      const clustersMap = new Map();
+      for (const config of dbConfigs) {
+        let serverConfig;
         try {
-          const clusterPath = path.join(this.clustersPath, clusterName);
-          const stat = await fs.stat(clusterPath);
-
-          if (stat.isDirectory()) {
-            const configPath = path.join(clusterPath, 'cluster.json');
-            let clusterConfig = {};
-
-            try {
-              const configContent = await fs.readFile(configPath, 'utf8');
-              clusterConfig = JSON.parse(configContent);
-            } catch {
-              // Cluster config not found, create a basic one
-              clusterConfig = {
-                name: clusterName,
-                servers: []
-              };
-
-              // Try to detect servers in the cluster directory
-              try {
-                const serverDirs = await fs.readdir(clusterPath);
-                for (const serverDir of serverDirs) {
-                  const serverPath = path.join(clusterPath, serverDir);
-                  const serverStat = await fs.stat(serverPath);
-                  if (serverStat.isDirectory() && serverDir !== 'clusterdata') {
-                    clusterConfig.servers.push({
-                      name: serverDir,
-                      map: 'TheIsland',
-                      gamePort: 7777,
-                      queryPort: 27015,
-                      rconPort: 32330,
-                      maxPlayers: 70
-                    });
-                  }
-                }
-              } catch {
-                // Ignore errors when trying to detect servers
-              }
-            }
-
-            clusters.push({
-              name: clusterName,
-              path: clusterPath,
-              config: clusterConfig,
-              created: clusterConfig.created || stat.birthtime.toISOString(),
-              serverCount: clusterConfig.servers?.length || 0
-            });
-          }
-        } catch (error) {
-          logger.error(`Error reading cluster ${clusterName}:`, error);
+          serverConfig = JSON.parse(config.config_data);
+        } catch {
+          continue;
         }
+        const clusterId = serverConfig.clusterId || 'standalone';
+        if (!clustersMap.has(clusterId)) {
+          clustersMap.set(clusterId, {
+            name: clusterId,
+            created: serverConfig.created || config.updated_at,
+            servers: [],
+          });
+        }
+        clustersMap.get(clusterId).servers.push(serverConfig);
       }
-
+      // Convert to array and add metadata
+      const clusters = Array.from(clustersMap.values()).map(cluster => ({
+        name: cluster.name,
+        created: cluster.created,
+        serverCount: cluster.servers.length,
+        config: { name: cluster.name, servers: cluster.servers },
+      }));
+      // Sort by name
       return clusters.sort((a, b) => a.name.localeCompare(b.name));
     } catch (error) {
-      logger.error('Failed to list clusters:', error);
+      logger.error('Failed to list clusters (DB-native):', error);
       return [];
     }
   }
