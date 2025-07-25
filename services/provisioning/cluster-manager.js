@@ -525,17 +525,17 @@ export class ClusterManager {
     this.serversPath = serversPath;
   }
 
-  /**
-   * List backups for a cluster
-   */
   async listClusterBackups(clusterName) {
     try {
       const backups = [];
       const backupsPath = path.join(this.basePath, 'backups', 'clusters');
+      logger.info(`[listClusterBackups] Checking backupsPath: ${backupsPath}`);
       if (!existsSync(backupsPath)) {
+        logger.warn(`[listClusterBackups] backupsPath does not exist: ${backupsPath}`);
         return backups;
       }
       const backupDirs = await fs.readdir(backupsPath);
+      logger.info(`[listClusterBackups] Found backupDirs: ${JSON.stringify(backupDirs)}`);
       for (const backupDir of backupDirs) {
         if (!backupDir.startsWith(clusterName + '_backup_')) continue;
         try {
@@ -564,6 +564,7 @@ export class ClusterManager {
           logger.error(`Error reading cluster backup ${backupDir}:`, error);
         }
       }
+      logger.info(`[listClusterBackups] Returning ${backups.length} backups for cluster ${clusterName}`);
       return backups.sort((a, b) => new Date(b.created) - new Date(a.created));
     } catch (error) {
       logger.error('Failed to list cluster backups:', error);

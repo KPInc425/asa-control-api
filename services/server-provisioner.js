@@ -315,10 +315,6 @@ export class ServerProvisioner {
     return await this.clusterManager.validateClusterConfig(config);
   }
 
-  async listClusterBackups(clusterName) {
-    return await this.clusterManager.listClusterBackups(clusterName);
-  }
-
   // ========================================
   // SYSTEM INFO DELEGATIONS
   // ========================================

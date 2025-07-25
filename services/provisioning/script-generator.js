@@ -3,7 +3,6 @@ import path from 'path';
 import { existsSync } from 'fs';
 import logger from '../../utils/logger.js';
 import config from '../../config/index.js';
-import { getAllServerConfigs } from '../database.js';
 
 /**
  * Script Generator
@@ -367,34 +366,47 @@ pause`;
    */
   async listClusters() {
     try {
-      const dbConfigs = getAllServerConfigs();
-      const clustersMap = new Map();
-      for (const config of dbConfigs) {
-        let serverConfig;
-        try {
-          serverConfig = JSON.parse(config.config_data);
-        } catch {
-          continue;
-        }
-        const clusterId = serverConfig.clusterId || 'standalone';
-        if (!clustersMap.has(clusterId)) {
-          clustersMap.set(clusterId, {
-            name: clusterId,
-            created: serverConfig.created || config.updated_at,
-            servers: [],
-          });
-        }
-        clustersMap.get(clusterId).servers.push(serverConfig);
+      const clusters = [];
+             if (!existsSync(this.clustersPath)) {
+        return clusters;
       }
-      const clusters = Array.from(clustersMap.values()).map(cluster => ({
-        name: cluster.name,
-        created: cluster.created,
-        serverCount: cluster.servers.length,
-        config: { name: cluster.name, servers: cluster.servers },
-      }));
-      return clusters.sort((a, b) => a.name.localeCompare(b.name));
+      
+      const clusterDirs = await fs.readdir(this.clustersPath);
+      
+      for (const clusterName of clusterDirs) {
+        try {
+          const clusterPath = path.join(this.clustersPath, clusterName);
+          const stat = await fs.stat(clusterPath);
+          
+          if (stat.isDirectory()) {
+            const configPath = path.join(clusterPath, 'cluster.json');
+            let clusterConfig = {};
+            
+            try {
+              const configContent = await fs.readFile(configPath, 'utf8');
+              clusterConfig = JSON.parse(configContent);
+            } catch {
+              // Cluster config not found, use defaults
+              clusterConfig = {
+                name: clusterName,
+                servers: []
+              };
+            }
+            
+            clusters.push({
+              name: clusterName,
+              path: clusterPath,
+              config: clusterConfig
+            });
+          }
+        } catch (error) {
+          logger.error(`Error reading cluster ${clusterName}:`, error);
+        }
+      }
+      
+      return clusters;
     } catch (error) {
-      logger.error('Failed to list clusters (DB-native):', error);
+      logger.error('Failed to list clusters:', error);
       return [];
     }
   }
