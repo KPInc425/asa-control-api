@@ -15,9 +15,6 @@ class ArkLogsService {
   /**
    * Get available log files for a server
    */
-  /**
-   * Get available log files for a server
-   */
   async getAvailableLogs(serverName) {
     try {
             logger.info(`Getting available log files for server: ${serverName}`);
