@@ -24,7 +24,7 @@ class ArkLogsService {
       try {
         // Add timeout to prevent hanging
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout getting server info')), 10000)
+          setTimeout(() => reject(new Error('Timeout getting server info')), 5000)
         );
         
         const serverInfoPromise = this.serverManager.getClusterServerInfo(serverName);
@@ -36,6 +36,7 @@ class ArkLogsService {
         });
       } catch (error) {
         logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
+        // Don't throw here - continue with fallback path
       }
 
       let serverPath = null;
@@ -46,7 +47,8 @@ class ArkLogsService {
         const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
         if (!basePath) {
           logger.error('ArkLogsService: Missing basePath for log file resolution.');
-          throw new Error('Server configuration error: basePath is not set.');
+          // Return empty array instead of throwing to prevent 502
+          return [];
         }
         serverPath = path.join(basePath, 'servers', serverName);
       }

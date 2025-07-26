@@ -82,7 +82,7 @@ const config = {
   arkLogs: {
     basePath: process.env.ARK_LOGS_BASE_PATH || 
       (process.env.SERVER_MODE === 'native' ? 
-        path.join(path.normalize(process.env.NATIVE_BASE_PATH || 'C:\\ARK'), 'logs') : 
+        path.normalize(process.env.NATIVE_BASE_PATH || 'C:\\ARK') : 
         '/home/gameserver/server-files')
   }
 };
