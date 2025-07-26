@@ -43,14 +43,39 @@ class ArkLogsService {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Robust fallback to default path
+        // Robust fallback to cluster-based path structure
         const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+        const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || path.join(basePath, 'clusters');
+        
         if (!basePath) {
           logger.error('ArkLogsService: Missing basePath for log file resolution.');
           // Return empty array instead of throwing to prevent 502
           return [];
         }
-        serverPath = path.join(basePath, 'servers', serverName);
+        
+        // Try to find the server in clusters directory
+        try {
+          const clusterDirs = await fs.readdir(clustersPath);
+          for (const clusterDir of clusterDirs) {
+            const potentialServerPath = path.join(clustersPath, clusterDir, serverName);
+            try {
+              await fs.access(potentialServerPath);
+              serverPath = potentialServerPath;
+              logger.info(`Found server ${serverName} in cluster ${clusterDir}`);
+              break;
+            } catch (error) {
+              // Continue to next cluster
+            }
+          }
+        } catch (error) {
+          logger.warn(`Could not search clusters directory: ${error.message}`);
+        }
+        
+        // Final fallback to old structure
+        if (!serverPath) {
+          serverPath = path.join(basePath, 'servers', serverName);
+          logger.info(`Using fallback server path: ${serverPath}`);
+        }
       }
 
       logger.info(`Using server path for logs: ${serverPath}`);
@@ -156,13 +181,38 @@ class ArkLogsService {
     if (serverInfo && serverInfo.serverPath) {
       serverPath = serverInfo.serverPath;
     } else {
-      // Robust fallback to default path
+      // Robust fallback to cluster-based path structure
       const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || path.join(basePath, 'clusters');
+      
       if (!basePath) {
         logger.error('ArkLogsService: Missing basePath for log file resolution.');
         throw new Error('Server configuration error: basePath is not set.');
       }
-      serverPath = path.join(basePath, 'servers', serverName);
+      
+      // Try to find the server in clusters directory
+      try {
+        const clusterDirs = await fs.readdir(clustersPath);
+        for (const clusterDir of clusterDirs) {
+          const potentialServerPath = path.join(clustersPath, clusterDir, serverName);
+          try {
+            await fs.access(potentialServerPath);
+            serverPath = potentialServerPath;
+            logger.info(`Found server ${serverName} in cluster ${clusterDir}`);
+            break;
+          } catch (error) {
+            // Continue to next cluster
+          }
+        }
+      } catch (error) {
+        logger.warn(`Could not search clusters directory: ${error.message}`);
+      }
+      
+      // Final fallback to old structure
+      if (!serverPath) {
+        serverPath = path.join(basePath, 'servers', serverName);
+        logger.info(`Using fallback server path: ${serverPath}`);
+      }
     }
 
     // Look for the log file in multiple possible locations
@@ -274,13 +324,38 @@ class ArkLogsService {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Robust fallback to default path
+        // Robust fallback to cluster-based path structure
         const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+        const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || path.join(basePath, 'clusters');
+        
         if (!basePath) {
           logger.error('ArkLogsService: Missing basePath for log file resolution.');
           throw new Error('Server configuration error: basePath is not set.');
         }
-        serverPath = path.join(basePath, 'servers', serverName);
+        
+        // Try to find the server in clusters directory
+        try {
+          const clusterDirs = await fs.readdir(clustersPath);
+          for (const clusterDir of clusterDirs) {
+            const potentialServerPath = path.join(clustersPath, clusterDir, serverName);
+            try {
+              await fs.access(potentialServerPath);
+              serverPath = potentialServerPath;
+              logger.info(`Found server ${serverName} in cluster ${clusterDir}`);
+              break;
+            } catch (error) {
+              // Continue to next cluster
+            }
+          }
+        } catch (error) {
+          logger.warn(`Could not search clusters directory: ${error.message}`);
+        }
+        
+        // Final fallback to old structure
+        if (!serverPath) {
+          serverPath = path.join(basePath, 'servers', serverName);
+          logger.info(`Using fallback server path: ${serverPath}`);
+        }
       }
 
       // Look for the log file in multiple possible locations
@@ -345,13 +420,38 @@ class ArkLogsService {
       if (serverInfo && serverInfo.serverPath) {
         serverPath = serverInfo.serverPath;
       } else {
-        // Robust fallback to default path
+        // Robust fallback to cluster-based path structure
         const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+        const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || path.join(basePath, 'clusters');
+        
         if (!basePath) {
           logger.error('ArkLogsService: Missing basePath for log file resolution.');
           throw new Error('Server configuration error: basePath is not set.');
         }
-        serverPath = path.join(basePath, 'servers', serverName);
+        
+        // Try to find the server in clusters directory
+        try {
+          const clusterDirs = await fs.readdir(clustersPath);
+          for (const clusterDir of clusterDirs) {
+            const potentialServerPath = path.join(clustersPath, clusterDir, serverName);
+            try {
+              await fs.access(potentialServerPath);
+              serverPath = potentialServerPath;
+              logger.info(`Found server ${serverName} in cluster ${clusterDir}`);
+              break;
+            } catch (error) {
+              // Continue to next cluster
+            }
+          }
+        } catch (error) {
+          logger.warn(`Could not search clusters directory: ${error.message}`);
+        }
+        
+        // Final fallback to old structure
+        if (!serverPath) {
+          serverPath = path.join(basePath, 'servers', serverName);
+          logger.info(`Using fallback server path: ${serverPath}`);
+        }
       }
 
       // Look for the log file in multiple possible locations
