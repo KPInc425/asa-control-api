@@ -96,7 +96,7 @@ class ArkLogsService {
       
       logger.info(`Total log files found for ${serverName}: ${logFiles.length}`);
       
-      // Sort log files with priority: actual logs first, then by size
+      // Sort log files with priority: most recent logs first
       return logFiles.sort((a, b) => {
         const aIsLog = a.name.toLowerCase().includes('shootergame.log') || 
                       a.name.toLowerCase().includes('servergame') ||
@@ -109,7 +109,14 @@ class ArkLogsService {
         
         if (aIsLog && !bIsLog) return -1;
         if (!aIsLog && bIsLog) return 1;
-        return b.size - a.size; // Then sort by size
+        
+        // For log files, prioritize by size (larger = more recent content)
+        if (aIsLog && bIsLog) {
+          return b.size - a.size;
+        }
+        
+        // For non-log files, sort by size
+        return b.size - a.size;
       });
     } catch (error) {
       logger.error(`Failed to get available logs for server ${serverName}:`, error);
