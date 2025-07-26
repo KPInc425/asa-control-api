@@ -25,7 +25,7 @@ RCONEnabled=True
 RCONPort=${serverConfig.rconPort || 32330}
 AdminPassword=${serverConfig.adminPassword || 'admin123'}
 ServerPassword=${serverConfig.serverPassword || ''}
-MaxPlayers=${serverConfig.maxPlayers || 70}
+WinLivePlayers=${serverConfig.maxPlayers || 70}
 DifficultyOffset=1.0
 OverrideOfficialDifficulty=5.0
 HarvestAmountMultiplier=${serverConfig.harvestMultiplier || 3.0}
@@ -130,7 +130,7 @@ LimitTurretsNum=100
 bHardLimitTurretsInRange=False
 
 [/script/engine.gamesession]
-MaxPlayers=${serverConfig.maxPlayers || 70}
+WinLivePlayers=${serverConfig.maxPlayers || 70}
 
 [/script/shootergame.shootergamemode]
 DifficultyOffset=1.0

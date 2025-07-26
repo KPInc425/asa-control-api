@@ -54,7 +54,7 @@ export class ScriptGenerator {
 echo Starting ${serverConfig.name}...
 
 REM Start the ASA server with proper parameters
-"${path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" "${serverConfig.map || 'TheIsland'}_WP?SessionName=${serverConfig.name}?Port=${serverConfig.gamePort || 7777}?QueryPort=${serverConfig.queryPort || 27015}?RCONPort=${serverConfig.rconPort || 32330}?RCONEnabled=True?MaxPlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ''}${customUrlArg}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig${battleEyeArg}
+"${path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" "${serverConfig.map || 'TheIsland'}_WP?SessionName=${serverConfig.name}?Port=${serverConfig.gamePort || 7777}?QueryPort=${serverConfig.queryPort || 27015}?RCONPort=${serverConfig.rconPort || 32330}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ''}${customUrlArg}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig${battleEyeArg}
 
 echo Server ${serverConfig.name} has stopped.
 pause`;
@@ -180,7 +180,7 @@ pause`;
         `QueryPort=${serverConfig.queryPort}`,
         `RCONPort=${serverConfig.rconPort}`,
         `RCONEnabled=True`,
-        `MaxPlayers=${serverConfig.maxPlayers}`
+        `WinLivePlayers=${serverConfig.maxPlayers}`
       ];
       
       // Only add server password if it's not empty (admin password is in config file)
