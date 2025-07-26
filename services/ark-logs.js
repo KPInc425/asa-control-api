@@ -22,44 +22,25 @@ class ArkLogsService {
     try {
       logger.info(`Getting available log files for server: ${serverName}`);
       
-      // Add overall timeout for the entire operation
-      const overallTimeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Overall timeout getting log files')), 10000)
-      );
-      
-      const getLogsPromise = this._getAvailableLogsInternal(serverName);
-      
-      return await Promise.race([getLogsPromise, overallTimeout]);
-    } catch (error) {
-      logger.error(`Failed to get available logs for ${serverName}:`, error);
-      // Return empty array instead of throwing to prevent 502
-      return [];
-    }
-  }
-
-  /**
-   * Internal method for getting available log files
-   */
-  async _getAvailableLogsInternal(serverName) {
-    // First, try to get server info to find the correct path
-    let serverInfo = null;
-    try {
       // Add timeout to prevent hanging
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout getting server info')), 3000)
+        setTimeout(() => reject(new Error('Timeout getting server info')), 5000)
       );
       
-      const serverInfoPromise = this.serverManager.getClusterServerInfo(serverName);
-      serverInfo = await Promise.race([serverInfoPromise, timeoutPromise]);
-      
-      logger.info(`Server info retrieved for ${serverName}:`, {
-        hasServerPath: !!serverInfo?.serverPath,
-        serverPath: serverInfo?.serverPath
-      });
-    } catch (error) {
-      logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
-      // Don't throw here - continue with fallback path
-    }
+      // First, try to get server info to find the correct path
+      let serverInfo = null;
+      try {
+        const serverInfoPromise = this.serverManager.getClusterServerInfo(serverName);
+        serverInfo = await Promise.race([serverInfoPromise, timeoutPromise]);
+        
+        logger.info(`Server info retrieved for ${serverName}:`, {
+          hasServerPath: !!serverInfo?.serverPath,
+          serverPath: serverInfo?.serverPath
+        });
+            } catch (error) {
+        logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
+        // Don't throw here - continue with fallback path
+      }
 
     let serverPath = null;
     if (serverInfo && serverInfo.serverPath) {
