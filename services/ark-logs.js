@@ -286,8 +286,10 @@ class ArkLogsService {
         try {
           await fs.access(path);
           logPath = path;
+          logger.info(`Found log file at: ${path}`);
           break;
         } catch (error) {
+          logger.debug(`Log file not found at: ${path}`);
           // Continue to next path
         }
       }
@@ -299,6 +301,17 @@ class ArkLogsService {
 
       const content = await fs.readFile(logPath, 'utf8');
       const linesArray = content.split('\n');
+      
+      // Add debugging information
+      const fileStats = await fs.stat(logPath);
+      logger.info(`Reading log file ${logPath}:`, {
+        fileSize: fileStats.size,
+        lastModified: fileStats.mtime,
+        linesRequested: lines,
+        linesReturned: Math.min(lines, linesArray.length),
+        totalLinesInFile: linesArray.length
+      });
+      
       return linesArray.slice(-lines).join('\n');
     } catch (error) {
       logger.error(`Failed to read recent logs for ${serverName}/${logFileName}:`, error);
