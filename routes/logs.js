@@ -12,7 +12,14 @@ export default async function (fastify) {
       
       logger.info(`Getting available log files for server: ${serverName}`);
       
-      const logFiles = await arkLogsService.getAvailableLogs(serverName);
+      // Add timeout wrapper to prevent 502 errors
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), 8000)
+      );
+      
+      const logFilesPromise = arkLogsService.getAvailableLogs(serverName);
+      
+      const logFiles = await Promise.race([logFilesPromise, timeoutPromise]);
       
       return {
         success: true,
@@ -21,8 +28,12 @@ export default async function (fastify) {
       };
     } catch (error) {
       logger.error(`Failed to get log files for server ${request.params.serverName}:`, error);
-      return reply.status(500).send({
+      
+      // Return a more graceful error response instead of 500
+      return reply.status(200).send({
         success: false,
+        serverName: request.params.serverName,
+        logFiles: [],
         message: 'Failed to get log files',
         error: error.message
       });

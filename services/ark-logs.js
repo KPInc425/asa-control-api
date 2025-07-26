@@ -15,86 +15,108 @@ class ArkLogsService {
   /**
    * Get available log files for a server
    */
+  /**
+   * Get available log files for a server
+   */
   async getAvailableLogs(serverName) {
     try {
       logger.info(`Getting available log files for server: ${serverName}`);
       
-      // First, try to get server info to find the correct path
-      let serverInfo = null;
-      try {
-        // Add timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout getting server info')), 5000)
-        );
-        
-        const serverInfoPromise = this.serverManager.getClusterServerInfo(serverName);
-        serverInfo = await Promise.race([serverInfoPromise, timeoutPromise]);
-        
-        logger.info(`Server info retrieved for ${serverName}:`, {
-          hasServerPath: !!serverInfo?.serverPath,
-          serverPath: serverInfo?.serverPath
-        });
-      } catch (error) {
-        logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
-        // Don't throw here - continue with fallback path
-      }
+      // Add overall timeout for the entire operation
+      const overallTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Overall timeout getting log files')), 10000)
+      );
+      
+      const getLogsPromise = this._getAvailableLogsInternal(serverName);
+      
+      return await Promise.race([getLogsPromise, overallTimeout]);
+    } catch (error) {
+      logger.error(`Failed to get available logs for ${serverName}:`, error);
+      // Return empty array instead of throwing to prevent 502
+      return [];
+    }
+  }
 
-      let serverPath = null;
-      if (serverInfo && serverInfo.serverPath) {
-        serverPath = serverInfo.serverPath;
-        logger.info(`Using server path from database: ${serverPath}`);
-      } else {
-        // Smart path resolution for both cluster and standalone servers
-        const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
-        const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || path.join(basePath, 'clusters');
-        const serversPath = path.join(basePath, 'servers');
+  /**
+   * Internal method for getting available log files
+   */
+  async _getAvailableLogsInternal(serverName) {
+    // First, try to get server info to find the correct path
+    let serverInfo = null;
+    try {
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout getting server info')), 3000)
+      );
+      
+      const serverInfoPromise = this.serverManager.getClusterServerInfo(serverName);
+      serverInfo = await Promise.race([serverInfoPromise, timeoutPromise]);
+      
+      logger.info(`Server info retrieved for ${serverName}:`, {
+        hasServerPath: !!serverInfo?.serverPath,
+        serverPath: serverInfo?.serverPath
+      });
+    } catch (error) {
+      logger.warn(`Could not get cluster server info for ${serverName}:`, error.message);
+      // Don't throw here - continue with fallback path
+    }
+
+    let serverPath = null;
+    if (serverInfo && serverInfo.serverPath) {
+      serverPath = serverInfo.serverPath;
+      logger.info(`Using server path from database: ${serverPath}`);
+    } else {
+      // Smart path resolution for both cluster and standalone servers
+      const basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH || (config.server && config.server.native && config.server.native.clustersPath) || path.join(basePath, 'clusters');
+      const serversPath = path.join(basePath, 'servers');
+      
+      if (!basePath) {
+        logger.error('ArkLogsService: Missing basePath for log file resolution.');
+        // Return empty array instead of throwing to prevent 502
+        return [];
+      }
+      
+      // Check both standalone and cluster locations
+      const standalonePath = path.join(serversPath, serverName);
+      let foundInCluster = false;
+      let clusterPath = null;
+      
+      // First check if it's a standalone server
+      try {
+        await fs.access(standalonePath);
+        serverPath = standalonePath;
+        logger.info(`Found standalone server ${serverName} at: ${serverPath}`);
+      } catch (error) {
+        logger.debug(`Server ${serverName} not found in standalone path: ${standalonePath}`);
         
-        if (!basePath) {
-          logger.error('ArkLogsService: Missing basePath for log file resolution.');
-          // Return empty array instead of throwing to prevent 502
-          return [];
-        }
-        
-        // Check both standalone and cluster locations
-        const standalonePath = path.join(serversPath, serverName);
-        let foundInCluster = false;
-        let clusterPath = null;
-        
-        // First check if it's a standalone server
+        // If not standalone, check clusters
         try {
-          await fs.access(standalonePath);
-          serverPath = standalonePath;
-          logger.info(`Found standalone server ${serverName} at: ${serverPath}`);
-        } catch (error) {
-          logger.debug(`Server ${serverName} not found in standalone path: ${standalonePath}`);
-          
-          // If not standalone, check clusters
-          try {
-            const clusterDirs = await fs.readdir(clustersPath);
-            for (const clusterDir of clusterDirs) {
-              const potentialServerPath = path.join(clustersPath, clusterDir, serverName);
-              try {
-                await fs.access(potentialServerPath);
-                serverPath = potentialServerPath;
-                foundInCluster = true;
-                clusterPath = clusterPath;
-                logger.info(`Found server ${serverName} in cluster ${clusterDir} at: ${serverPath}`);
-                break;
-              } catch (error) {
-                // Continue to next cluster
-              }
+          const clusterDirs = await fs.readdir(clustersPath);
+          for (const clusterDir of clusterDirs) {
+            const potentialServerPath = path.join(clustersPath, clusterDir, serverName);
+            try {
+              await fs.access(potentialServerPath);
+              serverPath = potentialServerPath;
+              foundInCluster = true;
+              clusterPath = clusterPath;
+              logger.info(`Found server ${serverName} in cluster ${clusterDir} at: ${serverPath}`);
+              break;
+            } catch (error) {
+              // Continue to next cluster
             }
-          } catch (error) {
-            logger.warn(`Could not search clusters directory: ${error.message}`);
           }
-        }
-        
-        if (!serverPath) {
-          logger.warn(`Server ${serverName} not found in either standalone or cluster locations`);
-          // Still set a default path for potential log discovery
-          serverPath = standalonePath;
+        } catch (error) {
+          logger.warn(`Could not search clusters directory: ${error.message}`);
         }
       }
+      
+      if (!serverPath) {
+        logger.warn(`Server ${serverName} not found in either standalone or cluster locations`);
+        // Still set a default path for potential log discovery
+        serverPath = standalonePath;
+      }
+    }
 
       logger.info(`Using server path for logs: ${serverPath}`);
 
