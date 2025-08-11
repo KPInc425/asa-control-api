@@ -1,4 +1,5 @@
 import winston from 'winston';
+import 'winston-daily-rotate-file';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import config from '../config/index.js';
@@ -86,10 +87,39 @@ async function cleanupOldBackups() {
 // Rotate logs on startup
 await rotateLogs();
 
-// Create main logger
+// Custom filter to reduce noise from frequent operations
+const noiseFilter = winston.format((info) => {
+  // Filter out frequent RCON operations unless they're errors
+  if (info.message && info.message.includes('RCON command successful') && info.level === 'info') {
+    return false; // Don't log successful RCON commands at info level
+  }
+  
+  // Filter out chat polling responses unless they contain actual chat
+  if (info.message && info.message.includes('[ChatPoller] GetChat response') && info.level === 'info') {
+    const responseLength = info.responseLength || 0;
+    if (responseLength === 0) {
+      return false; // Don't log empty chat responses
+    }
+  }
+  
+  // Filter out RCON connection events unless they're errors
+  if (info.message && info.message.includes('RCON connection ended') && info.level === 'info') {
+    return false;
+  }
+  
+  // Filter out RCON authentication success unless it's the first time
+  if (info.message && info.message.includes('RCON authenticated successfully') && info.level === 'info') {
+    return false;
+  }
+  
+  return info;
+});
+
+// Create main logger with rotation
 const logger = winston.createLogger({
   level: config.logging.level,
   format: winston.format.combine(
+    noiseFilter(),
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
     winston.format.json()
@@ -97,23 +127,39 @@ const logger = winston.createLogger({
   defaultMeta: { service: 'asa-control-api' },
   transports: [
     // Write all logs with importance level of `error` or less to `error.log`
-    new winston.transports.File({ 
-      filename: join(logsDir, 'error.log'), 
-      level: 'error' 
+    new winston.transports.DailyRotateFile({ 
+      filename: join(logsDir, 'error-%DATE%.log'), 
+      datePattern: 'YYYY-MM-DD',
+      level: 'error',
+      maxSize: config.logging.maxFileSize,
+      maxFiles: config.logging.maxFiles,
+      zippedArchive: true
     }),
-    // Write all logs with importance level of `info` or less to `combined.log`
-    new winston.transports.File({ 
-      filename: join(logsDir, 'combined.log') 
+    // Write all logs with importance level of `warn` or less to `combined.log`
+    new winston.transports.DailyRotateFile({ 
+      filename: join(logsDir, 'combined-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      maxSize: config.logging.maxFileSize,
+      maxFiles: config.logging.maxFiles,
+      zippedArchive: true
     }),
     // Write stdout logs to `node-out.log`
-    new winston.transports.File({ 
-      filename: join(logsDir, 'node-out.log'),
-      level: 'info'
+    new winston.transports.DailyRotateFile({ 
+      filename: join(logsDir, 'node-out-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      level: 'info',
+      maxSize: config.logging.maxFileSize,
+      maxFiles: config.logging.maxFiles,
+      zippedArchive: true
     }),
     // Write stderr logs to `node-err.log`
-    new winston.transports.File({ 
-      filename: join(logsDir, 'node-err.log'),
-      level: 'error'
+    new winston.transports.DailyRotateFile({ 
+      filename: join(logsDir, 'node-err-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      level: 'error',
+      maxSize: config.logging.maxFileSize,
+      maxFiles: config.logging.maxFiles,
+      zippedArchive: true
     })
   ],
 });

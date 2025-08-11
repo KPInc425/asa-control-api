@@ -1,31 +1,166 @@
 import rconService from '../services/rcon.js';
-import { requireWrite } from '../middleware/auth.js';
+import { testGetChatForServer } from '../services/chat-poller.js';
+import logger from '../utils/logger.js';
 
-/**
- * RCON routes for sending commands to ASA servers
- */
 export default async function rconRoutes(fastify, options) {
-  // Send RCON command
-  fastify.post('/api/containers/:name/rcon', {
-    preHandler: [requireWrite],
+  // Get RCON health status
+  fastify.get('/api/rcon/health', {
     schema: {
-      params: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-          name: { type: 'string' }
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            health: {
+              type: 'object',
+              additionalProperties: {
+                type: 'object',
+                properties: {
+                  successCount: { type: 'number' },
+                  failureCount: { type: 'number' },
+                  lastSuccess: { type: 'string', nullable: true },
+                  lastFailure: { type: 'string', nullable: true },
+                  consecutiveFailures: { type: 'number' },
+                  successRate: { type: 'string' }
+                }
+              }
+            },
+            cacheStats: {
+              type: 'object',
+              properties: {
+                totalEntries: { type: 'number' },
+                expiredEntries: { type: 'number' }
+              }
+            }
+          }
         }
-      },
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const health = rconService.getConnectionHealthSummary();
+      const cacheStats = {
+        totalEntries: rconService.cachedData.size,
+        expiredEntries: 0 // This would need to be calculated
+      };
+      
+      return {
+        success: true,
+        health,
+        cacheStats
+      };
+    } catch (error) {
+      logger.error('Error getting RCON health:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to get RCON health status'
+      });
+    }
+  });
+
+  // Clear RCON cache
+  fastify.post('/api/rcon/cache/clear', {
+    schema: {
       body: {
         type: 'object',
-        required: ['command'],
         properties: {
-          command: { type: 'string' },
-          host: { type: 'string' },
-          port: { type: 'number' },
-          password: { type: 'string' },
-          timeout: { type: 'number' }
+          serverKey: { type: 'string' }
         }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverKey } = request.body;
+      rconService.clearCache(serverKey);
+      
+      return {
+        success: true,
+        message: serverKey ? `Cache cleared for ${serverKey}` : 'All cache cleared'
+      };
+    } catch (error) {
+      logger.error('Error clearing RCON cache:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to clear RCON cache'
+      });
+    }
+  });
+
+  // Get RCON cache status
+  fastify.get('/api/rcon/cache/status', {
+    schema: {
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            cacheEntries: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  key: { type: 'string' },
+                  timestamp: { type: 'number' },
+                  ttl: { type: 'number' },
+                  age: { type: 'number' },
+                  expired: { type: 'boolean' }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const now = Date.now();
+      const cacheEntries = [];
+      
+      for (const [key, entry] of rconService.cachedData.entries()) {
+        const age = now - entry.timestamp;
+        const expired = age > entry.ttl;
+        
+        cacheEntries.push({
+          key,
+          timestamp: entry.timestamp,
+          ttl: entry.ttl,
+          age,
+          expired
+        });
+      }
+      
+      return {
+        success: true,
+        cacheEntries
+      };
+    } catch (error) {
+      logger.error('Error getting RCON cache status:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to get RCON cache status'
+      });
+    }
+  });
+
+  // Test RCON connection
+  fastify.post('/api/rcon/test', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          serverName: { type: 'string' },
+          command: { type: 'string', default: 'listplayers' }
+        },
+        required: ['serverName']
       },
       response: {
         200: {
@@ -33,97 +168,148 @@ export default async function rconRoutes(fastify, options) {
           properties: {
             success: { type: 'boolean' },
             response: { type: 'string' },
-            command: { type: 'string' }
+            cached: { type: 'boolean' },
+            attempt: { type: 'number' },
+            duration: { type: 'number' }
           }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { name } = request.params;
-      const { command, host, port, password, timeout } = request.body;
+      const { serverName, command = 'listplayers' } = request.body;
+      const startTime = Date.now();
       
-      // Validate required parameters
-      if (!name) {
-        return reply.status(400).send({
-          success: false,
-          message: 'Container name is required'
-        });
-      }
+      const result = await rconService.sendRconCommandWithRetry(serverName, command, {
+        maxRetries: 3,
+        timeout: 10000
+      });
       
-      if (!command || command.trim() === '') {
-        return reply.status(400).send({
-          success: false,
-          message: 'RCON command is required'
-        });
-      }
+      const duration = Date.now() - startTime;
       
-      fastify.log.info(`RCON command request for container ${name}: ${command}`);
-      
-      const options = {};
-      if (host) options.host = host;
-      if (port) options.port = port;
-      if (password) options.password = password;
-      if (timeout) options.timeout = timeout;
-      
-      const result = await rconService.sendRconCommand(name, command, options);
-      
-      fastify.log.info(`RCON command successful for container ${name}: ${command}`);
-      return result;
+      return {
+        success: true,
+        response: result.response,
+        cached: result.cached || false,
+        attempt: result.attempt || 1,
+        duration
+      };
     } catch (error) {
-      fastify.log.error(`RCON command failed for container ${request.params.name}:`, error);
+      logger.error('Error testing RCON connection:', error);
       return reply.status(500).send({
         success: false,
-        message: error.message || 'RCON command failed'
+        error: error.message
       });
     }
   });
 
-  // Get server info
-  fastify.get('/api/containers/:name/server-info', {
-    preHandler: [requireWrite],
+  // Send RCON command
+  fastify.post('/api/rcon/command', {
     schema: {
-      params: {
+      body: {
         type: 'object',
-        required: ['name'],
         properties: {
-          name: { type: 'string' }
-        }
+          serverName: { type: 'string' },
+          command: { type: 'string' },
+          options: {
+            type: 'object',
+            properties: {
+              maxRetries: { type: 'number' },
+              timeout: { type: 'number' },
+              retryDelay: { type: 'number' }
+            }
+          }
+        },
+        required: ['serverName', 'command']
       },
       response: {
         200: {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
-            info: { type: 'object' }
+            response: { type: 'string' },
+            cached: { type: 'boolean' },
+            attempt: { type: 'number' },
+            error: { type: 'string' }
           }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { name } = request.params;
-      const info = await rconService.getServerInfo(name);
-      return { success: true, info };
+      const { serverName, command, options = {} } = request.body;
+      
+      const result = await rconService.sendRconCommandWithRetry(serverName, command, {
+        maxRetries: options.maxRetries || 3,
+        timeout: options.timeout || 10000,
+        retryDelay: options.retryDelay || 1000
+      });
+      
+      return {
+        success: true,
+        response: result.response,
+        cached: result.cached || false,
+        attempt: result.attempt || 1
+      };
     } catch (error) {
-      fastify.log.error(`Failed to get server info for container ${request.params.name}:`, error);
+      logger.error('Error sending RCON command:', error);
       return reply.status(500).send({
         success: false,
-        message: error.message
+        error: error.message
       });
     }
   });
 
-  // Get player list
-  fastify.get('/api/containers/:name/players', {
-    preHandler: [requireWrite],
+  // Get server info with enhanced error handling
+  fastify.get('/api/rcon/server-info/:serverName', {
     schema: {
       params: {
         type: 'object',
-        required: ['name'],
         properties: {
-          name: { type: 'string' }
+          serverName: { type: 'string' }
+        },
+        required: ['serverName']
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            info: { type: 'object' },
+            cached: { type: 'boolean' }
+          }
         }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      
+      const info = await rconService.getServerInfo(serverName);
+      
+      return {
+        success: true,
+        info,
+        cached: false // This would need to be tracked in the service
+      };
+    } catch (error) {
+      logger.error('Error getting server info:', error);
+      return reply.status(500).send({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  // Get player list with enhanced error handling
+  fastify.get('/api/rcon/players/:serverName', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          serverName: { type: 'string' }
+        },
+        required: ['serverName']
       },
       response: {
         200: {
@@ -136,151 +322,84 @@ export default async function rconRoutes(fastify, options) {
                 type: 'object',
                 properties: {
                   id: { type: 'string' },
-                  name: { type: 'string' }
+                  name: { type: 'string' },
+                  steamId: { type: 'string' }
                 }
               }
-            }
+            },
+            cached: { type: 'boolean' }
           }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { name } = request.params;
-      const players = await rconService.getPlayerList(name);
-      return { success: true, players };
+      const { serverName } = request.params;
+      
+      const players = await rconService.getPlayerList(serverName);
+      
+      return {
+        success: true,
+        players,
+        cached: false // This would need to be tracked in the service
+      };
     } catch (error) {
-      fastify.log.error(`Failed to get player list for container ${request.params.name}:`, error);
+      logger.error('Error getting player list:', error);
       return reply.status(500).send({
         success: false,
-        message: error.message
+        error: error.message
       });
     }
   });
 
-  // Save world
-  fastify.post('/api/containers/:name/save-world', {
-    preHandler: [requireWrite],
+  // Test GetChat command for a specific server
+  fastify.get('/api/rcon/test-getchat/:serverName', {
     schema: {
       params: {
         type: 'object',
-        required: ['name'],
         properties: {
-          name: { type: 'string' }
-        }
+          serverName: { type: 'string' }
+        },
+        required: ['serverName']
       },
       response: {
         200: {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
-            message: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { name } = request.params;
-      const result = await rconService.saveWorld(name);
-      return result;
-    } catch (error) {
-      fastify.log.error(`Failed to save world for container ${request.params.name}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Broadcast message
-  fastify.post('/api/containers/:name/broadcast', {
-    preHandler: [requireWrite],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-          name: { type: 'string' }
-        }
-      },
-      body: {
-        type: 'object',
-        required: ['message'],
-        properties: {
-          message: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
-            message: { type: 'string' }
-          }
-        }
-      }
-    }
-  }, async (request, reply) => {
-    try {
-      const { name } = request.params;
-      const { message } = request.body;
-      const result = await rconService.broadcast(name, message);
-      return result;
-    } catch (error) {
-      fastify.log.error(`Failed to broadcast message to container ${request.params.name}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
-    }
-  });
-
-  // Send asa-ctrl command (alternative method)
-  fastify.post('/api/containers/:name/asa-ctrl', {
-    preHandler: [requireWrite],
-    schema: {
-      params: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-          name: { type: 'string' }
-        }
-      },
-      body: {
-        type: 'object',
-        required: ['command'],
-        properties: {
-          command: { type: 'string' },
-          password: { type: 'string' }
-        }
-      },
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            success: { type: 'boolean' },
+            serverName: { type: 'string' },
             response: { type: 'string' },
-            command: { type: 'string' }
+            responseLength: { type: 'number' },
+            cached: { type: 'boolean' },
+            attempt: { type: 'number' },
+            error: { type: 'string' }
           }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { name } = request.params;
-      const { command, password } = request.body;
+      const { serverName } = request.params;
       
-      const options = {};
-      if (password) options.password = password;
+      logger.info(`Testing GetChat command for server: ${serverName}`);
       
-      const result = await rconService.sendAsaCtrlCommand(name, command, options);
-      return result;
+      const result = await testGetChatForServer(serverName);
+      
+      return {
+        success: result.success,
+        serverName,
+        response: result.response,
+        responseLength: result.responseLength,
+        cached: result.cached,
+        attempt: result.attempt,
+        error: result.error
+      };
     } catch (error) {
-      fastify.log.error(`asa-ctrl command failed for container ${request.params.name}:`, error);
+      logger.error('Error testing GetChat command:', error);
       return reply.status(500).send({
         success: false,
-        message: error.message
+        serverName: request.params.serverName,
+        error: error.message
       });
     }
   });

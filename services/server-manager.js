@@ -1265,6 +1265,7 @@ export class NativeServerManager extends ServerManager {
       if (!this.processes) this.processes = new Map();
       const processInfo = this.processes.get(name);
       if (processInfo && processInfo.process) return !processInfo.process.killed;
+      
       let serverPorts = null;
       let serverInfo = null;
       try {
@@ -1282,24 +1283,53 @@ export class NativeServerManager extends ServerManager {
       } catch (error) {
         console.warn(`Failed to get server info for ${name}:`, error.message);
       }
+      
       const processes = await this.getRunningProcesses();
+      
       for (const process of processes) {
         const commandLine = process.commandLine || '';
         const processName = process.name || '';
-        // Tight match: require all key params
-        if (
-          serverPorts &&
-          commandLine.includes(`Port=${serverPorts.gamePort}`) &&
-          commandLine.includes(`QueryPort=${serverPorts.queryPort}`) &&
-          commandLine.includes(`RCONPort=${serverPorts.rconPort}`) &&
-          commandLine.includes(serverPorts.map) &&
-          commandLine.includes(`SessionName=${serverPorts.sessionName}`)
-        ) {
+        
+        // Multiple matching strategies
+        let isMatch = false;
+        
+        // Strategy 1: Strict match with all parameters
+        if (serverPorts &&
+            commandLine.includes(`Port=${serverPorts.gamePort}`) &&
+            commandLine.includes(`QueryPort=${serverPorts.queryPort}`) &&
+            commandLine.includes(`RCONPort=${serverPorts.rconPort}`) &&
+            commandLine.includes(serverPorts.map) &&
+            commandLine.includes(`SessionName=${serverPorts.sessionName}`)) {
           console.log(`Strict match: found running server ${name}`);
+          isMatch = true;
+        }
+        
+        // Strategy 2: Session name match (more flexible)
+        if (!isMatch && serverPorts && commandLine.includes(`SessionName=${serverPorts.sessionName}`)) {
+          console.log(`Session name match: found running server ${name}`);
+          isMatch = true;
+        }
+        
+        // Strategy 3: Port match (if session name is not available)
+        if (!isMatch && serverPorts && 
+            commandLine.includes(`Port=${serverPorts.gamePort}`) &&
+            commandLine.includes(`QueryPort=${serverPorts.queryPort}`)) {
+          console.log(`Port match: found running server ${name}`);
+          isMatch = true;
+        }
+        
+        // Strategy 4: Server name in command line (fallback)
+        if (!isMatch && commandLine.includes(name)) {
+          console.log(`Name match: found running server ${name}`);
+          isMatch = true;
+        }
+        
+        if (isMatch) {
           return true;
         }
       }
-      console.log(`No strict match found for server ${name}`);
+      
+      console.log(`No match found for server ${name}`);
       return false;
     } catch (error) {
       console.error(`Error checking if server ${name} is running:`, error);
@@ -1608,48 +1638,57 @@ export class NativeServerManager extends ServerManager {
       const { promisify } = await import('util');
       const execAsync = promisify(exec);
 
-      // Get all ArkAscendedServer processes
-      const command = 'tasklist /FI "IMAGENAME eq ArkAscendedServer.exe" /NH /FO CSV';
-      const output = await execAsync(command);
-      const lines = output.stdout.split('\n');
+      // Get all possible ARK server processes
+      const processNames = ['ArkAscendedServer.exe', 'ShooterGameServer.exe', 'ArkServer.exe'];
+      
+      for (const processName of processNames) {
+        try {
+          const command = `tasklist /FI "IMAGENAME eq ${processName}" /NH /FO CSV`;
+          const output = await execAsync(command);
+          const lines = output.stdout.split('\n');
 
-      for (const line of lines) {
-        if (line.includes('ArkAscendedServer.exe')) {
-          const fields = line.split('","');
-          if (fields.length >= 2) {
-            const processName = fields[0].replace(/"/g, '');
-            const pid = fields[1].replace(/"/g, '');
-            
-            if (processName === 'ArkAscendedServer.exe' && pid) {
-              try {
-                // Get command line for this process
-                const wmicCommand = `wmic process where "ProcessId=${pid}" get CommandLine /format:list`;
-                const wmicOutput = await execAsync(wmicCommand);
+          for (const line of lines) {
+            if (line.includes(processName)) {
+              const fields = line.split('","');
+              if (fields.length >= 2) {
+                const procName = fields[0].replace(/"/g, '');
+                const pid = fields[1].replace(/"/g, '');
                 
-                // Parse the WMIC output
-                const commandLineMatch = wmicOutput.stdout.match(/CommandLine=(.+)/);
-                const commandLine = commandLineMatch ? commandLineMatch[1].trim() : '';
-                
-                if (commandLine) {
-                  processes.push({
-                    id: parseInt(pid, 10),
-                    name: processName,
-                    commandLine: commandLine,
-                    pid: parseInt(pid, 10)
-                  });
+                if (procName === processName && pid) {
+                  try {
+                    // Get command line for this process
+                    const wmicCommand = `wmic process where "ProcessId=${pid}" get CommandLine /format:list`;
+                    const wmicOutput = await execAsync(wmicCommand);
+                    
+                    // Parse the WMIC output
+                    const commandLineMatch = wmicOutput.stdout.match(/CommandLine=(.+)/);
+                    const commandLine = commandLineMatch ? commandLineMatch[1].trim() : '';
+                    
+                    if (commandLine) {
+                      processes.push({
+                        id: parseInt(pid, 10),
+                        name: processName,
+                        commandLine: commandLine,
+                        pid: parseInt(pid, 10)
+                      });
+                    }
+                  } catch (wmicError) {
+                    console.warn(`Failed to get command line for PID ${pid}:`, wmicError.message);
+                  }
                 }
-              } catch (wmicError) {
-                console.warn(`Failed to get command line for PID ${pid}:`, wmicError.message);
               }
             }
           }
+        } catch (error) {
+          // Process not found, continue to next one
+          console.log(`No ${processName} processes found`);
         }
       }
     } catch (error) {
       console.error('Failed to get running processes:', error);
     }
     
-    console.log(`Found ${processes.length} running ArkAscendedServer processes:`, processes.map(p => ({ pid: p.pid, commandLine: p.commandLine.substring(0, 100) + '...' })));
+    console.log(`Found ${processes.length} running ARK server processes:`, processes.map(p => ({ pid: p.pid, name: p.name, commandLine: p.commandLine.substring(0, 100) + '...' })));
     return processes;
   }
 

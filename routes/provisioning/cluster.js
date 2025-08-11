@@ -438,16 +438,20 @@ export default async function clusterRoutes(fastify) {
         if (cluster.config && cluster.config.servers) {
           const serversWithStatus = await Promise.all(cluster.config.servers.map(async (server) => {
             try {
+              // Always try to get real-time status
               const isRunning = await serverManager.isRunning(server.name);
               return {
                 ...server,
-                status: isRunning ? 'running' : 'stopped'
+                status: isRunning ? 'running' : 'stopped',
+                lastStatusCheck: new Date().toISOString()
               };
             } catch (error) {
               logger.warn(`Failed to get status for server ${server.name}:`, error);
               return {
                 ...server,
-                status: 'unknown'
+                status: 'unknown',
+                lastStatusCheck: new Date().toISOString(),
+                statusError: error.message
               };
             }
           }));

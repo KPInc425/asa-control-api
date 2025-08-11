@@ -9,7 +9,10 @@
     "dev": "node --watch server.js",
     "setup-local": "node setup-local.js",
     "build-frontend": "cd ../asa-servers-dashboard && npm run build && cd ../asa-docker-control-api && node setup-local.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "cleanup-logs": "node scripts/cleanup-logs.js",
+    "logs:info": "LOG_LEVEL=info node server.js",
+    "logs:debug": "LOG_LEVEL=debug LOG_ENABLE_DEBUG=true node server.js"
   },
   "keywords": [
     "ark",
@@ -39,7 +42,8 @@
     "rcon": "^1.1.0",
     "socket.io": "^4.8.1",
     "unzipper": "^0.12.3",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "winston-daily-rotate-file": "^4.7.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

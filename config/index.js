@@ -71,8 +71,11 @@ const config = {
   },
   
   logging: {
-    level: process.env.LOG_LEVEL || 'info',
-    filePath: process.env.LOG_FILE_PATH || './logs/app.log'
+    level: process.env.LOG_LEVEL || 'warn', // Changed from 'info' to 'warn' to reduce noise
+    filePath: process.env.LOG_FILE_PATH || './logs/app.log',
+    maxFileSize: process.env.LOG_MAX_FILE_SIZE || '10m', // 10MB max file size
+    maxFiles: process.env.LOG_MAX_FILES || 5, // Keep 5 files max
+    enableDebug: process.env.LOG_ENABLE_DEBUG === 'true' || false // Enable debug logging only when needed
   },
   
   metrics: {
