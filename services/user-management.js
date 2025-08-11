@@ -194,7 +194,7 @@ class UserManagementService {
   /**
    * Enhanced user authentication with security features
    */
-  async authenticateUser(username, password, ipAddress = null, userAgent = null) {
+  async authenticateUser(username, password, ipAddress = null, userAgent = null, rememberMe = false) {
     try {
       // Query database directly for user
       const dbUser = dbGetUserByUsername(username);
@@ -251,7 +251,8 @@ class UserManagementService {
         timestamp: new Date().toISOString(),
         ipAddress,
         userAgent,
-        success: true
+        success: true,
+        rememberMe
       });
 
       // Keep only last 10 login attempts
@@ -271,18 +272,19 @@ class UserManagementService {
       // Update in-memory map
       this.users.set(username, user);
 
-      // Generate JWT token
-      const token = this.generateToken(user);
+      // Generate JWT token with remember me preference
+      const token = this.generateToken(user, rememberMe);
       
-      // Store session in database
-      await this.createSession(user.id, token, ipAddress, userAgent);
+      // Store session in database with appropriate expiration
+      await this.createSession(user.id, token, ipAddress, userAgent, rememberMe);
       
-      logger.info(`User ${username} authenticated successfully from ${ipAddress}`);
+      logger.info(`User ${username} authenticated successfully from ${ipAddress} (remember me: ${rememberMe})`);
       
       return {
         success: true,
         token,
-        user: this.sanitizeUser(user)
+        user: this.sanitizeUser(user),
+        rememberMe
       };
     } catch (error) {
       logger.error('Authentication error:', error);
@@ -335,18 +337,22 @@ class UserManagementService {
   /**
    * Generate JWT token with enhanced security
    */
-  generateToken(user) {
+  generateToken(user, rememberMe = false) {
     const payload = {
       id: user.id,
       username: user.username,
       role: user.role,
       permissions: user.permissions,
       sessionId: crypto.randomUUID(),
+      rememberMe,
       iat: Math.floor(Date.now() / 1000)
     };
 
+    // Use different expiration times based on remember me preference
+    const expiresIn = rememberMe ? '30d' : config.jwt.expiresIn; // 30 days for remember me, default for regular sessions
+
     return jwt.sign(payload, config.jwt.secret, {
-      expiresIn: config.jwt.expiresIn,
+      expiresIn,
       issuer: 'asa-management-api',
       audience: 'asa-management-dashboard'
     });
@@ -378,9 +384,12 @@ class UserManagementService {
   /**
    * Create user session in database
    */
-  async createSession(userId, token, ipAddress, userAgent) {
+  async createSession(userId, token, ipAddress, userAgent, rememberMe = false) {
     const sessionId = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours
+    
+    // Set session expiration based on remember me preference
+    const sessionDuration = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000; // 30 days or 24 hours
+    const expiresAt = new Date(Date.now() + sessionDuration).toISOString();
     
     const session = {
       id: sessionId,

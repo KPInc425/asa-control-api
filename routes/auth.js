@@ -13,7 +13,8 @@ export default async function authRoutes(fastify, options) {
         required: ['username', 'password'],
         properties: {
           username: { type: 'string' },
-          password: { type: 'string' }
+          password: { type: 'string' },
+          rememberMe: { type: 'boolean', default: false }
         }
       },
       response: {
@@ -33,14 +34,15 @@ export default async function authRoutes(fastify, options) {
                   items: { type: 'string' }
                 }
               }
-            }
+            },
+            rememberMe: { type: 'boolean' }
           }
         }
       }
     }
   }, async (request, reply) => {
     try {
-      const { username, password } = request.body;
+      const { username, password, rememberMe = false } = request.body;
       
       if (!username || !password) {
         return reply.status(400).send({
@@ -49,7 +51,7 @@ export default async function authRoutes(fastify, options) {
         });
       }
 
-      const result = await authService.authenticateUser(username, password);
+      const result = await authService.authenticateUser(username, password, rememberMe);
       
       if (!result.success) {
         return reply.status(401).send(result);

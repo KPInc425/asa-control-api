@@ -53,7 +53,7 @@ class AuthService {
   /**
    * Authenticate user with username and password
    */
-  async authenticateUser(username, password) {
+  async authenticateUser(username, password, rememberMe = false) {
     try {
       const user = this.users.get(username);
       
@@ -69,10 +69,10 @@ class AuthService {
         return { success: false, message: 'Invalid credentials' };
       }
 
-      // Generate JWT token
-      const token = this.generateToken(user);
+      // Generate JWT token with remember me preference
+      const token = this.generateToken(user, rememberMe);
       
-      logger.info(`User ${username} authenticated successfully`);
+      logger.info(`User ${username} authenticated successfully (remember me: ${rememberMe})`);
       
       return {
         success: true,
@@ -82,7 +82,8 @@ class AuthService {
           username: user.username,
           role: user.role,
           permissions: user.permissions
-        }
+        },
+        rememberMe
       };
     } catch (error) {
       logger.error('Authentication error:', error);
@@ -93,17 +94,21 @@ class AuthService {
   /**
    * Generate JWT token
    */
-  generateToken(user) {
+  generateToken(user, rememberMe = false) {
     const payload = {
       id: user.id,
       username: user.username,
       role: user.role,
       permissions: user.permissions,
+      rememberMe,
       iat: Math.floor(Date.now() / 1000)
     };
 
+    // Use different expiration times based on remember me preference
+    const expiresIn = rememberMe ? '30d' : config.jwt.expiresIn; // 30 days for remember me, default for regular sessions
+
     return jwt.sign(payload, config.jwt.secret, {
-      expiresIn: config.jwt.expiresIn
+      expiresIn
     });
   }
 
