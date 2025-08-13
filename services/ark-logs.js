@@ -265,6 +265,55 @@ class ArkLogsService {
   }
 
   /**
+   * Get system logs (API logs, not server-specific)
+   */
+  async getSystemLogs() {
+    try {
+      // Use the same log paths as the logger configuration
+      const systemLogDirs = [
+        path.join(process.cwd(), 'logs'),
+        path.join(__dirname, '..', 'logs'),
+        path.join(__dirname, '..', '..', 'logs')
+      ];
+
+      const logFiles = [];
+      
+      for (const logDir of systemLogDirs) {
+        try {
+          const files = await fs.readdir(logDir);
+          
+          for (const file of files) {
+            // Only include current log files, not timestamped backups
+            const isCurrentLog = file.endsWith('.log') && 
+                               !file.includes('-DATE') &&
+                               !file.includes('backup') &&
+                               !file.includes('backups');
+            
+            if (isCurrentLog) {
+              const filePath = path.join(logDir, file);
+              const size = await this.getFileSize(filePath);
+              logFiles.push({
+                name: file,
+                path: filePath,
+                size: size,
+                type: this.categorizeLogFile(file, logDir)
+              });
+            }
+          }
+        } catch (error) {
+          // Directory doesn't exist or can't be read
+          continue;
+        }
+      }
+      
+      return logFiles.sort((a, b) => b.size - a.size);
+    } catch (error) {
+      logger.error('Failed to get system logs:', error);
+      return [];
+    }
+  }
+
+  /**
    * Get file size in bytes
    */
   async getFileSize(filePath) {

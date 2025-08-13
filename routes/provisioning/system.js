@@ -67,77 +67,34 @@ export default async function systemRoutes(fastify) {
       
       logger.info('System logs request received', { type, lines });
       
-      // Detect service mode
+      // Use the new ark-logs service for system logs
+      const arkLogsService = await import('../../services/ark-logs.js');
+      const systemLogs = await arkLogsService.default.getSystemLogs();
+      
+      // Detect service mode for service info
       await serviceDetector.detectServiceMode();
       const serviceInfo = serviceDetector.getServiceInfo();
-      const logPaths = serviceDetector.getLogFilePaths();
       
-      logger.info('Service detection completed', { serviceInfo, logPaths });
+      logger.info('System logs found', { count: systemLogs.length, logs: systemLogs.map(l => l.name) });
       
-      // Get all available log files
+      // Convert the new format to the expected format
       const logFiles = {};
       
-      // Combined logs (main application logs)
-      const combinedLog = await findLogFile(logPaths.combined, lines);
-      if (combinedLog.exists) {
-        logFiles.combined = combinedLog;
-        logger.info('Found combined log file', { path: combinedLog.path });
-      } else {
-        logger.warn('Combined log file not found', { paths: logPaths.combined });
-      }
-      
-      // Error logs
-      const errorLog = await findLogFile(logPaths.error, lines);
-      if (errorLog.exists) {
-        logFiles.error = errorLog;
-        logger.info('Found error log file', { path: errorLog.path });
-      } else {
-        logger.warn('Error log file not found', { paths: logPaths.error });
-      }
-      
-      // ASA API Service logs
-      const asaApiServiceLog = await findLogFile(logPaths.asaApiService, lines);
-      if (asaApiServiceLog.exists) {
-        logFiles.asaApiService = asaApiServiceLog;
-        logger.info('Found ASA API service log file', { path: asaApiServiceLog.path });
-      } else {
-        logger.warn('ASA API service log file not found', { paths: logPaths.asaApiService });
-      }
-      
-      // Node stdout logs
-      const nodeOutLog = await findLogFile(logPaths.nodeOut, lines);
-      if (nodeOutLog.exists) {
-        logFiles.nodeOut = nodeOutLog;
-        logger.info('Found node stdout log file', { path: nodeOutLog.path });
-      } else {
-        logger.warn('Node stdout log file not found', { paths: logPaths.nodeOut });
-      }
-      
-      // Node stderr logs
-      const nodeErrLog = await findLogFile(logPaths.nodeErr, lines);
-      if (nodeErrLog.exists) {
-        logFiles.nodeErr = nodeErrLog;
-        logger.info('Found node stderr log file', { path: nodeErrLog.path });
-      } else {
-        logger.warn('Node stderr log file not found', { paths: logPaths.nodeErr });
-      }
-      
-      // Service logs (only when running as Windows service)
-      if (serviceInfo.isWindowsService) {
-        const serviceOutLog = await findLogFile(logPaths.serviceOut, lines);
-        if (serviceOutLog.exists) {
-          logFiles.serviceOut = serviceOutLog;
-          logger.info('Found service stdout log file', { path: serviceOutLog.path });
-        } else {
-          logger.warn('Service stdout log file not found', { paths: logPaths.serviceOut });
-        }
+      for (const logFile of systemLogs) {
+        const fileName = logFile.name;
+        const filePath = logFile.path;
         
-        const serviceErrLog = await findLogFile(logPaths.serviceErr, lines);
-        if (serviceErrLog.exists) {
-          logFiles.serviceErr = serviceErrLog;
-          logger.info('Found service stderr log file', { path: serviceErrLog.path });
-        } else {
-          logger.warn('Service stderr log file not found', { paths: logPaths.serviceErr });
+        // Read the log content
+        const content = await readLastLines(filePath, lines);
+        
+        if (content) {
+          const key = fileName.replace('.log', '');
+          logFiles[key] = {
+            content,
+            path: filePath,
+            exists: true
+          };
+          logger.info(`Found log file: ${fileName}`, { path: filePath });
         }
       }
       
@@ -145,7 +102,7 @@ export default async function systemRoutes(fastify) {
       if (Object.keys(logFiles).length === 0) {
         logger.warn('No log files found, creating fallback log content');
         logFiles.fallback = {
-          content: `No log files found in expected locations.\n\nService Info:\n${JSON.stringify(serviceInfo, null, 2)}\n\nExpected Log Paths:\n${JSON.stringify(logPaths, null, 2)}\n\nCurrent Working Directory: ${process.cwd()}\nProcess ID: ${process.pid}`,
+          content: `No log files found in expected locations.\n\nService Info:\n${JSON.stringify(serviceInfo, null, 2)}\n\nCurrent Working Directory: ${process.cwd()}\nProcess ID: ${process.pid}\n\nAvailable System Logs:\n${JSON.stringify(systemLogs, null, 2)}`,
           path: 'fallback',
           exists: true
         };
