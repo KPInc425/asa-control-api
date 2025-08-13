@@ -447,11 +447,13 @@ class ArkLogsService {
     try {
       // Use the current working directory since that's where the service is running from
       const systemLogDirs = [
-        path.join(process.cwd(), 'logs'),
-        path.join(__dirname, '..', 'logs')
+        path.normalize(path.join(process.cwd(), 'logs')),
+        path.normalize(path.join(__dirname, '..', 'logs'))
       ];
       
       logger.info('Looking for system logs in:', systemLogDirs);
+      logger.info('Current working directory:', process.cwd());
+      logger.info('__dirname:', __dirname);
 
       const logFiles = [];
       

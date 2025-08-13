@@ -101,8 +101,23 @@ export default async function systemRoutes(fastify) {
       // Add fallback log content if no logs found
       if (Object.keys(logFiles).length === 0) {
         logger.warn('No log files found, creating fallback log content');
+        
+        // Debug: Check if logs directory exists
+        const fs = await import('fs/promises');
+        const logsDir = path.join(process.cwd(), 'logs');
+        let logsDirExists = false;
+        let logsDirContents = [];
+        
+        try {
+          await fs.access(logsDir);
+          logsDirExists = true;
+          logsDirContents = await fs.readdir(logsDir);
+        } catch (error) {
+          logger.warn(`Logs directory not accessible: ${logsDir}`, error.message);
+        }
+        
         logFiles.fallback = {
-          content: `No log files found in expected locations.\n\nService Info:\n${JSON.stringify(serviceInfo, null, 2)}\n\nCurrent Working Directory: ${process.cwd()}\nProcess ID: ${process.pid}\n\nAvailable System Logs:\n${JSON.stringify(systemLogs, null, 2)}`,
+          content: `No log files found in expected locations.\n\nService Info:\n${JSON.stringify(serviceInfo, null, 2)}\n\nCurrent Working Directory: ${process.cwd()}\nProcess ID: ${process.pid}\n\nLogs Directory: ${logsDir}\nLogs Directory Exists: ${logsDirExists}\nLogs Directory Contents: ${logsDirContents.join(', ')}\n\nAvailable System Logs:\n${JSON.stringify(systemLogs, null, 2)}`,
           path: 'fallback',
           exists: true
         };
