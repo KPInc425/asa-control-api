@@ -332,6 +332,162 @@ export class ServerProvisioner {
   }
 
   // ========================================
+  // UPDATE CONFIGURATION METHODS
+  // ========================================
+
+  /**
+   * Get server update configuration
+   */
+  async getServerUpdateConfig(serverName) {
+    try {
+      // Try to get from database first
+      const { getServerUpdateConfig } = await import('../services/database.js');
+      const dbConfig = getServerUpdateConfig(serverName);
+      
+      if (dbConfig) {
+        return {
+          serverName,
+          clusterName: dbConfig.cluster_name,
+          updateOnStart: dbConfig.update_on_start === 1,
+          lastUpdate: dbConfig.last_update,
+          updateEnabled: dbConfig.update_enabled === 1,
+          autoUpdate: dbConfig.auto_update === 1,
+          updateInterval: dbConfig.update_interval || 24,
+          updateSchedule: dbConfig.update_schedule
+        };
+      }
+      
+      // Default configuration if not found in database
+      return {
+        serverName,
+        clusterName: null,
+        updateOnStart: true, // Default to true
+        lastUpdate: null,
+        updateEnabled: true, // Default to true
+        autoUpdate: false, // Default to false
+        updateInterval: 24, // Default to 24 hours
+        updateSchedule: null
+      };
+    } catch (error) {
+      logger.error(`Error getting update config for server ${serverName}:`, error);
+      // Return default configuration on error
+      return {
+        serverName,
+        clusterName: null,
+        updateOnStart: true,
+        lastUpdate: null,
+        updateEnabled: true,
+        autoUpdate: false,
+        updateInterval: 24,
+        updateSchedule: null
+      };
+    }
+  }
+
+  /**
+   * Update server update configuration
+   */
+  async updateServerUpdateConfig(serverName, config) {
+    try {
+      const { upsertServerUpdateConfig } = await import('../services/database.js');
+      
+      const updateData = {
+        serverName,
+        clusterName: config.clusterName || null,
+        updateOnStart: config.updateOnStart ? 1 : 0,
+        updateEnabled: config.updateEnabled ? 1 : 0,
+        autoUpdate: config.autoUpdate ? 1 : 0,
+        updateInterval: config.updateInterval || 24,
+        updateSchedule: config.updateSchedule || null
+      };
+      
+      upsertServerUpdateConfig(updateData);
+      logger.info(`Update configuration saved for server ${serverName}`);
+      
+      return { success: true, message: 'Update configuration saved successfully' };
+    } catch (error) {
+      logger.error(`Error updating configuration for server ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if server needs update
+   */
+  async checkServerUpdateStatus(serverName) {
+    try {
+      const config = await this.getServerUpdateConfig(serverName);
+      
+      if (!config.updateEnabled) {
+        return {
+          needsUpdate: false,
+          reason: 'Updates disabled',
+          lastUpdate: config.lastUpdate
+        };
+      }
+      
+      // Check if auto-update is enabled and enough time has passed
+      if (config.autoUpdate && config.lastUpdate) {
+        const lastUpdate = new Date(config.lastUpdate);
+        const now = new Date();
+        const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
+        
+        if (hoursSinceUpdate >= config.updateInterval) {
+          return {
+            needsUpdate: true,
+            reason: `Auto-update due (${Math.floor(hoursSinceUpdate)}h since last update)`,
+            lastUpdate: config.lastUpdate,
+            updateInterval: config.updateInterval,
+            updateOnStart: config.updateOnStart,
+            updateEnabled: config.updateEnabled
+          };
+        }
+      }
+      
+      // For now, always return false for manual update checks
+      // In the future, this could check Steam for actual update availability
+      return {
+        needsUpdate: false,
+        reason: 'Up to date',
+        lastUpdate: config.lastUpdate,
+        updateInterval: config.updateInterval,
+        updateOnStart: config.updateOnStart,
+        updateEnabled: config.updateEnabled
+      };
+    } catch (error) {
+      logger.error(`Error checking update status for server ${serverName}:`, error);
+      return {
+        needsUpdate: false,
+        reason: 'Error checking update status',
+        lastUpdate: null,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Update server binaries and mark last update time
+   */
+  async updateServerBinaries(serverName, force = false) {
+    try {
+      logger.info(`Starting binary update for server ${serverName}${force ? ' (forced)' : ''}`);
+      
+      // Update the binaries
+      await this.asaBinariesManager.updateForServer(serverName);
+      
+      // Update the last update time in database
+      const { updateServerLastUpdate } = await import('../services/database.js');
+      updateServerLastUpdate(serverName);
+      
+      logger.info(`Binary update completed for server ${serverName}`);
+      return { success: true, message: 'Server binaries updated successfully' };
+    } catch (error) {
+      logger.error(`Error updating binaries for server ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  // ========================================
   // UTILITY METHODS
   // ========================================
 

@@ -1379,4 +1379,183 @@ export default async function clusterRoutes(fastify) {
       });
     }
   });
+
+  // Update server configuration endpoint
+  fastify.put('/api/provisioning/servers/:serverName/update-config', {
+    preHandler: requirePermission('write'),
+    schema: {
+      params: {
+        type: 'object',
+        required: ['serverName'],
+        properties: {
+          serverName: { type: 'string' }
+        }
+      },
+      body: {
+        type: 'object',
+        properties: {
+          updateOnStart: { type: 'boolean' },
+          updateEnabled: { type: 'boolean' },
+          autoUpdate: { type: 'boolean' },
+          updateInterval: { type: 'number' },
+          updateSchedule: { type: 'string' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const config = request.body;
+      
+      await provisioner.updateServerUpdateConfig(serverName, config);
+      
+      return {
+        success: true,
+        message: 'Update configuration saved successfully'
+      };
+    } catch (error) {
+      logger.error(`Failed to update configuration for server ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update configuration'
+      });
+    }
+  });
+
+  // Update all servers with configuration
+  fastify.post('/api/provisioning/update-all-servers-with-config', {
+    preHandler: requirePermission('write'),
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          force: { type: 'boolean' },
+          updateConfig: { type: 'boolean' },
+          skipDisabled: { type: 'boolean' },
+          background: { type: 'boolean' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { force = false, updateConfig = true, skipDisabled = true, background = false } = request.body;
+      
+      const clusters = await provisioner.listClusters();
+      const results = [];
+      
+      for (const cluster of clusters) {
+        if (cluster.config && cluster.config.servers) {
+          for (const server of cluster.config.servers) {
+            try {
+              // Check if updates are enabled for this server
+              if (skipDisabled) {
+                const updateConfig = await provisioner.getServerUpdateConfig(server.name);
+                if (!updateConfig.updateEnabled) {
+                  results.push({
+                    serverName: server.name,
+                    success: false,
+                    reason: 'Updates disabled'
+                  });
+                  continue;
+                }
+              }
+              
+              if (background) {
+                // Start background update
+                provisioner.updateServerBinaries(server.name, force).catch(error => {
+                  logger.error(`Background update failed for server ${server.name}:`, error);
+                });
+                results.push({
+                  serverName: server.name,
+                  success: true,
+                  reason: 'Background update started'
+                });
+              } else {
+                // Perform immediate update
+                await provisioner.updateServerBinaries(server.name, force);
+                results.push({
+                  serverName: server.name,
+                  success: true,
+                  reason: 'Update completed'
+                });
+              }
+            } catch (error) {
+              results.push({
+                serverName: server.name,
+                success: false,
+                reason: error.message
+              });
+            }
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        message: `Update process completed for ${results.length} servers`,
+        data: results
+      };
+    } catch (error) {
+      logger.error('Failed to update all servers:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update all servers'
+      });
+    }
+  });
+
+  // Update single server with configuration
+  fastify.post('/api/provisioning/servers/:serverName/update-with-config', {
+    preHandler: requirePermission('write'),
+    schema: {
+      params: {
+        type: 'object',
+        required: ['serverName'],
+        properties: {
+          serverName: { type: 'string' }
+        }
+      },
+      body: {
+        type: 'object',
+        properties: {
+          force: { type: 'boolean' },
+          updateConfig: { type: 'boolean' },
+          background: { type: 'boolean' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { serverName } = request.params;
+      const { force = false, updateConfig = true, background = false } = request.body;
+      
+      if (background) {
+        // Start background update
+        provisioner.updateServerBinaries(serverName, force).catch(error => {
+          logger.error(`Background update failed for server ${serverName}:`, error);
+        });
+        
+        return {
+          success: true,
+          message: 'Background update started',
+          data: { background: true }
+        };
+      } else {
+        // Perform immediate update
+        await provisioner.updateServerBinaries(serverName, force);
+        
+        return {
+          success: true,
+          message: 'Server updated successfully',
+          data: { background: false }
+        };
+      }
+    } catch (error) {
+      logger.error(`Failed to update server ${request.params.serverName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to update server'
+      });
+    }
+  });
 } 

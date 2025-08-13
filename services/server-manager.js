@@ -213,6 +213,29 @@ export class NativeServerManager extends ServerManager {
         throw new Error(`Server configuration not found: ${name}`);
       }
       
+      // Check if update on start is enabled
+      try {
+        const { ServerProvisioner } = await import('./server-provisioner.js');
+        const provisioner = new ServerProvisioner();
+        const updateConfig = await provisioner.getServerUpdateConfig(name);
+        
+        if (updateConfig.updateEnabled && updateConfig.updateOnStart) {
+          console.log(`Update on start enabled for server ${name}. Checking for updates...`);
+          try {
+            await provisioner.updateServerBinaries(name, false);
+            console.log(`Server ${name} updated successfully before start`);
+          } catch (updateError) {
+            console.warn(`Failed to update server ${name} before start:`, updateError.message);
+            // Continue with start even if update fails
+          }
+        } else {
+          console.log(`Update on start disabled for server ${name}. Skipping update check.`);
+        }
+      } catch (configError) {
+        console.warn(`Failed to check update configuration for server ${name}:`, configError.message);
+        // Continue with start even if config check fails
+      }
+      
       // Debug: Log the server info to see what ports we have
       console.log(`Server info for ${name}:`, {
         name: serverInfo.name,
