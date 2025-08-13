@@ -37,9 +37,10 @@ class ServiceDetector {
     // Check if running as Windows service to determine log location
     this.isWindowsService = await this.checkIfRunningAsService();
     if (this.isWindowsService) {
-      this.serviceInstallPath = 'C:\\ASA-API';
+      // Use the actual working directory instead of hardcoded path
+      this.serviceInstallPath = process.cwd();
       this.logBasePath = this.serviceInstallPath;
-      logger.info('Detected native mode (Windows service) - API running as Windows service');
+      logger.info('Detected native mode (Windows service) - API running as Windows service from:', this.serviceInstallPath);
     } else {
       this.logBasePath = process.cwd();
       logger.info('Detected native mode (development) - API running from working directory');
@@ -165,12 +166,10 @@ class ServiceDetector {
       ],
       // Service logs (only when running as Windows service)
       serviceOut: this.isWindowsService ? [
-        path.join(basePath, 'logs', 'nssm-out.log'),
-        'C:\\ASA-API\\logs\\nssm-out.log'
+        path.join(basePath, 'logs', 'nssm-out.log')
       ] : [],
       serviceErr: this.isWindowsService ? [
-        path.join(basePath, 'logs', 'nssm-err.log'),
-        'C:\\ASA-API\\logs\\nssm-err.log'
+        path.join(basePath, 'logs', 'nssm-err.log')
       ] : []
     };
   }
