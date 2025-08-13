@@ -8,7 +8,8 @@ import { createServerManager } from './server-manager.js';
 
 class ArkLogsService {
   constructor() {
-    this.basePath = config.arkLogs.basePath || 'F:\\ARK';
+    // Use the same base path as the server manager for consistency
+    this.basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
     this.serverManager = createServerManager();
   }
 
@@ -107,8 +108,31 @@ class ArkLogsService {
         
         if (!serverPath) {
           logger.warn(`Server ${serverName} not found in either standalone or cluster locations`);
-          // Still set a default path for potential log discovery
-          serverPath = standalonePath;
+          // Try additional common paths for log discovery
+          const additionalPaths = [
+            path.join(basePath, serverName),
+            path.join(basePath, 'servers', serverName),
+            path.join(basePath, 'clusters', 'default', serverName),
+            path.join(basePath, 'clusters', 'main', serverName),
+            path.join(basePath, 'clusters', 'cluster1', serverName)
+          ];
+          
+          for (const additionalPath of additionalPaths) {
+            try {
+              await fs.access(additionalPath);
+              serverPath = additionalPath;
+              logger.info(`Found server ${serverName} in additional path: ${serverPath}`);
+              break;
+            } catch (error) {
+              logger.debug(`Server not found in additional path: ${additionalPath}`);
+            }
+          }
+          
+          // If still not found, use the standalone path as fallback
+          if (!serverPath) {
+            serverPath = standalonePath;
+            logger.info(`Using fallback path for server ${serverName}: ${serverPath}`);
+          }
         }
         
         logger.info(`Final server path resolved: ${serverPath}`);
@@ -116,7 +140,7 @@ class ArkLogsService {
 
       logger.info(`Using server path for logs: ${serverPath}`);
 
-      // Look for logs in the Saved directory structure
+      // Look for logs in the server's Saved directory structure only
       const possibleLogDirs = [
         path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
         path.join(serverPath, 'logs'),
@@ -134,22 +158,28 @@ class ArkLogsService {
           logger.info(`Found ${files.length} files in ${logDir}`);
           
           for (const file of files) {
-            if (file.endsWith('.log') || 
-                file.endsWith('.txt') ||
-                file.includes('ShooterGame') ||
-                file.includes('WindowsServer') ||
-                file.includes('ServGame') ||
-                file.includes('crashcallstack') ||
-                file.includes('FailedWaterDinoSpawns')) {
-              
+            // Server-specific log file detection
+            const isLogFile = file.endsWith('.log') || 
+                             file.endsWith('.txt') ||
+                             file.includes('ShooterGame') ||
+                             file.includes('WindowsServer') ||
+                             file.includes('ServGame') ||
+                             file.includes('crashcallstack') ||
+                             file.includes('FailedWaterDinoSpawns') ||
+                             file.includes('steam') ||
+                             file.includes('ark') ||
+                             file.includes('asa');
+            
+            if (isLogFile) {
               const filePath = path.join(logDir, file);
               const size = await this.getFileSize(filePath);
               logFiles.push({
                 name: file,
                 path: filePath,
-                size: size
+                size: size,
+                type: this.categorizeLogFile(file, logDir)
               });
-              logger.info(`Added log file: ${file} (${size} bytes)`);
+              logger.info(`Added log file: ${file} (${size} bytes) - Type: ${this.categorizeLogFile(file, logDir)}`);
             }
           }
         } catch (error) {
@@ -187,6 +217,51 @@ class ArkLogsService {
       logger.error(`Failed to get available logs for server ${serverName}:`, error);
       return [];
     }
+  }
+
+  /**
+   * Categorize log file based on name and location
+   */
+  categorizeLogFile(fileName, logDir) {
+    const lowerName = fileName.toLowerCase();
+    const lowerDir = logDir.toLowerCase();
+    
+    // Server-specific logs
+    if (lowerName.includes('shootergame') || lowerName.includes('servergame') || lowerName.includes('windowsserver')) {
+      return 'server';
+    }
+    
+    // API and system logs
+    if (lowerName.includes('asa-api-service') || lowerName.includes('application') || lowerName.includes('system')) {
+      return 'api';
+    }
+    
+    // Steam and update logs
+    if (lowerName.includes('steam') || lowerName.includes('update') || lowerName.includes('install')) {
+      return 'steam';
+    }
+    
+    // Error and crash logs
+    if (lowerName.includes('error') || lowerName.includes('crash') || lowerName.includes('failed')) {
+      return 'error';
+    }
+    
+    // Debug and info logs
+    if (lowerName.includes('debug') || lowerName.includes('info') || lowerName.includes('warn')) {
+      return 'debug';
+    }
+    
+    // General ARK/ASA logs
+    if (lowerName.includes('ark') || lowerName.includes('asa')) {
+      return 'game';
+    }
+    
+    // Windows system logs
+    if (lowerDir.includes('winevt') || lowerDir.includes('system32')) {
+      return 'system';
+    }
+    
+    return 'other';
   }
 
   /**
@@ -360,6 +435,58 @@ class ArkLogsService {
     } catch (error) {
       logger.error(`Failed to create log stream for ${serverName}/${logFileName}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Get system logs (API logs, not server-specific)
+   */
+  async getSystemLogs() {
+    try {
+      // Use the same log paths as the logger configuration
+      const systemLogDirs = [
+        path.join(process.cwd(), 'logs'),
+        path.join(__dirname, '..', 'logs'),
+        path.join(__dirname, '..', '..', 'logs')
+      ];
+
+      const logFiles = [];
+      
+      for (const logDir of systemLogDirs) {
+        try {
+          const files = await fs.readdir(logDir);
+          
+          for (const file of files) {
+            const isSystemLog = file.endsWith('.log') || 
+                               file.endsWith('.txt') ||
+                               file.includes('asa-api-service') ||
+                               file.includes('combined') ||
+                               file.includes('error') ||
+                               file.includes('node-out') ||
+                               file.includes('node-err') ||
+                               file.includes('nssm');
+            
+            if (isSystemLog) {
+              const filePath = path.join(logDir, file);
+              const size = await this.getFileSize(filePath);
+              logFiles.push({
+                name: file,
+                path: filePath,
+                size: size,
+                type: this.categorizeLogFile(file, logDir)
+              });
+            }
+          }
+        } catch (error) {
+          // Directory doesn't exist or can't be read
+          continue;
+        }
+      }
+      
+      return logFiles.sort((a, b) => b.size - a.size);
+    } catch (error) {
+      logger.error('Failed to get system logs:', error);
+      return [];
     }
   }
 

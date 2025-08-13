@@ -21,10 +21,14 @@ export default async function (fastify) {
       
       const logFiles = await Promise.race([logFilesPromise, timeoutPromise]);
       
+      // Also get system logs for comprehensive view
+      const systemLogs = await arkLogsService.getSystemLogs();
+      
       return {
         success: true,
         serverName,
-        logFiles
+        logFiles,
+        systemLogs
       };
     } catch (error) {
       logger.error(`Failed to get log files for server ${request.params.serverName}:`, error);
@@ -80,6 +84,15 @@ export default async function (fastify) {
       
       logger.info(`Debug: Getting log file info for server: ${serverName}`);
       
+      // Get environment info for debugging
+      const envInfo = {
+        NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+        NATIVE_CLUSTERS_PATH: process.env.NATIVE_CLUSTERS_PATH,
+        NATIVE_SERVERS_PATH: process.env.NATIVE_SERVERS_PATH,
+        config_arkLogs_basePath: config.arkLogs.basePath,
+        config_server_native_basePath: config.server?.native?.basePath
+      };
+      
       const logFiles = await arkLogsService.getAvailableLogs(serverName);
       
       // Get file stats for each log file
@@ -109,6 +122,7 @@ export default async function (fastify) {
         success: true,
         serverName,
         logFiles: fileInfo,
+        environment: envInfo,
         timestamp: new Date().toISOString()
       };
     } catch (error) {
@@ -116,6 +130,76 @@ export default async function (fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to get log file info',
+        error: error.message
+      });
+    }
+  });
+
+  // Get system logs (not server-specific)
+  fastify.get('/api/logs/system', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      logger.info('Getting system logs');
+      
+      const logFiles = await arkLogsService.getSystemLogs();
+      
+      return {
+        success: true,
+        logFiles: logFiles,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error('Failed to get system logs:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get system logs',
+        error: error.message
+      });
+    }
+  });
+
+  // Get system log content
+  fastify.get('/api/logs/system/:fileName', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      const { fileName } = request.params;
+      const { lines = 100 } = request.query;
+      
+      logger.info(`Getting system log content from ${fileName} (${lines} lines)`);
+      
+      // Get system logs to find the file
+      const logFiles = await arkLogsService.getSystemLogs();
+      const targetFile = logFiles.find(f => f.name === fileName);
+      
+      if (!targetFile) {
+        return reply.status(404).send({
+          success: false,
+          message: `System log file ${fileName} not found`
+        });
+      }
+      
+      // Read the file content
+      const fs = await import('fs/promises');
+      const content = await fs.readFile(targetFile.path, 'utf8');
+      
+      // Get the last N lines
+      const linesArray = content.split('\n');
+      const recentLines = linesArray.slice(-parseInt(lines)).join('\n');
+      
+      return {
+        success: true,
+        fileName,
+        content: recentLines,
+        lines: parseInt(lines),
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error(`Failed to get system log content for ${request.params.fileName}:`, error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Failed to get system log content',
         error: error.message
       });
     }
