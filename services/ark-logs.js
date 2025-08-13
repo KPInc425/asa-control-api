@@ -264,54 +264,7 @@ class ArkLogsService {
     return 'other';
   }
 
-  /**
-   * Get system logs (API logs, not server-specific)
-   */
-  async getSystemLogs() {
-    try {
-      // Use the same log paths as the logger configuration
-      const systemLogDirs = [
-        path.join(process.cwd(), 'logs'),
-        path.join(__dirname, '..', 'logs'),
-        path.join(__dirname, '..', '..', 'logs')
-      ];
 
-      const logFiles = [];
-      
-      for (const logDir of systemLogDirs) {
-        try {
-          const files = await fs.readdir(logDir);
-          
-          for (const file of files) {
-            // Only include current log files, not timestamped backups
-            const isCurrentLog = file.endsWith('.log') && 
-                               !file.includes('-DATE') &&
-                               !file.includes('backup') &&
-                               !file.includes('backups');
-            
-            if (isCurrentLog) {
-              const filePath = path.join(logDir, file);
-              const size = await this.getFileSize(filePath);
-              logFiles.push({
-                name: file,
-                path: filePath,
-                size: size,
-                type: this.categorizeLogFile(file, logDir)
-              });
-            }
-          }
-        } catch (error) {
-          // Directory doesn't exist or can't be read
-          continue;
-        }
-      }
-      
-      return logFiles.sort((a, b) => b.size - a.size);
-    } catch (error) {
-      logger.error('Failed to get system logs:', error);
-      return [];
-    }
-  }
 
   /**
    * Get file size in bytes
@@ -492,30 +445,30 @@ class ArkLogsService {
    */
   async getSystemLogs() {
     try {
-      // Use the same log paths as the logger configuration
+      // Use the current working directory since that's where the service is running from
       const systemLogDirs = [
         path.join(process.cwd(), 'logs'),
-        path.join(__dirname, '..', 'logs'),
-        path.join(__dirname, '..', '..', 'logs')
+        path.join(__dirname, '..', 'logs')
       ];
+      
+      logger.info('Looking for system logs in:', systemLogDirs);
 
       const logFiles = [];
       
       for (const logDir of systemLogDirs) {
         try {
+          logger.info(`Checking log directory: ${logDir}`);
           const files = await fs.readdir(logDir);
+          logger.info(`Found ${files.length} files in ${logDir}`);
           
           for (const file of files) {
-            const isSystemLog = file.endsWith('.log') || 
-                               file.endsWith('.txt') ||
-                               file.includes('asa-api-service') ||
-                               file.includes('combined') ||
-                               file.includes('error') ||
-                               file.includes('node-out') ||
-                               file.includes('node-err') ||
-                               file.includes('nssm');
+            // Only include current log files, not timestamped backups
+            const isCurrentLog = file.endsWith('.log') && 
+                               !file.includes('-DATE') &&
+                               !file.includes('backup') &&
+                               !file.includes('backups');
             
-            if (isSystemLog) {
+            if (isCurrentLog) {
               const filePath = path.join(logDir, file);
               const size = await this.getFileSize(filePath);
               logFiles.push({
@@ -524,14 +477,17 @@ class ArkLogsService {
                 size: size,
                 type: this.categorizeLogFile(file, logDir)
               });
+              logger.info(`Added log file: ${file} (${size} bytes)`);
             }
           }
         } catch (error) {
+          logger.warn(`Directory not accessible: ${logDir}`, error.message);
           // Directory doesn't exist or can't be read
           continue;
         }
       }
       
+      logger.info(`Total system log files found: ${logFiles.length}`);
       return logFiles.sort((a, b) => b.size - a.size);
     } catch (error) {
       logger.error('Failed to get system logs:', error);
