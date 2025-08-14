@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import path from 'path';
+import fs from 'fs/promises';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
@@ -160,6 +162,83 @@ fastify.get('/api/diagnostics/logs/ping', async (request, reply) => {
     route: '/api/diagnostics/logs/ping',
     timestamp: new Date().toISOString()
   };
+});
+
+// Temporary replacement endpoints under /api/logfiles to avoid proxy rules on /api/logs/*
+// List available log files for a server (minimal, server-side only)
+fastify.get('/api/logfiles/:serverName/files', async (request, reply) => {
+  try {
+    const { serverName } = request.params;
+    const basePath = config.server?.native?.basePath || process.env.NATIVE_BASE_PATH || 'C://ARK';
+    const candidates = [
+      path.join(basePath, 'servers', serverName),
+      path.join(basePath, 'clusters', 'default', serverName),
+      path.join(basePath, 'clusters', 'main', serverName),
+      path.join(basePath, serverName)
+    ];
+
+    let serverPath = null;
+    for (const p of candidates) {
+      try { await fs.access(p); serverPath = p; break; } catch {}
+    }
+
+    if (!serverPath) {
+      return { success: true, serverName, logFiles: [] };
+    }
+
+    const logDirs = [
+      path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
+      path.join(serverPath, 'logs'),
+      serverPath
+    ];
+
+    const results = [];
+    for (const dir of logDirs) {
+      try {
+        const files = await fs.readdir(dir);
+        for (const file of files) {
+          if (file.endsWith('.log') || file.endsWith('.txt')) {
+            const full = path.join(dir, file);
+            const st = await fs.stat(full);
+            results.push({ name: file, path: full, size: st.size });
+          }
+        }
+      } catch {}
+    }
+
+    // Sort by size desc as a proxy for recency
+    results.sort((a, b) => b.size - a.size);
+    return { success: true, serverName, logFiles: results };
+  } catch (err) {
+    return reply.status(200).send({ success: false, message: 'Failed to list log files', error: err?.message });
+  }
+});
+
+// Read recent lines from a specific log file
+fastify.get('/api/logfiles/:serverName/files/:fileName', async (request, reply) => {
+  try {
+    const { serverName, fileName } = request.params;
+    const { lines = 100 } = request.query;
+    const numLines = Math.max(1, parseInt(lines, 10) || 100);
+
+    // Reuse listing to find candidate paths
+    const listResp = await fastify.inject({
+      method: 'GET',
+      url: `/api/logfiles/${encodeURIComponent(serverName)}/files`
+    });
+    const data = JSON.parse(listResp.payload || '{}');
+    const match = (data.logFiles || []).find((f) => f.name === fileName);
+    if (!match) {
+      return reply.status(404).send({ success: false, message: 'Log file not found' });
+    }
+
+    const content = await fs.readFile(match.path, 'utf8');
+    const arr = content.split('\n');
+    const tail = arr.slice(-numLines).join('\n');
+    return { success: true, serverName, fileName, content: tail, lines: numLines };
+  } catch (err) {
+    return reply.status(200).send({ success: false, message: 'Failed to read log file', error: err?.message });
+  }
 });
 
 // Debug endpoint to test authentication
