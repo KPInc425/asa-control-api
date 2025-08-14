@@ -1,10 +1,15 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { createReadStream, watch } from 'fs';
 import { EventEmitter } from 'events';
 import logger from '../utils/logger.js';
 import config from '../config/index.js';
 import { createServerManager } from './server-manager.js';
+
+// __dirname for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class ArkLogsService {
   constructor() {

@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import path from 'path';
 import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
@@ -170,12 +171,14 @@ fastify.get('/api/logfiles/:serverName/files', async (request, reply) => {
   try {
     const { serverName } = request.params;
     const basePath = config.server?.native?.basePath || process.env.NATIVE_BASE_PATH || 'C://ARK';
-    const candidates = [
-      path.join(basePath, 'servers', serverName),
-      path.join(basePath, 'clusters', 'default', serverName),
-      path.join(basePath, 'clusters', 'main', serverName),
-      path.join(basePath, serverName)
-    ];
+    const clustersRoot = path.join(basePath, 'clusters');
+    const candidates = [path.join(basePath, 'servers', serverName), path.join(basePath, serverName)];
+    try {
+      const clusterDirs = await fs.readdir(clustersRoot);
+      for (const c of clusterDirs) {
+        candidates.push(path.join(clustersRoot, c, serverName));
+      }
+    } catch {}
 
     let serverPath = null;
     for (const p of candidates) {
