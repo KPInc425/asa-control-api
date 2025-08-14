@@ -153,6 +153,15 @@ fastify.get('/api/logs/ping', async (request, reply) => {
   };
 });
 
+// Alternate diagnostics route to bypass any proxy rules bound to /api/logs/*
+fastify.get('/api/diagnostics/logs/ping', async (request, reply) => {
+  return {
+    ok: true,
+    route: '/api/diagnostics/logs/ping',
+    timestamp: new Date().toISOString()
+  };
+});
+
 // Debug endpoint to test authentication
 fastify.get('/api/debug/auth', async (request, reply) => {
   const authHeader = request.headers.authorization;
