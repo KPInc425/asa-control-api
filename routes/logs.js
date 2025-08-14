@@ -262,12 +262,4 @@ export default async function (fastify) {
     }
   });
 
-  // Simple test endpoint to verify route registration
-  fastify.get('/api/logs/test', async (request, reply) => {
-    return {
-      success: true,
-      message: 'Logs route is working!',
-      timestamp: new Date().toISOString()
-    };
-  });
 } 
