@@ -1,6 +1,7 @@
 import { requirePermission } from '../middleware/auth.js';
 import arkLogsService from '../services/ark-logs.js';
 import logger from '../utils/logger.js';
+import config from '../config/index.js';
 
 export default async function (fastify) {
   // Get available log files for a server
@@ -106,6 +107,25 @@ export default async function (fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Test endpoint failed',
+        error: error.message
+      });
+    }
+  });
+
+  // Even simpler test endpoint without auth
+  fastify.get('/api/logs/test-simple', async (request, reply) => {
+    try {
+      logger.info('Simple test endpoint called');
+      return {
+        success: true,
+        message: 'Simple logs route is working',
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error('Simple test endpoint error:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Simple test endpoint failed',
         error: error.message
       });
     }
