@@ -67,15 +67,14 @@ export default async function (fastify) {
       
       logger.info(`Getting recent logs from ${serverName}/${fileName} (${lines} lines)`);
       
-      const content = await arkLogsService.getRecentLogs(serverName, fileName, parseInt(lines));
-      
+      // Temporarily disabled arkLogsService
       return {
         success: true,
         serverName,
         fileName,
-        content,
+        content: 'arkLogsService temporarily disabled for debugging',
         lines: parseInt(lines),
-        timestamp: new Date().toISOString() // Add timestamp to see when this was served
+        timestamp: new Date().toISOString()
       };
     } catch (error) {
       logger.error(`Failed to get log content for ${request.params.serverName}/${request.params.fileName}:`, error);
