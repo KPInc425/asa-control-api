@@ -134,6 +134,25 @@ fastify.get('/health', async (request, reply) => {
   };
 });
 
+// Health check alias under /api for reverse proxy configs that only forward /api/*
+fastify.get('/api/health', async (request, reply) => {
+  return {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    version: process.env.npm_package_version || '1.0.0'
+  };
+});
+
+// Minimal logs ping endpoint to validate reverse-proxy routing for /api/logs/*
+fastify.get('/api/logs/ping', async (request, reply) => {
+  return {
+    ok: true,
+    route: '/api/logs/ping',
+    timestamp: new Date().toISOString()
+  };
+});
+
 // Debug endpoint to test authentication
 fastify.get('/api/debug/auth', async (request, reply) => {
   const authHeader = request.headers.authorization;
