@@ -13,7 +13,7 @@ import containerRoutes from './routes/containers.js';
 import rconRoutes from './routes/rcon.js';
 import configRoutes from './routes/configs.js';
 import enhancedAuthRoutes from './routes/enhanced-auth.js';
-import logsRoutes from './routes/logs.js';
+// import logsRoutes from './routes/logs.js';
 import environmentRoutes from './routes/environment.js';
 import nativeServerRoutes from './routes/native-servers.js';
 import saveFilesRoutes from './routes/save-files.js';
