@@ -11,16 +11,42 @@ let pollerInterval = null;
 // Create server manager instance
 const serverManager = new NativeServerManager();
 
+let activeConnections = new Set(); // Track which servers have active chat connections
+
 export function startChatPolling(io) {
   if (pollerInterval) return; // Already running
   logger.info('Starting ARK chat polling for all servers...');
+  
+  // Set up Socket.IO connection tracking
+  io.on('connection', (socket) => {
+    socket.on('subscribe-to-chat', (serverName) => {
+      activeConnections.add(serverName);
+      logger.info(`Chat polling activated for server: ${serverName}`);
+    });
+    
+    socket.on('unsubscribe-from-chat', (serverName) => {
+      activeConnections.delete(serverName);
+      logger.info(`Chat polling deactivated for server: ${serverName}`);
+    });
+    
+    socket.on('disconnect', () => {
+      // Clean up any subscriptions when socket disconnects
+      activeConnections.clear();
+    });
+  });
+  
   pollerInterval = setInterval(async () => {
+    // Only poll if there are active chat connections
+    if (activeConnections.size === 0) {
+      return; // No active chat connections, skip polling
+    }
     const startTime = Date.now();
     try {
       // Get all running servers (native and container)
       const servers = await serverManager.listServers();
       for (const server of servers) {
         if (server.status !== 'running') continue;
+        if (!activeConnections.has(server.name)) continue; // Only poll servers with active chat connections
         try {
           // Use the same RCON connection options as the API endpoint
           const rconOptions = {

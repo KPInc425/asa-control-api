@@ -148,6 +148,14 @@ class ArkLogsService {
       ];
 
       logger.info(`Checking log directories for ${serverName}:`, possibleLogDirs);
+      
+      // Debug: Check if server path exists
+      try {
+        await fs.access(serverPath);
+        logger.info(`Server path exists: ${serverPath}`);
+      } catch (error) {
+        logger.warn(`Server path does not exist: ${serverPath}`, error.message);
+      }
 
       const logFiles = [];
       
@@ -464,23 +472,42 @@ class ArkLogsService {
           logger.info(`Found ${files.length} files in ${logDir}`);
           
           for (const file of files) {
-            // Only include current log files, not timestamped backups
-            const isCurrentLog = file.endsWith('.log') && 
-                               !file.includes('-DATE') &&
-                               !file.includes('backup') &&
-                               !file.includes('backups');
+            // Include current log files and the most recent timestamped files
+            const isLogFile = file.endsWith('.log');
+            const isBackup = file.includes('backup') || file.includes('backups');
+            const isAudit = file.includes('audit.json');
+            const isCompressed = file.endsWith('.gz');
             
-            if (isCurrentLog) {
-              const filePath = path.join(logDir, file);
-              const size = await this.getFileSize(filePath);
-              logFiles.push({
-                name: file,
-                path: filePath,
-                size: size,
-                type: this.categorizeLogFile(file, logDir)
-              });
-              logger.info(`Added log file: ${file} (${size} bytes)`);
+            // Skip backups, audit files, and compressed files
+            if (!isLogFile || isBackup || isAudit || isCompressed) {
+              continue;
             }
+            
+            // For timestamped files, only include the most recent one (without .1, .2, etc.)
+            if (file.includes('-') && /\d{4}-\d{2}-\d{2}/.test(file)) {
+              // Check if this is the most recent version (no .1, .2, etc. suffix)
+              const baseName = file.replace(/\.\d+$/, '');
+              const hasNewerVersion = files.some(f => 
+                f !== file && 
+                f.startsWith(baseName) && 
+                /\d{4}-\d{2}-\d{2}/.test(f) &&
+                !f.match(/\.\d+$/)
+              );
+              
+              if (hasNewerVersion) {
+                continue; // Skip older versions
+              }
+            }
+            
+            const filePath = path.join(logDir, file);
+            const size = await this.getFileSize(filePath);
+            logFiles.push({
+              name: file,
+              path: filePath,
+              size: size,
+              type: this.categorizeLogFile(file, logDir)
+            });
+            logger.info(`Added log file: ${file} (${size} bytes)`);
           }
         } catch (error) {
           logger.warn(`Directory not accessible: ${logDir}`, error.message);
