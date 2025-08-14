@@ -1,7 +1,9 @@
 import { requirePermission } from '../middleware/auth.js';
-import arkLogsService from '../services/ark-logs.js';
+// import arkLogsService from '../services/ark-logs.js';
 import logger from '../utils/logger.js';
 import config from '../config/index.js';
+import fs from 'fs/promises';
+import path from 'path';
 
 export default async function (fastify) {
   // Get available log files for a server
@@ -20,28 +22,91 @@ export default async function (fastify) {
         serverName: serverName
       });
       
-      // Add timeout wrapper to prevent 502 errors
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Request timeout')), 8000)
-      );
+      // Simple implementation without arkLogsService
+      const basePath = process.env.NATIVE_BASE_PATH || config.server?.native?.basePath || 'C:\\ARK';
+      logger.info(`Using basePath: ${basePath}`);
       
-      logger.info(`Starting getAvailableLogs for ${serverName}...`);
-      const logFilesPromise = arkLogsService.getAvailableLogs(serverName);
+      // Look for server logs
+      const serverLogs = [];
+      const possibleServerPaths = [
+        path.join(basePath, 'servers', serverName),
+        path.join(basePath, 'clusters', 'default', serverName),
+        path.join(basePath, 'clusters', 'main', serverName),
+        path.join(basePath, serverName)
+      ];
       
-      logger.info(`Waiting for getAvailableLogs to complete...`);
-      const logFiles = await Promise.race([logFilesPromise, timeoutPromise]);
-      logger.info(`getAvailableLogs completed, found ${logFiles.length} files`);
+      for (const serverPath of possibleServerPaths) {
+        try {
+          await fs.access(serverPath);
+          logger.info(`Found server at: ${serverPath}`);
+          
+          // Look for log files
+          const logDirs = [
+            path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
+            path.join(serverPath, 'logs'),
+            serverPath
+          ];
+          
+          for (const logDir of logDirs) {
+            try {
+              const files = await fs.readdir(logDir);
+              for (const file of files) {
+                if (file.endsWith('.log') || file.endsWith('.txt')) {
+                  const filePath = path.join(logDir, file);
+                  const stats = await fs.stat(filePath);
+                  serverLogs.push({
+                    name: file,
+                    path: filePath,
+                    size: stats.size,
+                    type: 'server'
+                  });
+                }
+              }
+            } catch (error) {
+              // Directory doesn't exist or can't be read
+              continue;
+            }
+          }
+          break; // Found the server, stop looking
+        } catch (error) {
+          // Server path doesn't exist
+          continue;
+        }
+      }
       
-      // Also get system logs for comprehensive view
-      logger.info(`Starting getSystemLogs...`);
-      const systemLogs = await arkLogsService.getSystemLogs();
-      logger.info(`getSystemLogs completed, found ${systemLogs.length} files`);
+      // Look for system logs
+      const systemLogs = [];
+      const systemLogDirs = [
+        path.join(process.cwd(), 'logs'),
+        path.join(__dirname, '..', 'logs')
+      ];
+      
+      for (const logDir of systemLogDirs) {
+        try {
+          const files = await fs.readdir(logDir);
+          for (const file of files) {
+            if (file.endsWith('.log')) {
+              const filePath = path.join(logDir, file);
+              const stats = await fs.stat(filePath);
+              systemLogs.push({
+                name: file,
+                path: filePath,
+                size: stats.size,
+                type: 'system'
+              });
+            }
+          }
+        } catch (error) {
+          // Directory doesn't exist or can't be read
+          continue;
+        }
+      }
       
       return {
         success: true,
         serverName,
-        logFiles,
-        systemLogs
+        logFiles: serverLogs,
+        systemLogs: systemLogs
       };
     } catch (error) {
       logger.error(`Failed to get log files for server ${request.params.serverName}:`, error);
