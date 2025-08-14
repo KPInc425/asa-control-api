@@ -12,17 +12,29 @@ export default async function (fastify) {
       
       logger.info(`Getting available log files for server: ${serverName}`);
       
+      // Add more detailed debugging
+      logger.info(`Environment check:`, {
+        NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+        config_server_native_basePath: config.server?.native?.basePath,
+        serverName: serverName
+      });
+      
       // Add timeout wrapper to prevent 502 errors
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Request timeout')), 8000)
       );
       
+      logger.info(`Starting getAvailableLogs for ${serverName}...`);
       const logFilesPromise = arkLogsService.getAvailableLogs(serverName);
       
+      logger.info(`Waiting for getAvailableLogs to complete...`);
       const logFiles = await Promise.race([logFilesPromise, timeoutPromise]);
+      logger.info(`getAvailableLogs completed, found ${logFiles.length} files`);
       
       // Also get system logs for comprehensive view
+      logger.info(`Starting getSystemLogs...`);
       const systemLogs = await arkLogsService.getSystemLogs();
+      logger.info(`getSystemLogs completed, found ${systemLogs.length} files`);
       
       return {
         success: true,
@@ -69,6 +81,31 @@ export default async function (fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Failed to get log content',
+        error: error.message
+      });
+    }
+  });
+
+  // Simple test endpoint to check if the route is working
+  fastify.get('/api/logs/test', {
+    preHandler: requirePermission('read')
+  }, async (request, reply) => {
+    try {
+      logger.info('Test endpoint called');
+      return {
+        success: true,
+        message: 'Logs route is working',
+        timestamp: new Date().toISOString(),
+        env: {
+          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+          config_server_native_basePath: config.server?.native?.basePath
+        }
+      };
+    } catch (error) {
+      logger.error('Test endpoint error:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Test endpoint failed',
         error: error.message
       });
     }

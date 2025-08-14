@@ -9,7 +9,7 @@ import { createServerManager } from './server-manager.js';
 class ArkLogsService {
   constructor() {
     // Use the same base path as the server manager for consistency
-    this.basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'F:\\ARK';
+    this.basePath = process.env.NATIVE_BASE_PATH || (config.server && config.server.native && config.server.native.basePath) || 'C:\\ARK';
     this.serverManager = createServerManager();
   }
 
@@ -18,7 +18,8 @@ class ArkLogsService {
    */
   async getAvailableLogs(serverName) {
     try {
-            logger.info(`Getting available log files for server: ${serverName}`);
+      logger.info(`Getting available log files for server: ${serverName}`);
+      logger.info(`ArkLogsService basePath: ${this.basePath}`);
       
       // Add timeout to prevent hanging
       const timeoutPromise = new Promise((_, reject) => 
