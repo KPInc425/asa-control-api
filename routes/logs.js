@@ -1,7 +1,7 @@
 import { requirePermission } from '../middleware/auth.js';
 // import arkLogsService from '../services/ark-logs.js';
 import logger from '../utils/logger.js';
-import config from '../config/index.js';
+// import config from '../config/index.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -15,98 +15,13 @@ export default async function (fastify) {
       
       logger.info(`Getting available log files for server: ${serverName}`);
       
-      // Add more detailed debugging
-      logger.info(`Environment check:`, {
-        NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
-        config_server_native_basePath: config.server?.native?.basePath,
-        serverName: serverName
-      });
-      
-      // Simple implementation without arkLogsService
-      const basePath = process.env.NATIVE_BASE_PATH || config.server?.native?.basePath || 'C:\\ARK';
-      logger.info(`Using basePath: ${basePath}`);
-      
-      // Look for server logs
-      const serverLogs = [];
-      const possibleServerPaths = [
-        path.join(basePath, 'servers', serverName),
-        path.join(basePath, 'clusters', 'default', serverName),
-        path.join(basePath, 'clusters', 'main', serverName),
-        path.join(basePath, serverName)
-      ];
-      
-      for (const serverPath of possibleServerPaths) {
-        try {
-          await fs.access(serverPath);
-          logger.info(`Found server at: ${serverPath}`);
-          
-          // Look for log files
-          const logDirs = [
-            path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
-            path.join(serverPath, 'logs'),
-            serverPath
-          ];
-          
-          for (const logDir of logDirs) {
-            try {
-              const files = await fs.readdir(logDir);
-              for (const file of files) {
-                if (file.endsWith('.log') || file.endsWith('.txt')) {
-                  const filePath = path.join(logDir, file);
-                  const stats = await fs.stat(filePath);
-                  serverLogs.push({
-                    name: file,
-                    path: filePath,
-                    size: stats.size,
-                    type: 'server'
-                  });
-                }
-              }
-            } catch (error) {
-              // Directory doesn't exist or can't be read
-              continue;
-            }
-          }
-          break; // Found the server, stop looking
-        } catch (error) {
-          // Server path doesn't exist
-          continue;
-        }
-      }
-      
-      // Look for system logs
-      const systemLogs = [];
-      const systemLogDirs = [
-        path.join(process.cwd(), 'logs'),
-        path.join(__dirname, '..', 'logs')
-      ];
-      
-      for (const logDir of systemLogDirs) {
-        try {
-          const files = await fs.readdir(logDir);
-          for (const file of files) {
-            if (file.endsWith('.log')) {
-              const filePath = path.join(logDir, file);
-              const stats = await fs.stat(filePath);
-              systemLogs.push({
-                name: file,
-                path: filePath,
-                size: stats.size,
-                type: 'system'
-              });
-            }
-          }
-        } catch (error) {
-          // Directory doesn't exist or can't be read
-          continue;
-        }
-      }
-      
+      // Simple response without file system operations
       return {
         success: true,
         serverName,
-        logFiles: serverLogs,
-        systemLogs: systemLogs
+        logFiles: [],
+        systemLogs: [],
+        message: 'Logs endpoint working - file system operations disabled for debugging'
       };
     } catch (error) {
       logger.error(`Failed to get log files for server ${request.params.serverName}:`, error);
@@ -162,8 +77,7 @@ export default async function (fastify) {
         message: 'Logs route is working',
         timestamp: new Date().toISOString(),
         env: {
-          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
-          config_server_native_basePath: config.server?.native?.basePath
+          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH
         }
       };
     } catch (error) {
@@ -171,6 +85,29 @@ export default async function (fastify) {
       return reply.status(500).send({
         success: false,
         message: 'Test endpoint failed',
+        error: error.message
+      });
+    }
+  });
+
+  // Debug endpoint without auth for browser testing
+  fastify.get('/api/logs/debug', async (request, reply) => {
+    try {
+      logger.info('Debug endpoint called');
+      return {
+        success: true,
+        message: 'Logs route is working!',
+        timestamp: new Date().toISOString(),
+        env: {
+          NATIVE_BASE_PATH: process.env.NATIVE_BASE_PATH,
+          NODE_ENV: process.env.NODE_ENV
+        }
+      };
+    } catch (error) {
+      logger.error('Debug endpoint error:', error);
+      return reply.status(500).send({
+        success: false,
+        message: 'Debug endpoint failed',
         error: error.message
       });
     }
