@@ -22,9 +22,12 @@ import nativeServerRoutes from './routes/native-servers.js';
 import saveFilesRoutes from './routes/save-files.js';
 import discordRoutes from './routes/discord.js';
 import autoShutdownRoutes from './routes/auto-shutdown.js';
+import autoUpdateRoutes from './routes/auto-update.js';
 import StaticServer from './services/static-server.js';
 import provisioningRoutes from './routes/provisioning/index.js';
 import { startChatPolling } from './services/chat-poller.js';
+import autoUpdateService from './services/auto-update-service.js';
+import { NotificationService } from './services/notifications/adapters.js';
 
 // Create Fastify instance
 const fastify = Fastify({
@@ -298,6 +301,8 @@ await fastify.register(discordRoutes);
 logger.info('Discord routes registered');
 await fastify.register(autoShutdownRoutes);
 logger.info('Auto shutdown routes registered');
+await fastify.register(autoUpdateRoutes);
+logger.info('Auto update routes registered');
 await fastify.register(provisioningRoutes);
 logger.info('Provisioning routes registered');
 
@@ -616,6 +621,116 @@ const setupSocketIO = () => {
 
 // WebSocket endpoints removed - using Socket.IO instead for real-time communication
 
+/**
+ * Setup auto-update service socket.io event forwarding
+ * Connects auto-update service events to socket.io broadcasts for real-time dashboard updates
+ * @param {Object} io - Socket.io server instance
+ * @param {Object} updateService - AutoUpdateService instance
+ */
+const setupAutoUpdateSocketEvents = (io, updateService) => {
+  logger.info('Setting up auto-update socket.io event forwarding...');
+  
+  // Forward 'checking' event - when checking for updates
+  updateService.on('auto-update:checking', (data) => {
+    logger.debug(`[AutoUpdate] Broadcasting checking event for ${data.serverName}`);
+    io.emit('auto-update:checking', {
+      serverName: data.serverName,
+      timestamp: data.timestamp || new Date().toISOString(),
+      message: `Checking for updates on ${data.serverName}...`
+    });
+  });
+  
+  // Forward 'available' event - when an update is available
+  updateService.on('auto-update:available', (data) => {
+    logger.info(`[AutoUpdate] Broadcasting update available for ${data.serverName}`);
+    io.emit('auto-update:available', {
+      serverName: data.serverName,
+      reason: data.reason,
+      lastUpdate: data.lastUpdate,
+      timestamp: data.timestamp || new Date().toISOString(),
+      message: `Update available for ${data.serverName}: ${data.reason}`
+    });
+  });
+  
+  // Forward 'warning' event - countdown warnings before update
+  updateService.on('auto-update:warning', (data) => {
+    logger.info(`[AutoUpdate] Broadcasting warning for ${data.serverName}: ${data.minutesRemaining}min remaining`);
+    io.emit('auto-update:warning', {
+      serverName: data.serverName,
+      minutesRemaining: data.minutesRemaining,
+      message: data.message,
+      timestamp: data.timestamp || new Date().toISOString()
+    });
+  });
+  
+  // Forward 'starting' event - when update process begins
+  updateService.on('auto-update:starting', (data) => {
+    logger.info(`[AutoUpdate] Broadcasting update starting for ${data.serverName}`);
+    io.emit('auto-update:starting', {
+      serverName: data.serverName,
+      jobId: data.jobId,
+      timestamp: data.timestamp || new Date().toISOString(),
+      message: `Update starting for ${data.serverName}`
+    });
+  });
+  
+  // Forward 'progress' event - step-by-step progress updates
+  updateService.on('auto-update:progress', (data) => {
+    logger.debug(`[AutoUpdate] Broadcasting progress for ${data.serverName}: ${data.message} (${data.percent}%)`);
+    io.emit('auto-update:progress', {
+      serverName: data.serverName,
+      step: data.step,
+      totalSteps: data.totalSteps,
+      message: data.message,
+      percent: data.percent,
+      timestamp: data.timestamp || new Date().toISOString()
+    });
+  });
+  
+  // Forward 'completed' event - when update finishes successfully
+  updateService.on('auto-update:completed', (data) => {
+    logger.info(`[AutoUpdate] Broadcasting update completed for ${data.serverName}`);
+    io.emit('auto-update:completed', {
+      serverName: data.serverName,
+      jobId: data.jobId,
+      timestamp: data.timestamp || new Date().toISOString(),
+      message: `Update completed successfully for ${data.serverName}`
+    });
+  });
+  
+  // Forward 'failed' event - when update fails
+  updateService.on('auto-update:failed', (data) => {
+    logger.error(`[AutoUpdate] Broadcasting update failed for ${data.serverName}: ${data.error}`);
+    io.emit('auto-update:failed', {
+      serverName: data.serverName,
+      jobId: data.jobId,
+      error: data.error,
+      phase: data.phase,
+      timestamp: data.timestamp || new Date().toISOString(),
+      message: `Update failed for ${data.serverName}: ${data.error}`
+    });
+  });
+  
+  // Forward scheduler status events
+  updateService.on('scheduler:started', () => {
+    logger.info('[AutoUpdate] Scheduler started');
+    io.emit('auto-update:scheduler-status', {
+      running: true,
+      timestamp: new Date().toISOString()
+    });
+  });
+  
+  updateService.on('scheduler:stopped', () => {
+    logger.info('[AutoUpdate] Scheduler stopped');
+    io.emit('auto-update:scheduler-status', {
+      running: false,
+      timestamp: new Date().toISOString()
+    });
+  });
+  
+  logger.info('Auto-update socket.io event forwarding configured');
+};
+
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
   logger.serviceEvent('info', `Received ${signal}. Starting graceful shutdown...`, {
@@ -625,6 +740,14 @@ const gracefulShutdown = async (signal) => {
   });
   
   try {
+    // Shutdown auto-update service
+    try {
+      await autoUpdateService.shutdown();
+      logger.info('Auto-update service shutdown complete');
+    } catch (error) {
+      logger.warn('Error shutting down auto-update service:', error.message);
+    }
+    
     // Close RCON connections
     const rconService = await import('./services/rcon.js');
     await rconService.default.closeAllConnections();
@@ -697,6 +820,35 @@ const start = async () => {
 
     // Start ARK chat polling
     startChatPolling(io);
+
+    // Initialize and start auto-update service
+    try {
+      logger.info('Initializing auto-update service...');
+      
+      // Create notification service instance with socket.io
+      const notificationService = new NotificationService({
+        io: io,
+        defaultChannels: { rcon: true, discord: true, socket: true }
+      });
+      
+      // Make notification service available globally
+      global.notificationService = notificationService;
+      
+      // Initialize auto-update service
+      await autoUpdateService.initialize();
+      
+      // Wire auto-update events to socket.io broadcasts
+      setupAutoUpdateSocketEvents(io, autoUpdateService);
+      
+      // Start the global scheduler if any servers have auto-update enabled
+      // The scheduler will check periodically for updates
+      autoUpdateService.startScheduler();
+      
+      logger.info('Auto-update service initialized and scheduler started');
+    } catch (error) {
+      logger.error('Failed to initialize auto-update service:', error);
+      // Don't fail startup - auto-update is not critical
+    }
     
     logger.serviceEvent('info', `ASA Control API server started successfully`, {
       event: 'startup-complete',

@@ -186,6 +186,51 @@ db.prepare(`CREATE TABLE IF NOT EXISTS server_update_configs (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )`).run();
 
+// --- Auto-Update Notification Fields Migration ---
+// Add new auto-update notification and configuration columns to server_update_configs
+const autoUpdateColumns = [
+  { name: 'notify_rcon', definition: 'BOOLEAN DEFAULT 1' },
+  { name: 'notify_discord', definition: 'BOOLEAN DEFAULT 1' },
+  { name: 'notify_socket', definition: 'BOOLEAN DEFAULT 1' },
+  { name: 'warning_minutes', definition: "TEXT DEFAULT '[30,10,5,1]'" },
+  { name: 'notification_templates', definition: 'TEXT DEFAULT NULL' },
+  { name: 'auto_update_enabled', definition: 'BOOLEAN DEFAULT 0' },
+  { name: 'auto_update_check_interval', definition: 'INTEGER DEFAULT 60' },
+  { name: 'auto_update_if_empty', definition: 'BOOLEAN DEFAULT 1' },
+  { name: 'last_update_check', definition: 'DATETIME DEFAULT NULL' },
+  { name: 'last_update_applied', definition: 'DATETIME DEFAULT NULL' }
+];
+
+for (const column of autoUpdateColumns) {
+  try {
+    db.prepare(`ALTER TABLE server_update_configs ADD COLUMN ${column.name} ${column.definition}`).run();
+    console.log(`Added column ${column.name} to server_update_configs`);
+  } catch (error) {
+    // Column already exists, ignore error
+  }
+}
+
+// Create server update history table
+db.prepare(`CREATE TABLE IF NOT EXISTS server_update_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_name TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  old_version TEXT,
+  new_version TEXT,
+  message TEXT,
+  details TEXT,
+  duration_ms INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`).run();
+
+// Create index on server_name for faster queries
+try {
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_update_history_server ON server_update_history(server_name)`).run();
+} catch (error) {
+  // Index already exists, ignore
+}
+
 // --- User CRUD functions ---
 
 /**
@@ -870,6 +915,278 @@ function deleteServerUpdateConfig(serverName) {
   return stmt.run(serverName);
 }
 
+// --- Auto-Update Configuration functions ---
+
+/**
+ * Get auto-update configuration for a server
+ * @param {string} serverName
+ * @returns {Object|null} Auto-update config with parsed JSON fields
+ */
+function getAutoUpdateConfig(serverName) {
+  const stmt = db.prepare(`
+    SELECT 
+      server_name,
+      notify_rcon,
+      notify_discord,
+      notify_socket,
+      warning_minutes,
+      notification_templates,
+      auto_update_enabled,
+      auto_update_check_interval,
+      auto_update_if_empty,
+      last_update_check,
+      last_update_applied,
+      updated_at
+    FROM server_update_configs 
+    WHERE server_name = ?
+  `);
+  const row = stmt.get(serverName);
+  
+  if (!row) return null;
+  
+  // Parse JSON fields
+  return {
+    ...row,
+    notify_rcon: !!row.notify_rcon,
+    notify_discord: !!row.notify_discord,
+    notify_socket: !!row.notify_socket,
+    warning_minutes: row.warning_minutes ? JSON.parse(row.warning_minutes) : [30, 10, 5, 1],
+    notification_templates: row.notification_templates ? JSON.parse(row.notification_templates) : null,
+    auto_update_enabled: !!row.auto_update_enabled,
+    auto_update_if_empty: !!row.auto_update_if_empty
+  };
+}
+
+/**
+ * Set auto-update configuration for a server
+ * @param {string} serverName
+ * @param {Object} config - Configuration object
+ * @param {boolean} [config.notify_rcon] - Enable RCON notifications
+ * @param {boolean} [config.notify_discord] - Enable Discord notifications
+ * @param {boolean} [config.notify_socket] - Enable socket notifications
+ * @param {number[]} [config.warning_minutes] - Warning intervals in minutes
+ * @param {Object} [config.notification_templates] - Custom message templates
+ * @param {boolean} [config.auto_update_enabled] - Enable auto-updates
+ * @param {number} [config.auto_update_check_interval] - Minutes between checks
+ * @param {boolean} [config.auto_update_if_empty] - Only update when empty
+ */
+function setAutoUpdateConfig(serverName, config) {
+  // First ensure the server exists in the table
+  const existing = db.prepare('SELECT server_name FROM server_update_configs WHERE server_name = ?').get(serverName);
+  
+  if (!existing) {
+    // Insert new record with defaults
+    db.prepare(`
+      INSERT INTO server_update_configs (server_name) VALUES (?)
+    `).run(serverName);
+  }
+  
+  // Build update statement dynamically based on provided fields
+  const updates = [];
+  const values = [];
+  
+  if (config.notify_rcon !== undefined) {
+    updates.push('notify_rcon = ?');
+    values.push(config.notify_rcon ? 1 : 0);
+  }
+  if (config.notify_discord !== undefined) {
+    updates.push('notify_discord = ?');
+    values.push(config.notify_discord ? 1 : 0);
+  }
+  if (config.notify_socket !== undefined) {
+    updates.push('notify_socket = ?');
+    values.push(config.notify_socket ? 1 : 0);
+  }
+  if (config.warning_minutes !== undefined) {
+    updates.push('warning_minutes = ?');
+    values.push(JSON.stringify(config.warning_minutes));
+  }
+  if (config.notification_templates !== undefined) {
+    updates.push('notification_templates = ?');
+    values.push(config.notification_templates ? JSON.stringify(config.notification_templates) : null);
+  }
+  if (config.auto_update_enabled !== undefined) {
+    updates.push('auto_update_enabled = ?');
+    values.push(config.auto_update_enabled ? 1 : 0);
+  }
+  if (config.auto_update_check_interval !== undefined) {
+    updates.push('auto_update_check_interval = ?');
+    values.push(config.auto_update_check_interval);
+  }
+  if (config.auto_update_if_empty !== undefined) {
+    updates.push('auto_update_if_empty = ?');
+    values.push(config.auto_update_if_empty ? 1 : 0);
+  }
+  
+  if (updates.length === 0) {
+    return { changes: 0 };
+  }
+  
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(serverName);
+  
+  const stmt = db.prepare(`
+    UPDATE server_update_configs 
+    SET ${updates.join(', ')}
+    WHERE server_name = ?
+  `);
+  
+  return stmt.run(...values);
+}
+
+/**
+ * Get all servers with auto-update enabled
+ * @returns {Array} List of server configs with auto-update enabled
+ */
+function getAutoUpdateEnabledServers() {
+  const stmt = db.prepare(`
+    SELECT 
+      server_name,
+      notify_rcon,
+      notify_discord,
+      notify_socket,
+      warning_minutes,
+      notification_templates,
+      auto_update_enabled,
+      auto_update_check_interval,
+      auto_update_if_empty,
+      last_update_check,
+      last_update_applied,
+      updated_at
+    FROM server_update_configs 
+    WHERE auto_update_enabled = 1
+    ORDER BY server_name
+  `);
+  const rows = stmt.all();
+  
+  // Parse JSON fields for each row
+  return rows.map(row => ({
+    ...row,
+    notify_rcon: !!row.notify_rcon,
+    notify_discord: !!row.notify_discord,
+    notify_socket: !!row.notify_socket,
+    warning_minutes: row.warning_minutes ? JSON.parse(row.warning_minutes) : [30, 10, 5, 1],
+    notification_templates: row.notification_templates ? JSON.parse(row.notification_templates) : null,
+    auto_update_enabled: !!row.auto_update_enabled,
+    auto_update_if_empty: !!row.auto_update_if_empty
+  }));
+}
+
+/**
+ * Update the last update check timestamp for a server
+ * @param {string} serverName
+ */
+function updateLastCheckTime(serverName) {
+  // Ensure server exists first
+  const existing = db.prepare('SELECT server_name FROM server_update_configs WHERE server_name = ?').get(serverName);
+  
+  if (!existing) {
+    db.prepare('INSERT INTO server_update_configs (server_name) VALUES (?)').run(serverName);
+  }
+  
+  const stmt = db.prepare(`
+    UPDATE server_update_configs 
+    SET last_update_check = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+    WHERE server_name = ?
+  `);
+  return stmt.run(serverName);
+}
+
+/**
+ * Update the last update applied timestamp for a server
+ * @param {string} serverName
+ */
+function updateLastAppliedTime(serverName) {
+  // Ensure server exists first
+  const existing = db.prepare('SELECT server_name FROM server_update_configs WHERE server_name = ?').get(serverName);
+  
+  if (!existing) {
+    db.prepare('INSERT INTO server_update_configs (server_name) VALUES (?)').run(serverName);
+  }
+  
+  const stmt = db.prepare(`
+    UPDATE server_update_configs 
+    SET last_update_applied = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+    WHERE server_name = ?
+  `);
+  return stmt.run(serverName);
+}
+
+/**
+ * Save an update history entry for a server
+ * @param {string} serverName - Server name
+ * @param {Object} entry - History entry
+ * @param {string} entry.eventType - Type of event (check, warning, update, restart, complete, error)
+ * @param {string} entry.status - Status (success, failed, in_progress)
+ * @param {string} [entry.oldVersion] - Previous version
+ * @param {string} [entry.newVersion] - New version after update
+ * @param {string} [entry.message] - Human-readable message
+ * @param {Object} [entry.details] - Additional details as JSON
+ * @param {number} [entry.durationMs] - Duration of operation in milliseconds
+ */
+function saveServerUpdateHistory(serverName, entry) {
+  const stmt = db.prepare(`
+    INSERT INTO server_update_history 
+    (server_name, event_type, status, old_version, new_version, message, details, duration_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  return stmt.run(
+    serverName,
+    entry.eventType,
+    entry.status,
+    entry.oldVersion || null,
+    entry.newVersion || null,
+    entry.message || null,
+    entry.details ? JSON.stringify(entry.details) : null,
+    entry.durationMs || null
+  );
+}
+
+/**
+ * Get update history for a server
+ * @param {string} serverName - Server name
+ * @param {number} [limit=50] - Maximum number of entries to return
+ * @returns {Array} List of history entries, most recent first
+ */
+function getServerUpdateHistory(serverName, limit = 50) {
+  const stmt = db.prepare(`
+    SELECT 
+      id,
+      server_name,
+      event_type,
+      status,
+      old_version,
+      new_version,
+      message,
+      details,
+      duration_ms,
+      created_at
+    FROM server_update_history 
+    WHERE server_name = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+  const rows = stmt.all(serverName, limit);
+  
+  // Parse JSON details field
+  return rows.map(row => ({
+    ...row,
+    details: row.details ? JSON.parse(row.details) : null
+  }));
+}
+
+/**
+ * Clean up old update history entries (older than specified days)
+ * @param {number} [daysToKeep=30] - Number of days of history to keep
+ */
+function cleanupOldUpdateHistory(daysToKeep = 30) {
+  const stmt = db.prepare(`
+    DELETE FROM server_update_history 
+    WHERE created_at < datetime('now', '-' || ? || ' days')
+  `);
+  return stmt.run(daysToKeep);
+}
+
 export {
   db,
   // User functions
@@ -941,4 +1258,14 @@ export {
   getAllServerUpdateConfigs,
   updateServerLastUpdate,
   deleteServerUpdateConfig,
+  // Auto-update configuration functions
+  getAutoUpdateConfig,
+  setAutoUpdateConfig,
+  getAutoUpdateEnabledServers,
+  updateLastCheckTime,
+  updateLastAppliedTime,
+  // Server update history functions
+  saveServerUpdateHistory,
+  getServerUpdateHistory,
+  cleanupOldUpdateHistory,
 };
