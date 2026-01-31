@@ -6,6 +6,15 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { promises as fs } from 'fs';
 import { getServerLiveStats } from '../services/asa-query.js';
+import { stateReconciliation } from '../services/state-reconciliation.js';
+import {
+  ServerStatus,
+  DataSource,
+  createServerLiveData,
+  createProblemDetails,
+  createProblemDetailsFromType,
+  normalizeStatus
+} from '../utils/statusContract.js';
 
 // Create native server manager instance (no Docker service)
 const serverManager = new NativeServerManager();
@@ -40,131 +49,132 @@ export default async function nativeServerRoutes(fastify, options) {
     try {
       const { name } = request.params;
       logger.info(`[live-details] Handling request for ${name}`);
-      // Always try asa-query first
-      const asaStats = await getServerLiveStats(name);
-      logger.info('[live-details] asaStats:', asaStats);
-      if (asaStats) {
-        logger.info(`[live-details] asa-query stats found for ${name}:`, asaStats);
-        const isOnline = asaStats.players > 0 || asaStats.started !== 'N/A';
-        logger.info('[live-details] asaStats isOnline:', isOnline);
-        let details;
-        if (isOnline) {
-          details = {
-            name,
-            status: 'online',
-            players: asaStats.players ?? 0,
-            maxPlayers: asaStats.maxPlayers ?? 0,
-            day: asaStats.day ?? 0,
-            gameTime: '00:00',
-            version: asaStats.version ?? 'N/A',
-            map: asaStats.map ?? 'N/A',
-            uptime: 0,
-            cpu: 0,
-            memory: 0,
-            lastUpdated: asaStats.lastUpdated || new Date().toISOString()
-          };
-        } else {
-          details = {
-            name,
-            status: 'offline',
-            players: asaStats.players ?? 0,
-            maxPlayers: asaStats.maxPlayers ?? 0,
-            day: asaStats.day ?? 0,
-            gameTime: '00:00',
-            version: asaStats.version ?? 'N/A',
-            map: asaStats.map ?? 'N/A',
-            uptime: 0,
-            cpu: 0,
-            memory: 0,
-            lastUpdated: asaStats.lastUpdated || new Date().toISOString()
-          };
-        }
-        const safeDetails = JSON.parse(JSON.stringify(details));
-        logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
-        logger.info('[live-details] about to return (asa-query)', { success: true, details: safeDetails });
-        return { success: true, details: safeDetails };
-      }
-      // If asa-query fails, fallback to RCON/local stats if server is running
+      
+      // Gather data from multiple sources for reconciliation
+      const sources = {};
+      
+      // Check if process is running
       let isRunning = false;
       let stats = {};
       try {
         isRunning = await serverManager.isRunning(name);
+        sources.process = { running: isRunning };
       } catch (err) {
         logger.warn(`isRunning check failed for ${name}:`, err);
       }
-      logger.info('[live-details] isRunning:', isRunning);
+      
+      // Try asa-query (server browser)
+      const asaStats = await getServerLiveStats(name);
+      if (asaStats) {
+        sources.query = {
+          success: true,
+          sessionName: asaStats.sessionName,
+          map: asaStats.map,
+          day: asaStats.day,
+          version: asaStats.version,
+          players: asaStats.players,
+          maxPlayers: asaStats.maxPlayers
+        };
+        // Record successful probe
+        stateReconciliation.recordSuccessfulProbe(name, DataSource.QUERY, asaStats);
+      }
+      
+      // If server appears running, try RCON for player data
+      let rconData = null;
       if (isRunning) {
         try {
           stats = await serverManager.getStats(name) || {};
+          if (stats) {
+            sources.process.stats = {
+              uptime: stats.uptime || 0,
+              cpu: stats.cpu || 0,
+              memory: stats.memory || 0
+            };
+          }
         } catch (err) {
           logger.warn(`getStats failed for ${name}:`, err);
-          stats = {};
         }
-        let playerCount = 0;
-        let maxPlayers = 70;
-        let day = 0;
-        let gameTime = '00:00';
-        let version = 'N/A';
-        let map = 'N/A';
+        
         try {
           const rconService = (await import('../services/rcon.js')).default;
-          const playerList = await rconService.getPlayerList(name);
-          playerCount = Array.isArray(playerList) ? playerList.length : 0;
-          const serverInfo = await rconService.getServerInfo(name);
-          if (serverInfo && serverInfo.Day) {
-            day = parseInt(serverInfo.Day) || 0;
-          }
-          if (day > 0) {
-            const hours = Math.floor((day * 24) % 24);
-            const minutes = Math.floor((day * 24 * 60) % 60);
-            gameTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+          const serverInfo = await serverManager.getClusterServerInfo(name);
+          if (serverInfo && serverInfo.rconPort) {
+            const rconOptions = {
+              host: '127.0.0.1',
+              port: serverInfo.rconPort,
+              password: serverInfo.adminPassword || serverInfo.config?.adminPassword || 'admin123',
+              timeout: 5000
+            };
+            const playerList = await rconService.getPlayerList(name, rconOptions);
+            rconData = {
+              success: true,
+              players: playerList,
+              playerCount: Array.isArray(playerList) ? playerList.length : 0
+            };
+            sources.rcon = rconData;
+            stateReconciliation.recordSuccessfulProbe(name, DataSource.RCON, rconData);
           }
         } catch (rconError) {
-          logger.warn(`RCON failed for ${name}, using fallback data:`, rconError.message);
+          logger.warn(`RCON failed for ${name}:`, rconError.message);
+          sources.rcon = { success: false, timeout: rconError.message.includes('timeout') };
         }
-        const details = {
-          name,
-          status: 'online',
-          players: playerCount,
-          maxPlayers,
-          day,
-          gameTime,
-          version,
-          map,
-          uptime: stats.uptime || 0,
-          cpu: stats.cpu || 0,
-          memory: stats.memory || 0,
-          lastUpdated: new Date().toISOString()
-        };
-        const safeDetails = JSON.parse(JSON.stringify(details));
-        logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
-        logger.info('[live-details] about to return (RCON/local)', { success: true, details: safeDetails });
-        return { success: true, details: safeDetails };
-      } else {
-        const details = {
-          name,
-          status: 'offline',
-          players: 0,
-          maxPlayers: 0,
-          day: 0,
-          gameTime: '00:00',
-          version: 'N/A',
-          map: 'N/A',
-          uptime: 0,
-          cpu: 0,
-          memory: 0,
-          lastUpdated: new Date().toISOString()
-        };
-        const safeDetails = JSON.parse(JSON.stringify(details));
-        logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
-        logger.info('[live-details] about to return (offline default)', { success: true, details: safeDetails });
-        return { success: true, details: safeDetails };
       }
+      
+      // Get reconciled status
+      const reconciledData = stateReconciliation.reconcileStatus(name, sources);
+      
+      // Build response in legacy format with enhanced data
+      // Map canonical status to legacy 'online'/'offline' for backward compatibility
+      const legacyStatus = (reconciledData.status === ServerStatus.RUNNING) ? 'online' : 
+                          (reconciledData.status === ServerStatus.STARTING) ? 'starting' :
+                          (reconciledData.status === ServerStatus.STOPPING) ? 'stopping' :
+                          (reconciledData.status === ServerStatus.FAILED) ? 'failed' : 'offline';
+      
+      const details = {
+        name,
+        status: legacyStatus,
+        canonicalStatus: reconciledData.status, // New: canonical status
+        players: rconData?.playerCount ?? asaStats?.players ?? 0,
+        maxPlayers: asaStats?.maxPlayers ?? 70,
+        day: asaStats?.day ?? 0,
+        gameTime: '00:00',
+        version: asaStats?.version ?? 'N/A',
+        map: asaStats?.map ?? 'N/A',
+        uptime: stats.uptime || 0,
+        cpu: stats.cpu || 0,
+        memory: stats.memory || 0,
+        lastUpdated: new Date().toISOString(),
+        source: reconciledData.source,
+        staleAfter: reconciledData.staleAfter,
+        lastSuccessfulProbe: reconciledData.lastSuccessfulProbe
+      };
+      
+      // Add transition info if present
+      if (reconciledData.transition) {
+        details.transition = reconciledData.transition;
+      }
+      
+      // Add crash info if present
+      if (reconciledData.crashInfo) {
+        details.crashInfo = reconciledData.crashInfo;
+      }
+      
+      // Add reason for failed/unknown states
+      if (reconciledData.reason) {
+        details.reason = reconciledData.reason;
+      }
+      
+      const safeDetails = JSON.parse(JSON.stringify(details));
+      logger.info('[live-details] about to return (reconciled)', { success: true, details: { name, status: safeDetails.status, canonicalStatus: safeDetails.canonicalStatus, source: safeDetails.source } });
+      return { success: true, details: safeDetails };
     } catch (error) {
       logger.error('[live-details] error', { error: error.message, stack: error.stack });
+      
+      // Return unknown status on error with proper formatting
       const details = {
         name: request.params.name,
         status: 'unknown',
+        canonicalStatus: ServerStatus.UNKNOWN,
         players: 0,
         maxPlayers: 0,
         day: 0,
@@ -174,10 +184,11 @@ export default async function nativeServerRoutes(fastify, options) {
         uptime: 0,
         cpu: 0,
         memory: 0,
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
+        source: DataSource.CACHED,
+        reason: `Status check failed: ${error.message}`
       };
       const safeDetails = JSON.parse(JSON.stringify(details));
-      logger.info('[live-details] details type:', { type: typeof details, keys: Object.keys(details) });
       logger.info('[live-details] about to return (error)', { success: true, details: safeDetails });
       return reply.status(200).send({ success: true, details: safeDetails });
     }
@@ -1751,6 +1762,7 @@ export default async function nativeServerRoutes(fastify, options) {
   });
 
   // Get enhanced server status with crash detection
+  // Uses unified status contract - see docs/STATUS_ERROR_CONTRACT.md
   fastify.get('/api/native-servers/:name/status', {
     preHandler: [requireRead],
     schema: {
@@ -1766,7 +1778,9 @@ export default async function nativeServerRoutes(fastify, options) {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
-            status: { type: 'object' }
+            data: { type: 'object', additionalProperties: true },
+            // Legacy compatibility - will be deprecated
+            status: { type: 'object', additionalProperties: true }
           }
         }
       }
@@ -1774,18 +1788,125 @@ export default async function nativeServerRoutes(fastify, options) {
   }, async (request, reply) => {
     try {
       const { name } = request.params;
-      const status = await serverManager.getServerStatus(name);
-      return { success: true, status };
+      const rawStatus = await serverManager.getServerStatus(name);
+      
+      // Create unified ServerLiveData response
+      const liveData = createServerLiveData({
+        serverId: name,
+        status: rawStatus.status,
+        source: DataSource.PROCESS,
+        players: {
+          online: rawStatus.playerCount || 0,
+          max: rawStatus.maxPlayers || 70
+        },
+        performance: {
+          uptime: rawStatus.uptime || 0,
+          cpu: rawStatus.cpu,
+          memory: rawStatus.memory
+        },
+        updatedAt: new Date().toISOString()
+      });
+      
+      // Add transition info if server is in a transitional state
+      if (rawStatus.status === 'starting' || rawStatus.status === 'stopping') {
+        liveData.transition = {
+          status: rawStatus.status,
+          previousStatus: rawStatus.previousStatus,
+          transitionStartedAt: rawStatus.startTime ? new Date(rawStatus.startTime).toISOString() : undefined
+        };
+      }
+      
+      // Add crash info if available
+      if (rawStatus.crashInfo) {
+        liveData.crashInfo = rawStatus.crashInfo;
+      }
+      
+      return { 
+        success: true, 
+        data: liveData,
+        // Legacy compatibility - keep 'status' for backward compatibility
+        status: rawStatus 
+      };
     } catch (error) {
       fastify.log.error(`Error getting enhanced server status for ${request.params.name}:`, error);
+      return reply.status(500).send(
+        createProblemDetails({
+          status: 500,
+          code: 'INTERNAL_ERROR',
+          title: 'Failed to get server status',
+          detail: error.message,
+          instance: request.url,
+          serverId: request.params.name
+        })
+      );
+    }
+  });
+
+  // Get state reconciliation debug info for a server
+  // Useful for debugging status determination logic
+  fastify.get('/api/native-servers/:name/state-debug', {
+    preHandler: [requireRead],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' }
+        }
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            debug: { type: 'object', additionalProperties: true }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { name } = request.params;
+      
+      // Get raw state from reconciliation service
+      const serverState = stateReconciliation.getServerState(name);
+      
+      // Get current status from server manager
+      const rawStatus = await serverManager.getServerStatus(name);
+      
+      // Get process info
+      let isRunning = false;
+      try {
+        isRunning = await serverManager.isRunning(name);
+      } catch (err) {
+        // Ignore
+      }
+      
+      return {
+        success: true,
+        debug: {
+          serverId: name,
+          serverState: serverState || { message: 'No tracked state for this server' },
+          currentStatus: rawStatus,
+          isProcessRunning: isRunning,
+          stateReconciliationInfo: {
+            lastIntent: serverState?.lastIntent || null,
+            lastKnownStatus: serverState?.lastKnownStatus || null,
+            transitionState: serverState?.transitionState || null,
+            lastSuccessfulProbe: serverState?.lastSuccessfulProbe || null,
+            lastStopReason: serverState?.lastStopReason || null
+          },
+          timestamp: new Date().toISOString()
+        }
+      };
+    } catch (error) {
+      logger.error(`Error getting state debug for ${request.params.name}:`, error);
       return reply.status(500).send({
         success: false,
         message: error.message
       });
     }
   });
-
-
 
   // Get all servers (compatibility endpoint)
   fastify.get('/api/servers', {

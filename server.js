@@ -748,6 +748,15 @@ const gracefulShutdown = async (signal) => {
       logger.warn('Error shutting down auto-update service:', error.message);
     }
     
+    // Destroy state reconciliation service to clear cleanup interval
+    try {
+      const { stateReconciliation } = await import('./services/state-reconciliation.js');
+      stateReconciliation.destroy();
+      logger.info('State reconciliation service destroyed');
+    } catch (error) {
+      logger.warn('Error destroying state reconciliation service:', error.message);
+    }
+    
     // Close RCON connections
     const rconService = await import('./services/rcon.js');
     await rconService.default.closeAllConnections();

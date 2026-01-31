@@ -1,6 +1,13 @@
 import dockerService from '../services/docker.js';
 import { DockerServerManager } from '../services/server-manager.js';
 import { requireRead, requireWrite } from '../middleware/auth.js';
+import {
+  ServerStatus,
+  DataSource,
+  createServerLiveData,
+  createProblemDetails,
+  normalizeStatus
+} from '../utils/statusContract.js';
 
 // Create Docker-only server manager instance
 const serverManager = new DockerServerManager(dockerService);
@@ -319,6 +326,7 @@ export default async function containerRoutes(fastify, options) {
   });
 
   // Get container status (compatibility with native servers)
+  // Uses unified status contract - see docs/STATUS_ERROR_CONTRACT.md
   fastify.get('/api/containers/:name/status', {
     preHandler: [requireRead],
     schema: {
@@ -334,6 +342,7 @@ export default async function containerRoutes(fastify, options) {
           type: 'object',
           properties: {
             success: { type: 'boolean' },
+            data: { type: 'object', additionalProperties: true },
             status: { type: 'object' }
           }
         }
@@ -343,17 +352,38 @@ export default async function containerRoutes(fastify, options) {
     try {
       const { name } = request.params;
       const running = await serverManager.isRunning(name);
-      const status = {
-        status: running ? 'running' : 'stopped',
-        running: running
+      const serverStatus = running ? ServerStatus.RUNNING : ServerStatus.STOPPED;
+      
+      // Create unified ServerLiveData response
+      const liveData = createServerLiveData({
+        serverId: name,
+        status: serverStatus,
+        source: DataSource.PROCESS,
+        players: { online: 0, max: 0 },
+        updatedAt: new Date().toISOString()
+      });
+      
+      return { 
+        success: true, 
+        data: liveData,
+        // Legacy compatibility
+        status: {
+          status: serverStatus,
+          running: running
+        }
       };
-      return { success: true, status };
     } catch (error) {
       fastify.log.error(`Error getting container status for ${request.params.name}:`, error);
-      return reply.status(500).send({
-        success: false,
-        message: error.message
-      });
+      return reply.status(500).send(
+        createProblemDetails({
+          status: 500,
+          code: 'INTERNAL_ERROR',
+          title: 'Failed to get container status',
+          detail: error.message,
+          instance: request.url,
+          serverId: request.params.name
+        })
+      );
     }
   });
 } 

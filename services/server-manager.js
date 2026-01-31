@@ -14,17 +14,34 @@ import {
   getServerMods,
   getServerSettings
 } from './database.js';
+import { 
+  ServerStatus, 
+  DataSource,
+  normalizeStatus,
+  createServerLiveData
+} from '../utils/statusContract.js';
+import { stateReconciliation, IntentType } from './state-reconciliation.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
  * Server statistics interface
+ * Aligned with STATUS_ERROR_CONTRACT.md specification
+ * @see docs/STATUS_ERROR_CONTRACT.md
  */
 export class ServerStats {
+  /**
+   * @param {string} name - Server name
+   * @param {string} status - Server status (uses ServerStatus constants)
+   * @param {number} cpu - CPU usage percentage
+   * @param {number} memory - Memory usage in MB
+   * @param {number} uptime - Uptime in seconds
+   * @param {number|null} pid - Process ID
+   */
   constructor(name, status, cpu, memory, uptime, pid) {
     this.name = name;
-    this.status = status; // 'running', 'stopped', 'starting', 'stopping'
+    this.status = normalizeStatus(status); // Normalize to canonical status
     this.cpu = cpu; // CPU usage percentage
     this.memory = memory; // Memory usage in MB
     this.uptime = uptime; // Uptime in seconds
@@ -188,6 +205,9 @@ export class NativeServerManager extends ServerManager {
 
   async start(name) {
     try {
+      // Record start intent for state reconciliation
+      stateReconciliation.recordIntent(name, IntentType.START, 'user');
+      
       // Check if server is already running
       const isCurrentlyRunning = await this.isRunning(name);
       if (isCurrentlyRunning) {
@@ -457,6 +477,14 @@ export class NativeServerManager extends ServerManager {
         processInfo.exitSignal = signal;
         processInfo.exitTime = new Date();
         
+        // Notify state reconciliation service about the exit
+        // It will determine if this was intentional or a crash
+        stateReconciliation.recordServerStopped(name, {
+          exitCode: code,
+          exitSignal: signal,
+          reason: code === 0 ? 'Normal exit' : `Process exited with code ${code}`
+        });
+        
         // Emit crash event for real-time updates
         this.eventEmitter.emit('serverCrashed', {
           name: name,
@@ -480,12 +508,21 @@ export class NativeServerManager extends ServerManager {
         processInfo.status = 'error';
         processInfo.error = error.message;
         processInfo.errorTime = new Date();
+        
+        // Notify state reconciliation service about the error
+        stateReconciliation.recordServerStopped(name, {
+          exitCode: -1,
+          reason: `Process error: ${error.message}`
+        });
       }
     });
   }
 
   async stop(name) {
     try {
+      // Record stop intent for state reconciliation
+      stateReconciliation.recordIntent(name, IntentType.STOP, 'user');
+      
       logger.info(`Stopping native server: ${name}`);
       
       const processInfo = this.processes.get(name);
@@ -499,6 +536,9 @@ export class NativeServerManager extends ServerManager {
             processInfo.process.kill('SIGKILL');
           }
         }, 5000);
+        
+        // Record successful stop
+        stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: 'Intentional stop' });
         
         this.processes.delete(name);
         logger.info(`Stopped server ${name}`);
@@ -526,9 +566,13 @@ export class NativeServerManager extends ServerManager {
           if (targetProcess) {
             // Kill the specific process by PID
             await execAsync(`taskkill /f /pid ${targetProcess.pid}`);
+            // Record successful stop
+            stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: 'Intentional stop' });
             logger.info(`Stopped server ${name} by PID ${targetProcess.pid}`);
             return { success: true, message: `Server ${name} stopped` };
           } else {
+            // Server wasn't running - still mark as stopped
+            stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: 'Server was not running' });
             logger.warn(`No running process found for server ${name}`);
             return { success: false, message: `Server ${name} not running` };
           }
@@ -545,6 +589,9 @@ export class NativeServerManager extends ServerManager {
 
   async restart(name) {
     try {
+      // Record restart intent for state reconciliation
+      stateReconciliation.recordIntent(name, IntentType.RESTART, 'user');
+      
       await this.stop(name);
       // Wait a moment for the process to fully stop
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -1719,47 +1766,77 @@ export class NativeServerManager extends ServerManager {
     try {
       const processInfo = this.processes.get(name);
       const isRunning = await this.isRunning(name);
-      if (!processInfo && !isRunning) {
-        return {
-          name: name,
-          status: 'stopped',
-          uptime: 0,
-          pid: null,
-          crashInfo: null
-        };
-      }
-      if (processInfo) {
-        const uptime = Math.floor((Date.now() - processInfo.startTime.getTime()) / 1000);
-        let currentStatus = processInfo.status;
-        if (processInfo.status === 'crashed') {
-          currentStatus = 'failed';
-        } else if (processInfo.process === null && isRunning) {
-          currentStatus = 'running';
-        } else if (processInfo.process === null && !isRunning) {
-          currentStatus = 'stopped';
-        }
-        return {
-          name: name,
-          status: currentStatus,
-          uptime: uptime,
-          pid: processInfo.process?.pid || null,
-          startTime: processInfo.startTime,
-          crashInfo: processInfo.status === 'crashed' ? {
+      
+      // Gather data sources for reconciliation
+      const sources = {
+        process: {
+          running: isRunning,
+          exitInfo: processInfo?.status === 'crashed' ? {
             exitCode: processInfo.exitCode,
             exitSignal: processInfo.exitSignal,
-            exitTime: processInfo.exitTime,
-            error: processInfo.error
-          } : null,
-          startupErrors: processInfo.startupErrors || null
-        };
-      }
-      return {
-        name: name,
-        status: isRunning ? 'running' : 'stopped',
-        uptime: 0,
-        pid: null,
-        crashInfo: null
+            reason: processInfo.error
+          } : undefined,
+          stats: processInfo ? {
+            uptime: Math.floor((Date.now() - processInfo.startTime.getTime()) / 1000),
+            cpu: processInfo.cpu,
+            memory: processInfo.memory
+          } : undefined
+        }
       };
+      
+      // Try to get RCON status if server appears to be running
+      if (isRunning) {
+        try {
+          const serverInfo = await this.getClusterServerInfo(name);
+          if (serverInfo && serverInfo.rconPort) {
+            const rconService = (await import('./rcon.js')).default;
+            const rconOptions = {
+              host: '127.0.0.1',
+              port: serverInfo.rconPort,
+              password: serverInfo.adminPassword || serverInfo.config?.adminPassword || 'admin123',
+              timeout: 5000 // Quick timeout for status check
+            };
+            try {
+              const response = await rconService.sendCommand(rconOptions, 'gettime');
+              sources.rcon = { success: true, response };
+            } catch (rconError) {
+              sources.rcon = { success: false, timeout: rconError.message.includes('timeout') };
+            }
+          }
+        } catch (rconSetupError) {
+          // RCON not available, continue with process-only check
+        }
+      }
+      
+      // Get reconciled status
+      const reconciledData = stateReconciliation.reconcileStatus(name, sources);
+      
+      // Build response in legacy format with enhanced data
+      const response = {
+        name: name,
+        status: reconciledData.status,
+        uptime: reconciledData.performance?.uptime || 0,
+        pid: processInfo?.process?.pid || null,
+        startTime: processInfo?.startTime,
+        source: reconciledData.source,
+        updatedAt: reconciledData.updatedAt,
+        staleAfter: reconciledData.staleAfter,
+        lastSuccessfulProbe: reconciledData.lastSuccessfulProbe,
+        crashInfo: reconciledData.crashInfo || null,
+        startupErrors: processInfo?.startupErrors || null
+      };
+      
+      // Add transition info if present
+      if (reconciledData.transition) {
+        response.transition = reconciledData.transition;
+      }
+      
+      // Add reason for failed/unknown states
+      if (reconciledData.reason) {
+        response.reason = reconciledData.reason;
+      }
+      
+      return response;
     } catch (error) {
       logger.error(`Failed to get server status for ${name}:`, error);
       return {
@@ -1767,8 +1844,10 @@ export class NativeServerManager extends ServerManager {
         status: 'unknown',
         uptime: 0,
         pid: null,
+        source: DataSource.CACHED,
         crashInfo: null,
-        error: error.message
+        error: error.message,
+        reason: `Status check failed: ${error.message}`
       };
     }
   }

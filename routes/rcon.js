@@ -1,6 +1,7 @@
 import rconService from '../services/rcon.js';
 import { testGetChatForServer } from '../services/chat-poller.js';
 import logger from '../utils/logger.js';
+import { createProblemDetails } from '../utils/statusContract.js';
 
 export default async function rconRoutes(fastify, options) {
   // Get RCON health status
@@ -196,10 +197,16 @@ export default async function rconRoutes(fastify, options) {
       };
     } catch (error) {
       logger.error('Error testing RCON connection:', error);
-      return reply.status(500).send({
-        success: false,
-        error: error.message
-      });
+      return reply.status(500).send(
+        createProblemDetails({
+          status: 500,
+          code: 'RCON_FAILED',
+          title: 'RCON Test Failed',
+          detail: error.message,
+          instance: request.url,
+          serverId: request.body?.serverName
+        })
+      );
     }
   });
 
@@ -253,10 +260,16 @@ export default async function rconRoutes(fastify, options) {
       };
     } catch (error) {
       logger.error('Error sending RCON command:', error);
-      return reply.status(500).send({
-        success: false,
-        error: error.message
-      });
+      return reply.status(500).send(
+        createProblemDetails({
+          status: 500,
+          code: 'RCON_FAILED',
+          title: 'RCON Command Failed',
+          detail: error.message,
+          instance: request.url,
+          serverId: request.body?.serverName
+        })
+      );
     }
   });
 
