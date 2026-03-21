@@ -194,6 +194,7 @@ const autoUpdateColumns = [
   { name: 'notify_socket', definition: 'BOOLEAN DEFAULT 1' },
   { name: 'warning_minutes', definition: "TEXT DEFAULT '[30,10,5,1]'" },
   { name: 'notification_templates', definition: 'TEXT DEFAULT NULL' },
+  { name: 'auto_restart', definition: 'BOOLEAN DEFAULT 1' },
   { name: 'auto_update_enabled', definition: 'BOOLEAN DEFAULT 0' },
   { name: 'auto_update_check_interval', definition: 'INTEGER DEFAULT 60' },
   { name: 'auto_update_if_empty', definition: 'BOOLEAN DEFAULT 1' },
@@ -931,6 +932,7 @@ function getAutoUpdateConfig(serverName) {
       notify_socket,
       warning_minutes,
       notification_templates,
+      auto_restart,
       auto_update_enabled,
       auto_update_check_interval,
       auto_update_if_empty,
@@ -952,6 +954,7 @@ function getAutoUpdateConfig(serverName) {
     notify_socket: !!row.notify_socket,
     warning_minutes: row.warning_minutes ? JSON.parse(row.warning_minutes) : [30, 10, 5, 1],
     notification_templates: row.notification_templates ? JSON.parse(row.notification_templates) : null,
+    auto_restart: row.auto_restart !== 0,
     auto_update_enabled: !!row.auto_update_enabled,
     auto_update_if_empty: !!row.auto_update_if_empty
   };
@@ -1005,6 +1008,10 @@ function setAutoUpdateConfig(serverName, config) {
     updates.push('notification_templates = ?');
     values.push(config.notification_templates ? JSON.stringify(config.notification_templates) : null);
   }
+  if (config.auto_restart !== undefined) {
+    updates.push('auto_restart = ?');
+    values.push(config.auto_restart ? 1 : 0);
+  }
   if (config.auto_update_enabled !== undefined) {
     updates.push('auto_update_enabled = ?');
     values.push(config.auto_update_enabled ? 1 : 0);
@@ -1047,6 +1054,7 @@ function getAutoUpdateEnabledServers() {
       notify_socket,
       warning_minutes,
       notification_templates,
+      auto_restart,
       auto_update_enabled,
       auto_update_check_interval,
       auto_update_if_empty,
@@ -1067,6 +1075,7 @@ function getAutoUpdateEnabledServers() {
     notify_socket: !!row.notify_socket,
     warning_minutes: row.warning_minutes ? JSON.parse(row.warning_minutes) : [30, 10, 5, 1],
     notification_templates: row.notification_templates ? JSON.parse(row.notification_templates) : null,
+    auto_restart: row.auto_restart !== 0,
     auto_update_enabled: !!row.auto_update_enabled,
     auto_update_if_empty: !!row.auto_update_if_empty
   }));

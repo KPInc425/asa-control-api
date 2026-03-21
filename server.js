@@ -16,7 +16,7 @@ import containerRoutes from './routes/containers.js';
 import rconRoutes from './routes/rcon.js';
 import configRoutes from './routes/configs.js';
 import enhancedAuthRoutes from './routes/enhanced-auth.js';
-// import logsRoutes from './routes/logs.js';
+import logsRoutes from './routes/logs.js';
 import environmentRoutes from './routes/environment.js';
 import nativeServerRoutes from './routes/native-servers.js';
 import saveFilesRoutes from './routes/save-files.js';
@@ -47,7 +47,16 @@ await fastify.register(multipart, {
 // CORS configuration
 const corsOrigins = process.env.CORS_ORIGIN 
   ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
-  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:4000'];
+  : [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:4173',
+      'http://127.0.0.1:4173',
+      'http://localhost:4000',
+      'http://127.0.0.1:4000'
+    ];
 
 await fastify.register(cors, {
   origin: corsOrigins,
@@ -168,85 +177,6 @@ fastify.get('/api/diagnostics/logs/ping', async (request, reply) => {
   };
 });
 
-// Temporary replacement endpoints under /api/logfiles to avoid proxy rules on /api/logs/*
-// List available log files for a server (minimal, server-side only)
-fastify.get('/api/logfiles/:serverName/files', async (request, reply) => {
-  try {
-    const { serverName } = request.params;
-    const basePath = config.server?.native?.basePath || process.env.NATIVE_BASE_PATH || 'C://ARK';
-    const clustersRoot = path.join(basePath, 'clusters');
-    const candidates = [path.join(basePath, 'servers', serverName), path.join(basePath, serverName)];
-    try {
-      const clusterDirs = await fs.readdir(clustersRoot);
-      for (const c of clusterDirs) {
-        candidates.push(path.join(clustersRoot, c, serverName));
-      }
-    } catch {}
-
-    let serverPath = null;
-    for (const p of candidates) {
-      try { await fs.access(p); serverPath = p; break; } catch {}
-    }
-
-    if (!serverPath) {
-      return { success: true, serverName, logFiles: [] };
-    }
-
-    const logDirs = [
-      path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
-      path.join(serverPath, 'logs'),
-      serverPath
-    ];
-
-    const results = [];
-    for (const dir of logDirs) {
-      try {
-        const files = await fs.readdir(dir);
-        for (const file of files) {
-          if (file.endsWith('.log') || file.endsWith('.txt')) {
-            const full = path.join(dir, file);
-            const st = await fs.stat(full);
-            results.push({ name: file, path: full, size: st.size });
-          }
-        }
-      } catch {}
-    }
-
-    // Sort by size desc as a proxy for recency
-    results.sort((a, b) => b.size - a.size);
-    return { success: true, serverName, logFiles: results };
-  } catch (err) {
-    return reply.status(200).send({ success: false, message: 'Failed to list log files', error: err?.message });
-  }
-});
-
-// Read recent lines from a specific log file
-fastify.get('/api/logfiles/:serverName/files/:fileName', async (request, reply) => {
-  try {
-    const { serverName, fileName } = request.params;
-    const { lines = 100 } = request.query;
-    const numLines = Math.max(1, parseInt(lines, 10) || 100);
-
-    // Reuse listing to find candidate paths
-    const listResp = await fastify.inject({
-      method: 'GET',
-      url: `/api/logfiles/${encodeURIComponent(serverName)}/files`
-    });
-    const data = JSON.parse(listResp.payload || '{}');
-    const match = (data.logFiles || []).find((f) => f.name === fileName);
-    if (!match) {
-      return reply.status(404).send({ success: false, message: 'Log file not found' });
-    }
-
-    const content = await fs.readFile(match.path, 'utf8');
-    const arr = content.split('\n');
-    const tail = arr.slice(-numLines).join('\n');
-    return { success: true, serverName, fileName, content: tail, lines: numLines };
-  } catch (err) {
-    return reply.status(200).send({ success: false, message: 'Failed to read log file', error: err?.message });
-  }
-});
-
 // Debug endpoint to test authentication
 fastify.get('/api/debug/auth', async (request, reply) => {
   const authHeader = request.headers.authorization;
@@ -289,8 +219,8 @@ await fastify.register(configRoutes);
 logger.info('Config routes registered');
 await fastify.register(enhancedAuthRoutes);
 logger.info('Enhanced auth routes registered');
-// await fastify.register(logsRoutes);
-logger.info('Logs routes temporarily disabled for debugging');
+await fastify.register(logsRoutes);
+logger.info('Logs routes registered');
 await fastify.register(environmentRoutes);
 logger.info('Environment routes registered');
 await fastify.register(nativeServerRoutes);

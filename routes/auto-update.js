@@ -12,7 +12,7 @@ import logger from '../utils/logger.js';
 import { requireRead, requireWrite } from '../middleware/auth.js';
 import autoUpdateService, { UPDATE_STATUS, DEFAULT_CONFIG } from '../services/auto-update-service.js';
 import { notifyInGame, notifyDiscord, notifySocket, NotificationService } from '../services/notifications/adapters.js';
-import { getServerUpdateConfig, getAllServerUpdateConfigs } from '../services/database.js';
+import { getAutoUpdateConfig, getAllServerUpdateConfigs } from '../services/database.js';
 
 /**
  * Auto-Update routes for managing automated server updates
@@ -119,7 +119,7 @@ export default async function autoUpdateRoutes(fastify, options) {
       
       // Get all enabled servers
       const configs = getAllServerUpdateConfigs();
-      const enabledConfigs = configs.filter(c => c.auto_update === 1);
+      const enabledConfigs = configs.filter(c => c.auto_update === 1 || c.auto_update_enabled === 1);
       
       // Start checking (don't await - let it run in background)
       autoUpdateService.checkAllServersForUpdates().catch(error => {
@@ -297,7 +297,7 @@ export default async function autoUpdateRoutes(fastify, options) {
       const config = autoUpdateService.getConfig(serverName);
       
       // Enhance config with notification settings from database
-      const dbConfig = getServerUpdateConfig(serverName);
+      const dbConfig = getAutoUpdateConfig(serverName);
       
       const enhancedConfig = {
         ...config,

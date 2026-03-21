@@ -12,6 +12,7 @@
 import { EventEmitter } from 'events';
 import logger from '../utils/logger.js';
 import { ServerProvisioner } from './server-provisioner.js';
+import { NativeServerManager } from './server-manager.js';
 import rconService from './rcon.js';
 import DiscordService from './discord.js';
 import { NotificationService } from './notifications/adapters.js';
@@ -23,11 +24,21 @@ import {
 } from './job-manager.js';
 import {
   upsertServerUpdateConfig,
+  getAutoUpdateConfig,
   getServerUpdateConfig,
   getAllServerUpdateConfigs,
+  setAutoUpdateConfig,
+  updateLastAppliedTime,
+  updateLastCheckTime,
   updateServerLastUpdate,
   saveServerUpdateHistory
 } from './database.js';
+
+const WARNING_RECHECK_INTERVAL_MS = 60 * 1000;
+const SAVE_RETRY_COUNT = 3;
+const SAVE_RETRY_DELAY_MS = 5000;
+const STARTUP_VERIFY_TIMEOUT_MS = 2 * 60 * 1000;
+const STARTUP_VERIFY_INTERVAL_MS = 5000;
 
 /**
  * Default configuration for auto-updates
@@ -67,6 +78,7 @@ export class AutoUpdateService extends EventEmitter {
     
     // Service dependencies
     this.serverProvisioner = new ServerProvisioner();
+    this.nativeServerManager = new NativeServerManager();
     this.discordService = new DiscordService();
     this.notificationService = null; // Will be set during initialization or via setNotificationService
     
@@ -147,7 +159,7 @@ export class AutoUpdateService extends EventEmitter {
       
       // Auto-start schedulers for enabled servers
       for (const config of configs) {
-        if (config.auto_update === 1) {
+        if (config.auto_update === 1 || config.auto_update_enabled === 1) {
           this.startServerScheduler(config.server_name);
         }
       }
@@ -271,7 +283,7 @@ export class AutoUpdateService extends EventEmitter {
     logger.info('[AutoUpdateService] Checking all servers for updates...');
     
     const configs = getAllServerUpdateConfigs();
-    const enabledConfigs = configs.filter(c => c.auto_update === 1);
+    const enabledConfigs = configs.filter(c => c.auto_update === 1 || c.auto_update_enabled === 1);
     
     for (const config of enabledConfigs) {
       try {
@@ -294,6 +306,8 @@ export class AutoUpdateService extends EventEmitter {
     this.emit('auto-update:checking', { serverName, timestamp: new Date() });
     
     try {
+      updateLastCheckTime(serverName);
+
       // Get update status from server provisioner
       const updateStatus = await this.serverProvisioner.checkServerUpdateStatus(serverName);
       
@@ -353,17 +367,18 @@ export class AutoUpdateService extends EventEmitter {
     
     // Check for players if not forcing
     if (!options.force) {
-      const playersConnected = await this.checkPlayersConnected(serverName);
+      const playerState = await this.getPlayerConnectionState(serverName);
+      const playersConnected = playerState.hasPlayers;
       
       if (playersConnected) {
-        if (config.updateIfEmpty) {
-          logger.info(`[AutoUpdateService] Players connected to ${serverName}, deferring update`);
-          return { success: false, message: 'Players connected, update deferred' };
-        } else {
-          // Start warning countdown
-          await this.startWarningCountdown(serverName, options);
-          return { success: true, message: 'Warning countdown started' };
-        }
+        await this.startWarningCountdown(serverName, {
+          ...options,
+          initialPlayerCount: playerState.count
+        });
+        return {
+          success: true,
+          message: `Warning countdown started for ${playerState.count} connected player(s)`
+        };
       }
     }
     
@@ -379,44 +394,109 @@ export class AutoUpdateService extends EventEmitter {
   async startWarningCountdown(serverName, options = {}) {
     const config = this.getConfig(serverName);
     const warningMinutes = config.warningMinutes || DEFAULT_CONFIG.warningMinutes;
+    const sortedWarningMinutes = [...warningMinutes].sort((a, b) => b - a);
+    const maxWarningMinutes = Math.max(...sortedWarningMinutes, 0);
+    const startedAt = new Date();
+    const deadlineAt = new Date(startedAt.getTime() + (maxWarningMinutes * 60 * 1000));
     
-    logger.info(`[AutoUpdateService] Starting warning countdown for ${serverName}: ${warningMinutes.join(', ')} minutes`);
+    logger.info(`[AutoUpdateService] Starting warning countdown for ${serverName}: ${sortedWarningMinutes.join(', ')} minutes`);
     
     this.setStatus(serverName, UPDATE_STATUS.WARNING, { 
-      warningMinutes,
-      startedAt: new Date()
+      warningMinutes: sortedWarningMinutes,
+      startedAt,
+      deadlineAt,
+      playersDetectedAtStart: options.initialPlayerCount ?? null
     });
     
     // Cancel any existing timers
     this.cancelWarnings(serverName);
     
     const timers = [];
-    const maxWarningMinutes = Math.max(...warningMinutes);
     
     // Schedule warning notifications
-    for (const minutes of warningMinutes) {
+    for (const minutes of sortedWarningMinutes) {
       const delayMs = (maxWarningMinutes - minutes) * 60 * 1000;
       
       const timer = setTimeout(async () => {
-        await this.sendWarningNotification(serverName, minutes);
+        await this.sendWarningNotification(serverName, minutes, { deadlineAt });
       }, delayMs);
       
       timers.push(timer);
     }
+
+    const recheckTimer = setInterval(async () => {
+      try {
+        await this.handleWarningPhaseRecheck(serverName, options, deadlineAt);
+      } catch (error) {
+        logger.warn(`[AutoUpdateService] Warning recheck failed for ${serverName}:`, error.message);
+      }
+    }, WARNING_RECHECK_INTERVAL_MS);
+
+    timers.push(recheckTimer);
     
     // Schedule the actual update after the last warning
     const updateDelayMs = maxWarningMinutes * 60 * 1000;
     const updateTimer = setTimeout(async () => {
-      await this.performUpdate(serverName, options);
+      await this.performUpdate(serverName, {
+        ...options,
+        playerStateAtExecution: await this.getPlayerConnectionState(serverName)
+      });
     }, updateDelayMs);
     
     timers.push(updateTimer);
     this.warningTimers.set(serverName, timers);
     
     // Send initial notification
-    await this.sendWarningNotification(serverName, maxWarningMinutes);
+    if (maxWarningMinutes > 0) {
+      await this.sendWarningNotification(serverName, maxWarningMinutes, { deadlineAt });
+    }
     
     return { success: true, firstWarning: maxWarningMinutes };
+  }
+
+  async handleWarningPhaseRecheck(serverName, options, deadlineAt) {
+    if (!this.warningTimers.has(serverName) || this.pendingUpdates.has(serverName)) {
+      return;
+    }
+
+    const playerState = await this.getPlayerConnectionState(serverName);
+    const now = new Date();
+
+    this.setStatus(serverName, UPDATE_STATUS.WARNING, {
+      ...this.getUpdateStatus(serverName),
+      deadlineAt,
+      lastPlayerCheckAt: now,
+      playersConnected: playerState.count
+    });
+
+    if (!playerState.hasPlayers) {
+      logger.info(`[AutoUpdateService] ${serverName} is empty during warning phase, proceeding immediately`);
+      this.cancelWarnings(serverName);
+
+      try {
+        await this.sendInGameBroadcast(serverName, '[AUTO-UPDATE] Server is now empty. Applying update immediately.');
+      } catch (error) {
+        logger.debug(`[AutoUpdateService] Empty-server broadcast skipped for ${serverName}: ${error.message}`);
+      }
+
+      await this.performUpdate(serverName, {
+        ...options,
+        startedEarlyBecauseEmpty: true,
+        playerStateAtExecution: playerState
+      });
+      return;
+    }
+
+    saveServerUpdateHistory(serverName, {
+      eventType: 'warning',
+      status: 'in_progress',
+      message: `Update pending with ${playerState.count} player(s) online`,
+      details: {
+        playersOnline: playerState.count,
+        checkedAt: now.toISOString(),
+        deadlineAt: deadlineAt.toISOString()
+      }
+    });
   }
 
   /**
@@ -424,10 +504,11 @@ export class AutoUpdateService extends EventEmitter {
    * @param {string} serverName - Server name
    * @param {number} minutesRemaining - Minutes until update
    */
-  async sendWarningNotification(serverName, minutesRemaining) {
+  async sendWarningNotification(serverName, minutesRemaining, context = {}) {
     logger.info(`[AutoUpdateService] Sending ${minutesRemaining}min warning for ${serverName}`);
     
     const config = this.getConfig(serverName);
+    const playerState = await this.getPlayerConnectionState(serverName);
     const message = `[AUTO-UPDATE] Server will restart for update in ${minutesRemaining} minute${minutesRemaining !== 1 ? 's' : ''}. Please save your progress!`;
     
     this.emit('auto-update:warning', {
@@ -435,6 +516,17 @@ export class AutoUpdateService extends EventEmitter {
       minutesRemaining,
       message,
       timestamp: new Date()
+    });
+
+    saveServerUpdateHistory(serverName, {
+      eventType: 'warning',
+      status: 'in_progress',
+      message,
+      details: {
+        minutesRemaining,
+        playersOnline: playerState.count,
+        deadlineAt: context.deadlineAt?.toISOString?.() || null
+      }
     });
     
     // Use NotificationService if available for unified notifications
@@ -602,7 +694,7 @@ export class AutoUpdateService extends EventEmitter {
       logger.info(`[AutoUpdateService] ${serverName}: ${steps[1]}`);
       
       try {
-        await this.saveWorldData(serverName);
+        await this.saveWorldDataWithRetry(serverName);
         logger.info(`[AutoUpdateService] ${serverName}: World data saved`);
       } catch (error) {
         logger.warn(`[AutoUpdateService] ${serverName}: Failed to save world (may be offline):`, error.message);
@@ -626,6 +718,7 @@ export class AutoUpdateService extends EventEmitter {
       
       // Update last update time in database
       updateServerLastUpdate(serverName);
+      updateLastAppliedTime(serverName);
       
       // Step 5: Start server
       if (config.autoRestart) {
@@ -641,9 +734,7 @@ export class AutoUpdateService extends EventEmitter {
         emitProgress(steps[5], 95);
         logger.info(`[AutoUpdateService] ${serverName}: ${steps[5]}`);
         
-        // Wait a bit and verify the server is responding
-        await this.delay(10000); // Wait 10 seconds
-        // TODO: Add actual health check here
+        await this.verifyServerStartup(serverName);
       }
       
       // Complete
@@ -671,7 +762,11 @@ export class AutoUpdateService extends EventEmitter {
           eventType: 'complete',
           status: 'success',
           message: 'Update completed successfully',
-          details: { jobId }
+          details: {
+            jobId,
+            playersOnlineAtExecution: options.playerStateAtExecution?.count ?? null,
+            startedEarlyBecauseEmpty: !!options.startedEarlyBecauseEmpty
+          }
         });
       } catch (historyError) {
         logger.warn(`[AutoUpdateService] Failed to save update history:`, historyError);
@@ -795,23 +890,87 @@ export class AutoUpdateService extends EventEmitter {
    * @returns {boolean} True if players are connected
    */
   async checkPlayersConnected(serverName) {
+    const playerState = await this.getPlayerConnectionState(serverName);
+    return playerState.hasPlayers;
+  }
+
+  async getPlayerConnectionState(serverName) {
     try {
       const serverConfig = await this.getServerRconConfig(serverName);
       if (!serverConfig) {
         logger.warn(`[AutoUpdateService] No RCON config found for ${serverName}`);
-        return false;
+        return {
+          hasPlayers: false,
+          count: 0,
+          players: [],
+          checkedAt: new Date().toISOString(),
+          source: 'missing-rcon'
+        };
       }
       
       const players = await rconService.getPlayerList(serverName, serverConfig);
       const hasPlayers = Array.isArray(players) && players.length > 0;
       
       logger.info(`[AutoUpdateService] ${serverName}: ${hasPlayers ? players.length : 0} players connected`);
-      return hasPlayers;
+      return {
+        hasPlayers,
+        count: hasPlayers ? players.length : 0,
+        players: Array.isArray(players) ? players : [],
+        checkedAt: new Date().toISOString(),
+        source: 'rcon'
+      };
     } catch (error) {
       logger.warn(`[AutoUpdateService] Failed to check players for ${serverName}:`, error.message);
       // Assume no players if we can't check (server might be offline)
-      return false;
+      return {
+        hasPlayers: false,
+        count: 0,
+        players: [],
+        checkedAt: new Date().toISOString(),
+        source: 'error',
+        error: error.message
+      };
     }
+  }
+
+  async runUpdateOnStart(serverName, options = {}) {
+    const config = this.getConfig(serverName);
+
+    if (!config.updateOnStart) {
+      return { success: true, skipped: true, reason: 'update_on_start disabled' };
+    }
+
+    logger.info(`[AutoUpdateService] Running update-on-start check for ${serverName}`);
+
+    const updateStatus = await this.serverProvisioner.checkServerUpdateStatus(serverName);
+    updateLastCheckTime(serverName);
+
+    if (updateStatus.needsUpdate) {
+      this.setStatus(serverName, UPDATE_STATUS.AVAILABLE, {
+        reason: updateStatus.reason,
+        lastUpdate: updateStatus.lastUpdate
+      });
+    }
+
+    if (!updateStatus.needsUpdate) {
+      return { success: true, skipped: true, reason: 'no update available', updateStatus };
+    }
+
+    if (this.pendingUpdates.has(serverName)) {
+      return { success: true, started: true, reason: 'update already in progress', updateStatus };
+    }
+
+    const result = await this.initiateUpdate(serverName, {
+      ...options,
+      force: options.force ?? config.forceUpdate ?? false,
+      triggeredBy: 'updateOnStart'
+    });
+
+    return {
+      ...result,
+      started: !!result?.success,
+      updateStatus
+    };
   }
 
   /**
@@ -853,6 +1012,26 @@ export class AutoUpdateService extends EventEmitter {
     }
   }
 
+  async saveWorldDataWithRetry(serverName) {
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= SAVE_RETRY_COUNT; attempt += 1) {
+      try {
+        await this.saveWorldData(serverName);
+        return;
+      } catch (error) {
+        lastError = error;
+        logger.warn(`[AutoUpdateService] Save attempt ${attempt}/${SAVE_RETRY_COUNT} failed for ${serverName}: ${error.message}`);
+
+        if (attempt < SAVE_RETRY_COUNT) {
+          await this.delay(SAVE_RETRY_DELAY_MS);
+        }
+      }
+    }
+
+    throw lastError || new Error(`Failed to save world for ${serverName}`);
+  }
+
   /**
    * Stop a server
    * @param {string} serverName - Server name
@@ -872,9 +1051,9 @@ export class AutoUpdateService extends EventEmitter {
         logger.warn(`[AutoUpdateService] RCON shutdown failed for ${serverName}:`, rconError.message);
       }
       
-      // For native servers, we need to stop the process
-      // This might need to be adapted based on how servers are managed
-      logger.info(`[AutoUpdateService] Server ${serverName} stop requested`);
+      const stopResult = await this.nativeServerManager.stop(serverName);
+      logger.info(`[AutoUpdateService] Server ${serverName} stop requested`, stopResult);
+      await this.waitForRunningState(serverName, false, 30000);
       
     } catch (error) {
       logger.error(`[AutoUpdateService] Failed to stop ${serverName}:`, error);
@@ -888,17 +1067,54 @@ export class AutoUpdateService extends EventEmitter {
    */
   async startServer(serverName) {
     try {
-      // This would need to be adapted based on how servers are started
-      // For native servers, this might invoke a start script
-      logger.info(`[AutoUpdateService] Server ${serverName} start requested`);
-      
-      // TODO: Implement server start logic based on server type
-      // await this.serverProvisioner.startServer(serverName);
+      const startResult = await this.nativeServerManager.start(serverName);
+      logger.info(`[AutoUpdateService] Server ${serverName} start requested`, startResult);
       
     } catch (error) {
       logger.error(`[AutoUpdateService] Failed to start ${serverName}:`, error);
       throw error;
     }
+  }
+
+  async verifyServerStartup(serverName) {
+    const started = await this.waitForRunningState(serverName, true, STARTUP_VERIFY_TIMEOUT_MS);
+
+    if (!started) {
+      throw new Error(`Server ${serverName} did not enter running state after update`);
+    }
+
+    const serverConfig = await this.getServerRconConfig(serverName);
+    if (!serverConfig) {
+      logger.warn(`[AutoUpdateService] No RCON config available for startup verification on ${serverName}`);
+      return true;
+    }
+
+    try {
+      await rconService.sendCommand(serverConfig, 'ListPlayers');
+      return true;
+    } catch (error) {
+      logger.warn(`[AutoUpdateService] RCON verification failed for ${serverName}: ${error.message}`);
+      return true;
+    }
+  }
+
+  async waitForRunningState(serverName, shouldBeRunning, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      try {
+        const isRunning = await this.nativeServerManager.isRunning(serverName);
+        if (isRunning === shouldBeRunning) {
+          return true;
+        }
+      } catch (error) {
+        logger.debug(`[AutoUpdateService] Running state check failed for ${serverName}: ${error.message}`);
+      }
+
+      await this.delay(STARTUP_VERIFY_INTERVAL_MS);
+    }
+
+    return false;
   }
 
   /**
@@ -982,21 +1198,24 @@ export class AutoUpdateService extends EventEmitter {
   getConfig(serverName) {
     try {
       const dbConfig = getServerUpdateConfig(serverName);
+      const autoConfig = getAutoUpdateConfig(serverName);
       
-      if (dbConfig) {
+      if (dbConfig || autoConfig) {
         return {
           serverName,
-          enabled: dbConfig.auto_update === 1,
-          updateOnStart: dbConfig.update_on_start === 1,
-          lastUpdate: dbConfig.last_update,
-          checkIntervalMinutes: dbConfig.update_interval || DEFAULT_CONFIG.checkIntervalMinutes,
-          cronExpression: dbConfig.update_schedule,
-          warningMinutes: DEFAULT_CONFIG.warningMinutes, // Could be stored in JSON column
+          enabled: autoConfig?.auto_update_enabled ?? (dbConfig?.auto_update === 1),
+          updateOnStart: dbConfig?.update_on_start === 1,
+          lastUpdate: dbConfig?.last_update || autoConfig?.last_update_applied || null,
+          checkIntervalMinutes: autoConfig?.auto_update_check_interval || dbConfig?.update_interval || DEFAULT_CONFIG.checkIntervalMinutes,
+          cronExpression: dbConfig?.update_schedule || DEFAULT_CONFIG.cronExpression,
+          warningMinutes: autoConfig?.warning_minutes || DEFAULT_CONFIG.warningMinutes,
           forceUpdate: DEFAULT_CONFIG.forceUpdate,
-          updateIfEmpty: DEFAULT_CONFIG.updateIfEmpty,
-          notifyDiscord: DEFAULT_CONFIG.notifyDiscord,
-          notifyInGame: DEFAULT_CONFIG.notifyInGame,
-          autoRestart: DEFAULT_CONFIG.autoRestart
+          updateIfEmpty: autoConfig?.auto_update_if_empty ?? DEFAULT_CONFIG.updateIfEmpty,
+          notifyDiscord: autoConfig?.notify_discord ?? DEFAULT_CONFIG.notifyDiscord,
+          notifyInGame: autoConfig?.notify_rcon ?? DEFAULT_CONFIG.notifyInGame,
+          notifySocket: autoConfig?.notify_socket ?? true,
+          notificationTemplates: autoConfig?.notification_templates || null,
+          autoRestart: autoConfig?.auto_restart ?? DEFAULT_CONFIG.autoRestart
         };
       }
       
@@ -1021,17 +1240,30 @@ export class AutoUpdateService extends EventEmitter {
    */
   setConfig(serverName, config) {
     try {
+      const existing = this.getConfig(serverName);
       const updateData = {
         serverName,
         clusterName: config.clusterName || null,
-        updateOnStart: config.updateOnStart !== undefined ? config.updateOnStart : true,
-        updateEnabled: config.enabled !== undefined ? config.enabled : true,
-        autoUpdate: config.enabled !== undefined ? config.enabled : false,
-        updateInterval: config.checkIntervalMinutes || DEFAULT_CONFIG.checkIntervalMinutes,
-        updateSchedule: config.cronExpression || null
+        updateOnStart: config.updateOnStart !== undefined ? config.updateOnStart : existing.updateOnStart,
+        updateEnabled: config.enabled !== undefined ? config.enabled : existing.enabled,
+        autoUpdate: config.enabled !== undefined ? config.enabled : existing.enabled,
+        updateInterval: config.checkIntervalMinutes || existing.checkIntervalMinutes || DEFAULT_CONFIG.checkIntervalMinutes,
+        updateSchedule: config.cronExpression !== undefined ? config.cronExpression : existing.cronExpression
       };
       
       upsertServerUpdateConfig(updateData);
+
+      setAutoUpdateConfig(serverName, {
+        auto_update_enabled: config.enabled !== undefined ? config.enabled : existing.enabled,
+        auto_update_check_interval: config.checkIntervalMinutes || existing.checkIntervalMinutes || DEFAULT_CONFIG.checkIntervalMinutes,
+        auto_update_if_empty: config.updateIfEmpty !== undefined ? config.updateIfEmpty : existing.updateIfEmpty,
+        notify_rcon: config.notifyInGame !== undefined ? config.notifyInGame : existing.notifyInGame,
+        notify_discord: config.notifyDiscord !== undefined ? config.notifyDiscord : existing.notifyDiscord,
+        notify_socket: config.notifySocket !== undefined ? config.notifySocket : existing.notifySocket,
+        warning_minutes: config.warningMinutes || existing.warningMinutes || DEFAULT_CONFIG.warningMinutes,
+        notification_templates: config.notificationTemplates !== undefined ? config.notificationTemplates : existing.notificationTemplates,
+        auto_restart: config.autoRestart !== undefined ? config.autoRestart : existing.autoRestart
+      });
       
       // Restart scheduler if running
       if (this.schedulers.has(serverName)) {

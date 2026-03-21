@@ -7,6 +7,7 @@ import { dirname, join } from 'path';
 import { promises as fs } from 'fs';
 import { getServerLiveStats } from '../services/asa-query.js';
 import { stateReconciliation } from '../services/state-reconciliation.js';
+import autoUpdateService from '../services/auto-update-service.js';
 import {
   ServerStatus,
   DataSource,
@@ -457,10 +458,20 @@ export default async function nativeServerRoutes(fastify, options) {
           message: `Cluster ${name} start initiated. Check server status for progress.`
         };
       } else {
-        // For individual servers, start in background and return immediately
-        serverManager.start(name).catch(error => {
-          fastify.log.error(`Background server start failed for ${name}:`, error);
-        });
+        // For individual servers, optionally run update-on-start before launch.
+        (async () => {
+          try {
+            const updateResult = await autoUpdateService.runUpdateOnStart(name);
+            if (updateResult?.success && !updateResult?.skipped) {
+              fastify.log.info(`Update-on-start triggered for ${name}; delaying server start until update flow completes`);
+              return;
+            }
+
+            await serverManager.start(name);
+          } catch (error) {
+            fastify.log.error(`Background server start failed for ${name}:`, error);
+          }
+        })();
         
         return {
           success: true,

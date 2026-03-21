@@ -1,9 +1,8 @@
 import { requirePermission } from '../middleware/auth.js';
-// import arkLogsService from '../services/ark-logs.js';
+import arkLogsService from '../services/ark-logs.js';
 import logger from '../utils/logger.js';
-// import config from '../config/index.js';
+import config from '../config/index.js';
 import fs from 'fs/promises';
-import path from 'path';
 
 export default async function (fastify) {
   // Get available log files for a server
@@ -14,14 +13,13 @@ export default async function (fastify) {
       const { serverName } = request.params;
       
       logger.info(`Getting available log files for server: ${serverName}`);
-      
-      // Simple response without file system operations
+
+      const logFiles = await arkLogsService.getAvailableLogs(serverName);
+
       return {
         success: true,
         serverName,
-        logFiles: [],
-        systemLogs: [],
-        message: 'Logs endpoint working - file system operations disabled for debugging'
+        logFiles
       };
     } catch (error) {
       logger.error(`Failed to get log files for server ${request.params.serverName}:`, error);
@@ -46,14 +44,15 @@ export default async function (fastify) {
       const { lines = 100 } = request.query;
       
       logger.info(`Getting recent logs from ${serverName}/${fileName} (${lines} lines)`);
-      
-      // Temporarily disabled arkLogsService
+
+      const content = await arkLogsService.getRecentLogs(serverName, fileName, parseInt(lines, 10));
+
       return {
         success: true,
         serverName,
         fileName,
-        content: 'arkLogsService temporarily disabled for debugging',
-        lines: parseInt(lines),
+        content,
+        lines: parseInt(lines, 10),
         timestamp: new Date().toISOString()
       };
     } catch (error) {
@@ -244,13 +243,13 @@ export default async function (fastify) {
       
       // Get the last N lines
       const linesArray = content.split('\n');
-      const recentLines = linesArray.slice(-parseInt(lines)).join('\n');
+      const recentLines = linesArray.slice(-parseInt(lines, 10)).join('\n');
       
       return {
         success: true,
         fileName,
         content: recentLines,
-        lines: parseInt(lines),
+        lines: parseInt(lines, 10),
         timestamp: new Date().toISOString()
       };
     } catch (error) {

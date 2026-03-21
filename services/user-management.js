@@ -363,20 +363,10 @@ class UserManagementService {
    */
   verifyToken(token) {
     try {
-      logger.info('=== VERIFY TOKEN DEBUG START ===');
-      logger.info(`Token to verify: ${token ? token.substring(0, 20) + '...' : 'NULL'}`);
-      logger.info(`JWT secret length: ${config.jwt.secret ? config.jwt.secret.length : 'NULL'}`);
-      
       const decoded = jwt.verify(token, config.jwt.secret);
-      logger.info(`Token decoded successfully:`, JSON.stringify(decoded, null, 2));
-      
-      const result = { success: true, user: decoded };
-      logger.info('=== VERIFY TOKEN DEBUG END ===');
-      return result;
+      return { success: true, user: decoded };
     } catch (error) {
       logger.warn('Token verification failed:', error.message);
-      logger.error('Full verification error:', error);
-      logger.info('=== VERIFY TOKEN DEBUG END ===');
       return { success: false, message: 'Invalid token' };
     }
   }

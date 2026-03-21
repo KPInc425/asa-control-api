@@ -1,4 +1,5 @@
 import authService from '../services/auth.js';
+import userManagementService from '../services/user-management.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 
 /**
@@ -51,7 +52,13 @@ export default async function authRoutes(fastify, options) {
         });
       }
 
-      const result = await authService.authenticateUser(username, password, rememberMe);
+      const result = await userManagementService.authenticateUser(
+        username,
+        password,
+        request.ip,
+        request.headers['user-agent'],
+        rememberMe
+      );
       
       if (!result.success) {
         return reply.status(401).send(result);

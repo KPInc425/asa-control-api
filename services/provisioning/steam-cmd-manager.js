@@ -1,13 +1,10 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
-import { createWriteStream } from 'fs';
+import { createReadStream, createWriteStream } from 'fs';
 import https from 'https';
+import unzipper from 'unzipper';
 import logger from '../../utils/logger.js';
 import config from '../../config/index.js';
-
-const execAsync = promisify(exec);
 
 /**
  * SteamCMD Manager
@@ -170,18 +167,9 @@ export class SteamCmdManager {
         console.log('\n=== Extracting SteamCMD ===');
       }
       logger.info(`[SteamCMD] Starting extraction to: ${this.steamCmdPath}`);
-      
+
       const extractStartTime = Date.now();
-      const extractCommand = `powershell -command "Expand-Archive -Path '${zipPath}' -DestinationPath '${this.steamCmdPath}' -Force"`;
-      logger.info(`[SteamCMD] Extract command: ${extractCommand}`);
-      
-      if (foreground) {
-        await this.execForeground(extractCommand);
-      } else {
-        const { execSync } = await import('child_process');
-        const output = execSync(extractCommand, { encoding: 'utf8', stdio: 'pipe' });
-        logger.info(`[SteamCMD] Extract output: ${output}`);
-      }
+      await this.extractZip(zipPath, this.steamCmdPath, foreground);
       
       const extractDuration = Date.now() - extractStartTime;
       logger.info(`[SteamCMD] Extraction completed in ${extractDuration}ms`);
@@ -254,6 +242,23 @@ export class SteamCmdManager {
         reject(err);
       });
     });
+  }
+
+  async extractZip(zipPath, destination, foreground = false) {
+    try {
+      if (foreground) {
+        console.log(`Extracting ${zipPath} to ${destination}`);
+      }
+
+      await createReadStream(zipPath)
+        .pipe(unzipper.Extract({ path: destination }))
+        .promise();
+
+      logger.info(`[SteamCMD] Zip extracted successfully to ${destination}`);
+    } catch (error) {
+      logger.error(`[SteamCMD] Zip extraction failed for ${zipPath}:`, error);
+      throw error;
+    }
   }
 
   /**

@@ -16,7 +16,7 @@ export async function metricsMiddleware(request, reply) {
   reply.send = function(payload) {
     const duration = (Date.now() - startTime) / 1000;
     const method = request.method;
-    const endpoint = request.routerPath || request.url;
+    const endpoint = request.routeOptions?.url || request.url;
     const statusCode = reply.statusCode || 200;
     
     // Record metrics

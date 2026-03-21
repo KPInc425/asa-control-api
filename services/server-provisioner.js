@@ -54,6 +54,10 @@ export class ServerProvisioner {
     this.steamCmdExe = this.steamCmdManager.getExecutablePath();
     this.autoInstallSteamCmd = config.server.native.autoInstallSteamCmd !== false;
     this.emitProgress = null;
+    this.latestBuildCache = {
+      buildId: null,
+      checkedAt: 0
+    };
 
     logger.info(`ServerProvisioner initialized successfully`);
     logger.info(`Servers path: ${this.serversPath}`);
@@ -425,8 +429,24 @@ export class ServerProvisioner {
           lastUpdate: config.lastUpdate
         };
       }
+
+      const latestBuildId = await this.getLatestAsaBuildId();
+      const localBuildId = await this.getInstalledAsaBuildId(serverName);
+
+      if (latestBuildId && localBuildId && latestBuildId !== localBuildId) {
+        return {
+          needsUpdate: true,
+          reason: `Steam build ${latestBuildId} is newer than installed build ${localBuildId}`,
+          lastUpdate: config.lastUpdate,
+          currentBuildId: localBuildId,
+          latestBuildId,
+          updateInterval: config.updateInterval,
+          updateOnStart: config.updateOnStart,
+          updateEnabled: config.updateEnabled
+        };
+      }
       
-      // Check if auto-update is enabled and enough time has passed
+      // Fallback when build IDs are unavailable: use the configured update cadence.
       if (config.autoUpdate && config.lastUpdate) {
         const lastUpdate = new Date(config.lastUpdate);
         const now = new Date();
@@ -437,6 +457,8 @@ export class ServerProvisioner {
             needsUpdate: true,
             reason: `Auto-update due (${Math.floor(hoursSinceUpdate)}h since last update)`,
             lastUpdate: config.lastUpdate,
+            currentBuildId: localBuildId,
+            latestBuildId,
             updateInterval: config.updateInterval,
             updateOnStart: config.updateOnStart,
             updateEnabled: config.updateEnabled
@@ -444,12 +466,14 @@ export class ServerProvisioner {
         }
       }
       
-      // For now, always return false for manual update checks
-      // In the future, this could check Steam for actual update availability
       return {
         needsUpdate: false,
-        reason: 'Up to date',
+        reason: latestBuildId && localBuildId
+          ? `Installed build ${localBuildId} matches Steam build ${latestBuildId}`
+          : 'Up to date',
         lastUpdate: config.lastUpdate,
+        currentBuildId: localBuildId,
+        latestBuildId,
         updateInterval: config.updateInterval,
         updateOnStart: config.updateOnStart,
         updateEnabled: config.updateEnabled
@@ -463,6 +487,99 @@ export class ServerProvisioner {
         error: error.message
       };
     }
+  }
+
+  async getLatestAsaBuildId() {
+    const cacheTtlMs = 5 * 60 * 1000;
+    if (this.latestBuildCache.buildId && (Date.now() - this.latestBuildCache.checkedAt) < cacheTtlMs) {
+      return this.latestBuildCache.buildId;
+    }
+
+    try {
+      const steamCmdExe = this.steamCmdManager.getExecutablePath();
+      const command = `"${steamCmdExe}" +login anonymous +app_info_update 1 +app_info_print 2430930 +quit`;
+      const { stdout } = await execAsync(command, {
+        timeout: 120000,
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024
+      });
+      const buildId = this.extractBuildId(stdout);
+
+      if (buildId) {
+        this.latestBuildCache = {
+          buildId,
+          checkedAt: Date.now()
+        };
+      }
+
+      return buildId;
+    } catch (error) {
+      logger.warn(`Failed to fetch latest Steam build ID for ASA: ${error.message}`);
+      return this.latestBuildCache.buildId;
+    }
+  }
+
+  async getInstalledAsaBuildId(serverName) {
+    try {
+      const serverPath = await this.getServerInstallPath(serverName);
+      if (!serverPath) {
+        return null;
+      }
+
+      const manifestCandidates = [
+        path.join(serverPath, 'steamapps', 'appmanifest_2430930.acf'),
+        path.join(serverPath, 'appmanifest_2430930.acf')
+      ];
+
+      for (const candidate of manifestCandidates) {
+        if (existsSync(candidate)) {
+          const contents = await fs.readFile(candidate, 'utf8');
+          const buildId = this.extractBuildId(contents);
+          if (buildId) {
+            return buildId;
+          }
+        }
+      }
+
+      return null;
+    } catch (error) {
+      logger.warn(`Failed to read installed build ID for ${serverName}: ${error.message}`);
+      return null;
+    }
+  }
+
+  extractBuildId(rawText) {
+    if (!rawText) {
+      return null;
+    }
+
+    const matches = [...rawText.matchAll(/"buildid"\s+"(\d+)"/g)];
+    if (matches.length === 0) {
+      return null;
+    }
+
+    return matches[matches.length - 1][1];
+  }
+
+  async getServerInstallPath(serverName) {
+    const standaloneServers = await this.listServers();
+    const standalone = standaloneServers.find((server) => server.name === serverName);
+    if (standalone?.path) {
+      return standalone.path;
+    }
+
+    const clusters = await this.listClusters();
+    for (const cluster of clusters) {
+      const clusterServer = cluster?.servers?.find((server) => server.name === serverName);
+      if (clusterServer?.serverPath) {
+        return clusterServer.serverPath;
+      }
+      if (clusterServer) {
+        return path.join(this.clustersPath, cluster.name, serverName);
+      }
+    }
+
+    return null;
   }
 
   /**
