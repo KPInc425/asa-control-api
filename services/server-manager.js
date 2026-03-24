@@ -618,6 +618,189 @@ export class NativeServerManager extends ServerManager {
     }
   }
 
+  getClusterIdFromConfig(serverConfig) {
+    if (!serverConfig) {
+      return null;
+    }
+
+    return (
+      serverConfig.clusterId ||
+      serverConfig.clusterName ||
+      (serverConfig.config && (serverConfig.config.clusterId || serverConfig.config.clusterName)) ||
+      null
+    );
+  }
+
+  async getClusterServers(clusterName) {
+    const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+    const dbConfigs = getAllServerConfigs();
+    const dbServers = dbConfigs
+      .map(configRow => {
+        try {
+          const serverConfig = JSON.parse(configRow.config_data);
+          const resolvedClusterName = this.getClusterIdFromConfig(serverConfig);
+
+          if (resolvedClusterName !== clusterName) {
+            return null;
+          }
+
+          return {
+            name: configRow.name,
+            ...serverConfig,
+            clusterName: resolvedClusterName,
+            clusterId: resolvedClusterName,
+            isClusterServer: true,
+            serverPath: serverConfig.serverPath || path.join(clustersPath, resolvedClusterName, configRow.name)
+          };
+        } catch (error) {
+          logger.warn(`Failed to parse database config for cluster lookup: ${configRow.name}`, error.message);
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    if (dbServers.length > 0) {
+      return dbServers;
+    }
+
+    const clusterConfigPath = path.join(clustersPath, clusterName, 'cluster.json');
+    try {
+      const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
+      const clusterConfig = JSON.parse(clusterConfigContent);
+
+      if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+        return clusterConfig.servers.map(server => ({
+          ...server,
+          name: server.name,
+          clusterName,
+          clusterId: server.clusterId || clusterName,
+          isClusterServer: true,
+          serverPath: server.serverPath || path.join(clustersPath, clusterName, server.name)
+        }));
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        logger.warn(`Error reading legacy cluster config for ${clusterName}:`, error.message);
+      }
+    }
+
+    const clusterPath = path.join(clustersPath, clusterName);
+    if (!existsSync(clusterPath)) {
+      return [];
+    }
+
+    const { parseStartBat } = await import('../utils/parse-start-bat.js');
+    const serverDirs = await fs.readdir(clusterPath);
+    const servers = [];
+
+    for (const serverDir of serverDirs) {
+      const serverPath = path.join(clusterPath, serverDir);
+      if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) {
+        continue;
+      }
+
+      const startBatPath = path.join(serverPath, 'start.bat');
+      if (!existsSync(startBatPath)) {
+        continue;
+      }
+
+      try {
+        const parsed = await parseStartBat(startBatPath);
+        servers.push({
+          name: parsed.name || serverDir,
+          ...parsed,
+          clusterName,
+          clusterId: parsed.clusterId || clusterName,
+          isClusterServer: true,
+          serverPath
+        });
+      } catch (error) {
+        logger.warn(`[NativeServerManager] Failed to parse start.bat for cluster ${clusterName} server ${serverDir}: ${error.message}`);
+      }
+    }
+
+    return servers;
+  }
+
+  async findServerOnDisk(name) {
+    const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+    const serversPath = this.serversPath || path.join(this.basePath, 'servers');
+    const { parseStartBat } = await import('../utils/parse-start-bat.js');
+
+    if (this.clustersPath && existsSync(this.clustersPath)) {
+      const clusterDirs = await fs.readdir(clustersPath);
+
+      for (const clusterName of clusterDirs) {
+        const clusterPath = path.join(clustersPath, clusterName);
+        if (!existsSync(clusterPath) || !(await fs.stat(clusterPath)).isDirectory()) {
+          continue;
+        }
+
+        const serverDirs = await fs.readdir(clusterPath);
+        for (const serverDir of serverDirs) {
+          const serverPath = path.join(clusterPath, serverDir);
+          if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) {
+            continue;
+          }
+
+          const startBatPath = path.join(serverPath, 'start.bat');
+          if (!existsSync(startBatPath)) {
+            continue;
+          }
+
+          try {
+            const parsed = await parseStartBat(startBatPath);
+            if (parsed.name === name || serverDir === name) {
+              return {
+                name: parsed.name || name,
+                ...parsed,
+                clusterName,
+                clusterId: parsed.clusterId || clusterName,
+                isClusterServer: true,
+                serverPath
+              };
+            }
+          } catch (error) {
+            logger.warn(`[NativeServerManager] Failed to parse start.bat while resolving ${name}: ${error.message}`);
+          }
+        }
+      }
+    }
+
+    if (serversPath && existsSync(serversPath)) {
+      const serverDirs = await fs.readdir(serversPath);
+      for (const serverDir of serverDirs) {
+        const serverPath = path.join(serversPath, serverDir);
+        if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) {
+          continue;
+        }
+
+        const startBatPath = path.join(serverPath, 'start.bat');
+        if (!existsSync(startBatPath)) {
+          continue;
+        }
+
+        try {
+          const parsed = await parseStartBat(startBatPath);
+          if (parsed.name === name || serverDir === name) {
+            return {
+              name: parsed.name || name,
+              ...parsed,
+              isClusterServer: false,
+              clusterName: null,
+              clusterId: null,
+              serverPath
+            };
+          }
+        } catch (error) {
+          logger.warn(`[NativeServerManager] Failed to parse standalone start.bat while resolving ${name}: ${error.message}`);
+        }
+      }
+    }
+
+    return null;
+  }
+
   /**
    * Get cluster server info with database config merge
    */
@@ -629,10 +812,12 @@ export class NativeServerManager extends ServerManager {
         logger.info(`Found server ${name} in database`);
         
         // Add serverPath to database config for compatibility with start process
-        const clusterId = dbConfig.clusterId || dbConfig.clusterName;
+        const clusterId = this.getClusterIdFromConfig(dbConfig);
         if (clusterId) {
-          const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+          const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, 'clusters');
           dbConfig.serverPath = path.join(clustersPath, clusterId, name);
+        } else if (!dbConfig.serverPath) {
+          dbConfig.serverPath = path.join(this.serversPath || path.join(this.basePath, 'servers'), name);
         }
         
         return dbConfig;
@@ -640,7 +825,7 @@ export class NativeServerManager extends ServerManager {
       
       // Fallback: Check disk-based cluster.json files (legacy support)
       logger.info(`Server ${name} not found in database, checking disk-based configs...`);
-      const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+      const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, 'clusters');
       const clusterDirs = await fs.readdir(clustersPath);
       
       for (const clusterDir of clusterDirs) {
@@ -653,7 +838,13 @@ export class NativeServerManager extends ServerManager {
             const server = clusterConfig.servers.find(s => s.name === name);
             if (server) {
               logger.info(`Found server ${name} in disk-based config for cluster ${clusterDir}`);
-              return server;
+              return {
+                ...server,
+                clusterName: clusterDir,
+                clusterId: server.clusterId || clusterDir,
+                isClusterServer: true,
+                serverPath: server.serverPath || path.join(clustersPath, clusterDir, name)
+              };
             }
           }
         } catch (error) {
@@ -662,6 +853,12 @@ export class NativeServerManager extends ServerManager {
           if (error.code === 'ENOENT') continue;
           // If error is something else, try to continue, but log it
         }
+      }
+
+      const fallbackServer = await this.findServerOnDisk(name);
+      if (fallbackServer) {
+        logger.info(`Found server ${name} by scanning start.bat files on disk`);
+        return fallbackServer;
       }
       
       logger.warn(`Server ${name} not found in database or disk-based configs`);
@@ -1496,16 +1693,13 @@ export class NativeServerManager extends ServerManager {
 
   // Add to NativeServerManager
   async startCluster(clusterName) {
-    // Use the correct native clusters path
-    const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
-    const clusterConfigPath = path.join(clustersPath, clusterName, 'cluster.json');
-    const configContent = await fs.readFile(clusterConfigPath, 'utf8');
-    const clusterConfig = JSON.parse(configContent);
-    if (!clusterConfig.servers || !Array.isArray(clusterConfig.servers)) {
+    const clusterServers = await this.getClusterServers(clusterName);
+    if (clusterServers.length === 0) {
       throw new Error(`No servers found in cluster: ${clusterName}`);
     }
+
     const results = [];
-    for (const server of clusterConfig.servers) {
+    for (const server of clusterServers) {
       try {
         const result = await this.start(server.name);
         results.push({ name: server.name, success: true, result });
@@ -1521,101 +1715,45 @@ export class NativeServerManager extends ServerManager {
    */
   async regenerateServerStartScript(serverName) {
     try {
-      // First, try to get server config from database (primary source)
       const dbServerConfig = this.getServerConfigFromDatabase(serverName);
-      if (dbServerConfig) {
-        try {
-          const clusterId = dbServerConfig.clusterId || dbServerConfig.clusterName;
-          
-          if (clusterId) {
-            // Get mod configuration for this server
-            const finalMods = await this.getFinalModListForServer(serverName);
-            let excludeSharedMods = dbServerConfig.excludeSharedMods === true;
-            
-            // Filter out null values from finalMods
-            const cleanMods = finalMods.filter(modId => modId !== null && modId !== undefined && modId !== '');
+      const resolvedServerConfig = dbServerConfig || await this.getClusterServerInfo(serverName);
 
-            // Update server config with new mods and preserve excludeSharedMods flag
-            dbServerConfig.mods = cleanMods;
-            dbServerConfig.excludeSharedMods = excludeSharedMods;
-            
-            logger.info(`[regenerateServerStartScript][DB] Updated server config for ${serverName}:`, {
-              mods: cleanMods,
-              excludeSharedMods: excludeSharedMods
-            });
-            
-            // Regenerate start.bat file using the provisioner
-            const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
-            const serverPath = path.join(clustersPath, clusterId, serverName);
-            
-            // Import the provisioner dynamically to avoid circular dependencies
-            const { ServerProvisioner } = await import('./services/server-provisioner.js');
-            const provisioner = new ServerProvisioner();
-            await provisioner.createStartScriptInCluster(clusterId, serverPath, dbServerConfig);
-            
-            logger.info(`[regenerateServerStartScript][DB] Regenerated start.bat for server ${serverName} in cluster ${clusterId}`);
-            return;
-          }
-        } catch (err) {
-          logger.warn(`[regenerateServerStartScript][DB] Failed to process config for ${serverName}:`, err.message);
-        }
+      if (!resolvedServerConfig) {
+        throw new Error(`Server ${serverName} not found in database or any cluster`);
       }
-      
-      // Fallback: Check disk-based cluster.json files (legacy support)
-      logger.info(`[regenerateServerStartScript] Server ${serverName} not found in database, checking disk-based configs...`);
-      const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
-      const clusterDirs = await fs.readdir(clustersPath);
-      
-      for (const clusterDir of clusterDirs) {
-        try {
-          const clusterConfigPath = path.join(clustersPath, clusterDir, 'cluster.json');
-          const clusterConfigContent = await fs.readFile(clusterConfigPath, 'utf8');
-          const clusterConfig = JSON.parse(clusterConfigContent);
-          
-          if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
-            const serverConfig = clusterConfig.servers.find(s => s.name === serverName);
-            if (serverConfig) {
-                                           // Get mod configuration for this server
-                             const finalMods = await this.getFinalModListForServer(serverName);
 
-                             // Filter out null values from finalMods
-                             const cleanMods = finalMods.filter(modId => modId !== null && modId !== undefined && modId !== '');
-
-                             // Preserve the excludeSharedMods flag from the database
-                             let excludeSharedMods = false;
-                             if (dbServerConfig) {
-                               excludeSharedMods = dbServerConfig.excludeSharedMods === true;
-                             }
-
-                             // Update server config with new mods and preserve excludeSharedMods flag
-                             serverConfig.mods = cleanMods;
-                             serverConfig.excludeSharedMods = excludeSharedMods;
-              
-              logger.info(`[regenerateServerStartScript] Updated server config for ${serverName}:`, {
-                mods: finalMods,
-                excludeSharedMods: excludeSharedMods
-              });
-              
-              // Update cluster config file
-              await fs.writeFile(clusterConfigPath, JSON.stringify(clusterConfig, null, 2));
-              
-              // Regenerate start.bat file using the provisioner
-              const serverPath = path.join(clustersPath, clusterDir, serverName);
-              
-              // Import the provisioner dynamically to avoid circular dependencies
-              const { default: provisioner } = await import('./services/server-provisioner.js');
-              await provisioner.createStartScriptInCluster(clusterDir, serverPath, serverConfig);
-              
-              logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterDir}`);
-              return;
-            }
-          }
-        } catch (error) {
-          logger.warn(`Error processing cluster ${clusterDir}:`, error.message);
-        }
+      const clusterId = this.getClusterIdFromConfig(resolvedServerConfig);
+      if (!clusterId) {
+        throw new Error(`Server ${serverName} is not associated with a cluster`);
       }
-      
-      throw new Error(`Server ${serverName} not found in database or any cluster`);
+
+      const finalMods = await this.getFinalModListForServer(serverName);
+      const cleanMods = finalMods.filter(modId => modId !== null && modId !== undefined && modId !== '');
+      const excludeSharedMods = dbServerConfig?.excludeSharedMods === true || resolvedServerConfig.excludeSharedMods === true;
+      const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, 'clusters');
+      const serverPath = resolvedServerConfig.serverPath || path.join(clustersPath, clusterId, serverName);
+      const serverConfig = {
+        ...resolvedServerConfig,
+        mods: cleanMods,
+        excludeSharedMods,
+        clusterId,
+        clusterName: clusterId,
+        serverPath
+      };
+
+      logger.info(`[regenerateServerStartScript] Updated server config for ${serverName}:`, {
+        mods: cleanMods,
+        excludeSharedMods,
+        clusterId,
+        serverPath
+      });
+
+      const { ServerProvisioner } = await import('./server-provisioner.js');
+      const provisioner = new ServerProvisioner();
+      await provisioner.createStartScriptInCluster(clusterId, serverPath, serverConfig);
+
+      logger.info(`Regenerated start.bat for server ${serverName} in cluster ${clusterId}`);
+      return;
     } catch (error) {
       logger.error(`Failed to regenerate start script for ${serverName}:`, error);
       throw error;
@@ -1677,15 +1815,13 @@ export class NativeServerManager extends ServerManager {
     }
   }
   async stopCluster(clusterName) {
-    const clustersPath = config.server.native.clustersPath || path.join(this.basePath, 'clusters');
-    const clusterConfigPath = path.join(clustersPath, clusterName, 'cluster.json');
-    const configContent = await fs.readFile(clusterConfigPath, 'utf8');
-    const clusterConfig = JSON.parse(configContent);
-    if (!clusterConfig.servers || !Array.isArray(clusterConfig.servers)) {
+    const clusterServers = await this.getClusterServers(clusterName);
+    if (clusterServers.length === 0) {
       throw new Error(`No servers found in cluster: ${clusterName}`);
     }
+
     const results = [];
-    for (const server of clusterConfig.servers) {
+    for (const server of clusterServers) {
       try {
         const result = await this.stop(server.name);
         results.push({ name: server.name, success: true, result });
