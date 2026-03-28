@@ -46,6 +46,9 @@ export default async function autoUpdateRoutes(fastify, options) {
                   lastCheck: { type: 'string', nullable: true },
                   nextCheck: { type: 'string', nullable: true },
                   updateAvailable: { type: 'boolean' },
+                  currentVersion: { type: 'string', nullable: true },
+                  latestVersion: { type: 'string', nullable: true },
+                  message: { type: 'string', nullable: true },
                   enabled: { type: 'boolean' },
                   schedulerActive: { type: 'boolean' }
                 }
@@ -75,6 +78,9 @@ export default async function autoUpdateRoutes(fastify, options) {
           lastCheck: status.updatedAt ? status.updatedAt.toISOString() : null,
           nextCheck,
           updateAvailable: status.status === UPDATE_STATUS.AVAILABLE,
+          currentVersion: status.currentBuildId || null,
+          latestVersion: status.latestBuildId || null,
+          message: status.reason || status.error || null,
           enabled: status.config?.enabled || false,
           schedulerActive: status.schedulerActive || false
         };
