@@ -1,9 +1,9 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs/promises';
-import path from 'path';
-import { existsSync } from 'fs';
-import logger from '../../utils/logger.js';
+import { exec } from "child_process";
+import { promisify } from "util";
+import fs from "fs/promises";
+import path from "path";
+import { existsSync } from "fs";
+import logger from "../../utils/logger.js";
 
 const execAsync = promisify(exec);
 
@@ -33,22 +33,22 @@ export class ASABinariesManager {
   async execForeground(command, options = {}) {
     return new Promise(async (resolve, reject) => {
       try {
-        const { execSync } = await import('child_process');
-        
+        const { execSync } = await import("child_process");
+
         logger.info(`Executing command in foreground: ${command}`);
         console.log(`\n=== Executing: ${command} ===\n`);
-        
+
         execSync(command, {
-          stdio: 'inherit',
-          ...options
+          stdio: "inherit",
+          ...options,
         });
-        
+
         console.log(`\n=== Command completed successfully ===\n`);
-        logger.info('Foreground command completed successfully');
+        logger.info("Foreground command completed successfully");
         resolve({ success: true });
       } catch (error) {
         console.log(`\n=== Command failed ===\n`);
-        logger.error('Foreground command failed:', error);
+        logger.error("Foreground command failed:", error);
         reject(error);
       }
     });
@@ -60,50 +60,66 @@ export class ASABinariesManager {
   async installForServer(serverName) {
     try {
       const serverPath = path.join(this.serversPath, serverName);
-      const binariesPath = path.join(serverPath, 'binaries');
-      
+      const binariesPath = path.join(serverPath, "binaries");
+
       logger.info(`Installing ASA binaries for server: ${serverName}`);
-      
+
       // Create binaries directory
       await fs.mkdir(binariesPath, { recursive: true });
-      
+
       // Use SteamCMD to install
       const steamCmdExe = this.steamCmdManager.getExecutablePath();
-      
+
       // Create installation script
-      const scriptPath = path.join(serverPath, 'install_asa.txt');
+      const scriptPath = path.join(serverPath, "install_asa.txt");
       const scriptContent = `@ShutdownOnFailedCommand 1
 @NoPromptForPassword 1
-login anonymous
 force_install_dir "${binariesPath}"
-app_update 2430930 validate
+login anonymous
+app_update 2430930
 quit`;
-      
+
       await fs.writeFile(scriptPath, scriptContent);
-      
+
       // Run SteamCMD
       const command = `"${steamCmdExe}" +runscript "${scriptPath}"`;
       const { stdout, stderr } = await execAsync(command, { timeout: 900000 });
-      
+
       if (stderr) {
         logger.warn(`SteamCMD stderr for ${serverName}: ${stderr}`);
       }
-      
+
       // Verify installation
-      const serverExe = path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
-      const exists = await fs.access(serverExe).then(() => true).catch(() => false);
-      
+      const serverExe = path.join(
+        binariesPath,
+        "ShooterGame",
+        "Binaries",
+        "Win64",
+        "ArkAscendedServer.exe",
+      );
+      const exists = await fs
+        .access(serverExe)
+        .then(() => true)
+        .catch(() => false);
+
       if (!exists) {
-        throw new Error(`ASA server executable not found at ${serverExe} after installation`);
+        throw new Error(
+          `ASA server executable not found at ${serverExe} after installation`,
+        );
       }
-      
+
       // Clean up script
       await fs.unlink(scriptPath);
-      
-      logger.info(`ASA binaries installed successfully for server: ${serverName}`);
+
+      logger.info(
+        `ASA binaries installed successfully for server: ${serverName}`,
+      );
       return { success: true };
     } catch (error) {
-      logger.error(`Failed to install ASA binaries for server ${serverName}:`, error);
+      logger.error(
+        `Failed to install ASA binaries for server ${serverName}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -114,47 +130,61 @@ quit`;
   async installForServerInCluster(clusterName, serverName, foreground = false) {
     const serverPath = path.join(this.clustersPath, clusterName, serverName);
     const clusterDir = path.join(this.clustersPath, clusterName);
-    
+
     try {
       // Ensure cluster and server directories exist before proceeding
       await fs.mkdir(clusterDir, { recursive: true });
       await fs.mkdir(serverPath, { recursive: true });
-      logger.info(`Installing ASA binaries for server: ${serverName} in cluster ${clusterName} (foreground: ${foreground})`);
+      logger.info(
+        `Installing ASA binaries for server: ${serverName} in cluster ${clusterName} (foreground: ${foreground})`,
+      );
       this.emitProgress?.(`Created server directory: ${serverPath}`);
-      
+
       // Use the correct SteamCMD path with proper escaping
       const steamCmdExe = this.steamCmdManager.getExecutablePath();
       const installPath = serverPath; // Install directly to server folder, not a binaries subfolder
-      
+
       // Build the full SteamCMD command with proper error handling
       const steamCmdCommand = `"${steamCmdExe}" +force_install_dir "${installPath}" +login anonymous +app_update 2430930 validate +quit`;
-      
+
       if (foreground) {
         console.log(`Installing ASA binaries for ${serverName}...`);
-        console.log('This may take several minutes depending on your internet connection...');
-        
+        console.log(
+          "This may take several minutes depending on your internet connection...",
+        );
+
         // Write the .bat file
-        const batPath = path.join(this.clustersPath, clusterName, `install_${serverName}.bat`);
+        const batPath = path.join(
+          this.clustersPath,
+          clusterName,
+          `install_${serverName}.bat`,
+        );
         const batContent = `@echo off\n${steamCmdCommand}\n`;
         await fs.writeFile(batPath, batContent);
-        
+
         // Debug: Ensure batch file exists and log contents
         await fs.access(batPath); // Throws if not found
         logger.info(`Batch file exists at: ${batPath}`);
         logger.info(`Batch file contents:\n${batContent}`);
-        logger.info(`Current working directory for exec: ${path.dirname(batPath)}`);
-        
+        logger.info(
+          `Current working directory for exec: ${path.dirname(batPath)}`,
+        );
+
         // Run the .bat file in foreground
         await this.execForeground(`cmd /c "${batPath}"`, {
           cwd: path.dirname(batPath),
-          timeout: 900000 // 15 minute timeout
+          timeout: 900000, // 15 minute timeout
         });
-        
+
         // Clean up .bat file
         await fs.unlink(batPath);
       } else {
         // Write the .bat file with better error handling
-        const batPath = path.join(this.clustersPath, clusterName, 'install_asa.bat');
+        const batPath = path.join(
+          this.clustersPath,
+          clusterName,
+          "install_asa.bat",
+        );
         const batContent = `@echo off
 echo Installing ASA binaries for ${serverName}...
 echo SteamCMD path: ${steamCmdExe}
@@ -166,7 +196,7 @@ echo Installation completed with exit code: %ERRORLEVEL%
 if %ERRORLEVEL% NEQ 0 (
     echo SteamCMD exited with error code: %ERRORLEVEL%
     echo Checking if files were actually downloaded...
-    if exist "${path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" (
+    if exist "${path.join(serverPath, "ShooterGame", "Binaries", "Win64", "ArkAscendedServer.exe")}" (
         echo ASA server executable found - installation may have succeeded despite error code
         exit 0
     ) else (
@@ -178,52 +208,86 @@ if %ERRORLEVEL% NEQ 0 (
     exit 0
 )`;
         await fs.writeFile(batPath, batContent);
-        
+
         // Debug: Ensure batch file exists and log contents
         await fs.access(batPath); // Throws if not found
         logger.info(`Batch file exists at: ${batPath}`);
         logger.info(`Batch file contents:\n${batContent}`);
-        logger.info(`Current working directory for exec: ${path.dirname(batPath)}`);
-        
+        logger.info(
+          `Current working directory for exec: ${path.dirname(batPath)}`,
+        );
+
         // Run the .bat file
         logger.info(`Running install batch: ${batPath}`);
         logger.info(`SteamCMD command: ${steamCmdCommand}`);
-        
+
         try {
           const { stdout, stderr } = await execAsync(`cmd /c "${batPath}"`, {
             cwd: path.dirname(batPath),
-            timeout: 900000 // 15 minute timeout
+            timeout: 900000, // 15 minute timeout
           });
-          
+
           if (stderr) {
             logger.warn(`SteamCMD stderr for ${serverName}: ${stderr}`);
           }
           if (stdout) {
-            logger.info(`SteamCMD stdout for ${serverName}: ${stdout.substring(0, 500)}...`);
+            logger.info(
+              `SteamCMD stdout for ${serverName}: ${stdout.substring(0, 500)}...`,
+            );
           }
-          
+
           // Check if the installation was successful by looking for key files
-          const arkServerExe = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
-          const exists = await fs.access(arkServerExe).then(() => true).catch(() => false);
-          
+          const arkServerExe = path.join(
+            serverPath,
+            "ShooterGame",
+            "Binaries",
+            "Win64",
+            "ArkAscendedServer.exe",
+          );
+          const exists = await fs
+            .access(arkServerExe)
+            .then(() => true)
+            .catch(() => false);
+
           if (!exists) {
-            throw new Error(`ASA server executable not found at ${arkServerExe} after installation`);
+            throw new Error(
+              `ASA server executable not found at ${arkServerExe} after installation`,
+            );
           }
-          
+
           logger.info(`ASA server executable verified at: ${arkServerExe}`);
         } catch (execError) {
-          logger.error(`SteamCMD execution failed for ${serverName}:`, execError);
-          
+          logger.error(
+            `SteamCMD execution failed for ${serverName}:`,
+            execError,
+          );
+
           // Check if the installation actually succeeded despite the error
-          const arkServerExe = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
-          const exists = await fs.access(arkServerExe).then(() => true).catch(() => false);
-          
+          const arkServerExe = path.join(
+            serverPath,
+            "ShooterGame",
+            "Binaries",
+            "Win64",
+            "ArkAscendedServer.exe",
+          );
+          const exists = await fs
+            .access(arkServerExe)
+            .then(() => true)
+            .catch(() => false);
+
           if (exists) {
-            logger.info(`ASA server executable found despite error, continuing: ${arkServerExe}`);
+            logger.info(
+              `ASA server executable found despite error, continuing: ${arkServerExe}`,
+            );
           } else {
             // If it's a timeout error, provide a more helpful message
-            if (execError.code === 'ETIMEDOUT' || execError.message.includes('timeout')) {
-              throw new Error(`SteamCMD update timed out for ${serverName}. The update may still be running in the background. Please check the server files or try again later.`);
+            if (
+              execError.code === "ETIMEDOUT" ||
+              execError.message.includes("timeout")
+            ) {
+              throw new Error(
+                `SteamCMD update timed out for ${serverName}. The update may still be running in the background. Please check the server files or try again later.`,
+              );
             }
             throw execError;
           }
@@ -232,56 +296,74 @@ if %ERRORLEVEL% NEQ 0 (
           await fs.unlink(batPath);
         }
       }
-      
+
       // Verify installation by checking for key files
-      const arkServerExe = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
-      const shooterGameDir = path.join(serverPath, 'ShooterGame');
-      
+      const arkServerExe = path.join(
+        serverPath,
+        "ShooterGame",
+        "Binaries",
+        "Win64",
+        "ArkAscendedServer.exe",
+      );
+      const shooterGameDir = path.join(serverPath, "ShooterGame");
+
       try {
         await fs.access(arkServerExe);
         logger.info(`ASA server executable verified: ${arkServerExe}`);
-        
+
         // Check if ShooterGame directory exists and has content
         const shooterGameStats = await fs.stat(shooterGameDir);
         if (shooterGameStats.isDirectory()) {
           const contents = await fs.readdir(shooterGameDir);
-          logger.info(`ShooterGame directory contents: ${contents.join(', ')}`);
+          logger.info(`ShooterGame directory contents: ${contents.join(", ")}`);
         }
-        
+
         this.emitProgress?.(`ASA binaries installed for server: ${serverName}`);
-        logger.info(`ASA binaries installed for server: ${serverName} in cluster ${clusterName}`);
+        logger.info(
+          `ASA binaries installed for server: ${serverName} in cluster ${clusterName}`,
+        );
       } catch (accessError) {
-        logger.error(`Installation verification failed for ${serverName}:`, accessError);
-        throw new Error(`ASA server executable not found at ${arkServerExe} after installation`);
+        logger.error(
+          `Installation verification failed for ${serverName}:`,
+          accessError,
+        );
+        throw new Error(
+          `ASA server executable not found at ${arkServerExe} after installation`,
+        );
       }
     } catch (error) {
-      logger.error(`Failed to install ASA binaries for server ${serverName} in cluster ${clusterName}:`, error);
-      this.emitProgress?.(`Failed to install ASA binaries for server ${serverName}: ${error.message}`);
-      
+      logger.error(
+        `Failed to install ASA binaries for server ${serverName} in cluster ${clusterName}:`,
+        error,
+      );
+      this.emitProgress?.(
+        `Failed to install ASA binaries for server ${serverName}: ${error.message}`,
+      );
+
       // Provide more specific error messages
       let errorMessage = `Failed to install ASA binaries for server ${serverName}`;
       if (error.message) {
-        if (error.message.includes('ENOENT')) {
+        if (error.message.includes("ENOENT")) {
           errorMessage = `Failed to access SteamCMD or create directories for server ${serverName}`;
-        } else if (error.message.includes('timeout')) {
+        } else if (error.message.includes("timeout")) {
           errorMessage = `SteamCMD installation timed out for server ${serverName}. Please try again.`;
-        } else if (error.message.includes('steamcmd')) {
+        } else if (error.message.includes("steamcmd")) {
           errorMessage = `SteamCMD installation failed for server ${serverName}. Please check if SteamCMD is properly installed.`;
-        } else if (error.message.includes('ArkAscendedServer.exe')) {
+        } else if (error.message.includes("ArkAscendedServer.exe")) {
           errorMessage = `ASA server files not found after installation for server ${serverName}. Installation may have failed.`;
         } else {
           errorMessage = error.message;
         }
       }
-      
+
       // Log additional debugging information
       logger.error(`Error details for ${serverName}:`, {
         errorCode: error.code,
         errorMessage: error.message,
         serverPath: serverPath,
-        steamCmdExe: this.steamCmdManager.getExecutablePath()
+        steamCmdExe: this.steamCmdManager.getExecutablePath(),
       });
-      
+
       throw new Error(errorMessage);
     }
   }
@@ -292,27 +374,36 @@ if %ERRORLEVEL% NEQ 0 (
   async updateForServer(serverName) {
     try {
       logger.info(`Updating ASA binaries for server: ${serverName}`);
-      
+
       // First check if it's a cluster server
       const clusters = await this.listClusters();
       for (const cluster of clusters) {
-        const server = cluster.config.servers?.find(s => s.name === serverName);
+        const server = cluster.config.servers?.find(
+          (s) => s.name === serverName,
+        );
         if (server) {
           // It's a cluster server, use the cluster-specific update method
-          logger.info(`Server ${serverName} is a cluster server, using cluster update method`);
+          logger.info(
+            `Server ${serverName} is a cluster server, using cluster update method`,
+          );
           await this.installForServerInCluster(cluster.name, serverName, false);
           logger.info(`ASA binaries updated for cluster server: ${serverName}`);
           return { success: true };
         }
       }
-      
+
       // If not found in clusters, try as standalone server
-      logger.info(`Server ${serverName} not found in clusters, trying as standalone server`);
+      logger.info(
+        `Server ${serverName} not found in clusters, trying as standalone server`,
+      );
       await this.installForServer(serverName);
       logger.info(`ASA binaries updated for standalone server: ${serverName}`);
       return { success: true };
     } catch (error) {
-      logger.error(`Failed to update ASA binaries for server ${serverName}:`, error);
+      logger.error(
+        `Failed to update ASA binaries for server ${serverName}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -322,16 +413,16 @@ if %ERRORLEVEL% NEQ 0 (
    */
   async updateAll() {
     try {
-      logger.info('Updating ASA binaries for all servers...');
+      logger.info("Updating ASA binaries for all servers...");
       await fs.mkdir(this.serversPath, { recursive: true }); // Ensure serversPath exists
       const servers = await fs.readdir(this.serversPath);
       const results = [];
-      
+
       for (const serverName of servers) {
         try {
           const serverPath = path.join(this.serversPath, serverName);
           const stat = await fs.stat(serverPath);
-          
+
           if (stat.isDirectory()) {
             logger.info(`Updating server: ${serverName}`);
             await this.updateForServer(serverName);
@@ -339,14 +430,18 @@ if %ERRORLEVEL% NEQ 0 (
           }
         } catch (error) {
           logger.error(`Failed to update server ${serverName}:`, error);
-          results.push({ server: serverName, success: false, error: error.message });
+          results.push({
+            server: serverName,
+            success: false,
+            error: error.message,
+          });
         }
       }
-      
-      logger.info('All server binary updates completed');
+
+      logger.info("All server binary updates completed");
       return { success: true, results };
     } catch (error) {
-      logger.error('Failed to update all server binaries:', error);
+      logger.error("Failed to update all server binaries:", error);
       throw error;
     }
   }
@@ -354,29 +449,42 @@ if %ERRORLEVEL% NEQ 0 (
   /**
    * Verify ASA binaries installation for a server
    */
-  async verifyInstallation(serverPath, serverType = 'cluster') {
+  async verifyInstallation(serverPath, serverType = "cluster") {
     try {
       let exePath;
-      if (serverType === 'cluster') {
-        exePath = path.join(serverPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+      if (serverType === "cluster") {
+        exePath = path.join(
+          serverPath,
+          "ShooterGame",
+          "Binaries",
+          "Win64",
+          "ArkAscendedServer.exe",
+        );
       } else {
-        exePath = path.join(serverPath, 'binaries', 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe');
+        exePath = path.join(
+          serverPath,
+          "binaries",
+          "ShooterGame",
+          "Binaries",
+          "Win64",
+          "ArkAscendedServer.exe",
+        );
       }
-      
+
       await fs.access(exePath);
       const stats = await fs.stat(exePath);
-      
+
       return {
         installed: true,
         executable: exePath,
         size: stats.size,
-        modified: stats.mtime.toISOString()
+        modified: stats.mtime.toISOString(),
       };
     } catch (error) {
       return {
         installed: false,
         executable: null,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -390,44 +498,44 @@ if %ERRORLEVEL% NEQ 0 (
       if (!existsSync(this.clustersPath)) {
         return clusters;
       }
-      
+
       const clusterDirs = await fs.readdir(this.clustersPath);
-      
+
       for (const clusterName of clusterDirs) {
         try {
           const clusterPath = path.join(this.clustersPath, clusterName);
           const stat = await fs.stat(clusterPath);
-          
+
           if (stat.isDirectory()) {
-            const configPath = path.join(clusterPath, 'cluster.json');
+            const configPath = path.join(clusterPath, "cluster.json");
             let clusterConfig = {};
-            
+
             try {
-              const configContent = await fs.readFile(configPath, 'utf8');
+              const configContent = await fs.readFile(configPath, "utf8");
               clusterConfig = JSON.parse(configContent);
             } catch {
               // Cluster config not found, use defaults
               clusterConfig = {
                 name: clusterName,
-                servers: []
+                servers: [],
               };
             }
-            
+
             clusters.push({
               name: clusterName,
               path: clusterPath,
-              config: clusterConfig
+              config: clusterConfig,
             });
           }
         } catch (error) {
           logger.error(`Error reading cluster ${clusterName}:`, error);
         }
       }
-      
+
       return clusters;
     } catch (error) {
-      logger.error('Failed to list clusters:', error);
+      logger.error("Failed to list clusters:", error);
       return [];
     }
   }
-} 
+}
