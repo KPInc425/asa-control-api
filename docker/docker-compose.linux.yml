@@ -1,0 +1,61 @@
+services:
+  asa-api:
+    container_name: asa-control-api
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${PORT:-4000}:${PORT:-4000}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs:/app/logs
+      - ../data:/app/data
+      # Mount the local gameservers directory for native mode
+      - ${NATIVE_BASE_PATH:-/home/steam/gameservers}:/opt/asa/asa-server
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - HOST=0.0.0.0
+      - PORT=${PORT:-4000}
+      - DOCKER_SOCKET_PATH=/var/run/docker.sock
+      - DOCKER_ENABLED=${DOCKER_ENABLED:-true}
+      - SERVER_MODE=${SERVER_MODE:-hybrid}
+      - NATIVE_BASE_PATH=${NATIVE_BASE_PATH:-/home/steam/gameservers}
+      - NATIVE_CONFIG_FILE=${NATIVE_CONFIG_FILE:-native-servers.json}
+      - STEAMCMD_PATH=${STEAMCMD_PATH:-}
+      - AUTO_INSTALL_STEAMCMD=${AUTO_INSTALL_STEAMCMD:-false}
+      - JWT_SECRET=${JWT_SECRET:-generate-secret-put-here}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:4010,https://ark.ilgaming.xyz}
+      - RCON_DEFAULT_PORT=${RCON_DEFAULT_PORT:-32330}
+      - RCON_PASSWORD=${RCON_PASSWORD:-admin}
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-1000}
+      - RATE_LIMIT_TIME_WINDOW=${RATE_LIMIT_TIME_WINDOW:-60000}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FILE_PATH=${LOG_FILE_PATH:-/app/logs/app.log}
+      - DB_PATH=${DB_PATH:-/app/data/asa-data.sqlite}
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - POWERSHELL_ENABLED=false
+      - AGENT_ENABLED=${AGENT_ENABLED:-false}
+      - ASA_CONFIG_SUB_PATH=${ASA_CONFIG_SUB_PATH:-Config/LinuxServer}
+      - ASA_UPDATE_LOCK_PATH=${ASA_UPDATE_LOCK_PATH:-/opt/asa/.update.lock}
+    restart: unless-stopped
+    networks:
+      - asa-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:${PORT:-4000}/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  asa-network:
+    driver: bridge

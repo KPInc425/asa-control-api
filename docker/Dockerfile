@@ -1,18 +1,21 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies (docker-cli + build tools for native modules)
 RUN apk add --no-cache \
     docker-cli \
+    python3 \
+    make \
+    g++ \
     && rm -rf /var/cache/apk/*
 
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (build tools already installed above for better-sqlite3 native module)
+RUN npm ci --legacy-peer-deps && npm prune --omit=dev
 
 # Copy application code
 COPY . .
@@ -20,23 +23,16 @@ COPY . .
 # Create logs directory
 RUN mkdir -p logs
 
-# Create non-root user with valid shell and home
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S -u 1001 -G nodejs -h /home/nodejs -s /bin/sh nodejs
-
-# Copy entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Change ownership of the app directory
-RUN chown -R nodejs:nodejs /app
+# Run as root to avoid host volume permission issues with docker socket
+# The entrypoint script handles docker group membership at runtime
+RUN mkdir -p logs && chmod 777 logs
 
 # Expose port
-EXPOSE 3000
+EXPOSE 4000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:4000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
 
-# Use the entrypoint script
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"] 
+# Start the server
+CMD ["node", "server.js"]
