@@ -288,7 +288,7 @@ export default async function clusterRoutes(fastify) {
     },
   );
 
-  // Add a server to an existing cluster
+  // Add a server to an existing cluster (async with job progress)
   fastify.post(
     "/api/provisioning/clusters/:clusterName/servers",
     {
@@ -329,25 +329,94 @@ export default async function clusterRoutes(fastify) {
           });
         }
 
-        const result = await provisioner.clusterManager.addServerToCluster(
+        const io = fastify.io;
+        const job = createJob("add-server-to-cluster", {
           clusterName,
-          serverConfig,
-        );
-        return reply.send({
-          success: true,
-          message: result.message,
+          serverName: serverConfig.name,
         });
+        logger.info(
+          `Created job ${job.id} for adding server to cluster ${clusterName}`,
+        );
+
+        // Respond immediately with job ID
+        reply.send({ success: true, jobId: job.id });
+
+        // Do the heavy work in the background
+        (async () => {
+          try {
+            addJobProgress(
+              job.id,
+              `Starting server creation for ${serverConfig.name} in cluster ${clusterName}...`,
+            );
+            if (io) {
+              io.emit("job-progress", {
+                jobId: job.id,
+                status: "running",
+                progress: 5,
+                message: `Creating server ${serverConfig.name}...`,
+              });
+            }
+
+            // Set up progress callback on the cluster manager
+            let stepCount = 0;
+            const totalSteps = 5;
+            provisioner.clusterManager.setProgressCallback((msg) => {
+              stepCount++;
+              const progress = Math.min(
+                Math.round((stepCount / totalSteps) * 100),
+                95,
+              );
+              addJobProgress(job.id, msg);
+              if (io) {
+                io.emit("job-progress", {
+                  jobId: job.id,
+                  status: "running",
+                  progress,
+                  message:
+                    typeof msg === "string"
+                      ? msg
+                      : msg.message || JSON.stringify(msg),
+                });
+              }
+            });
+
+            await provisioner.clusterManager.addServerToCluster(
+              clusterName,
+              serverConfig,
+            );
+
+            updateJob(job.id, { status: "completed" });
+            if (io) {
+              io.emit("job-progress", {
+                jobId: job.id,
+                status: "completed",
+                progress: 100,
+                message: `Server "${serverConfig.name}" added to cluster "${clusterName}" successfully!`,
+              });
+            }
+            logger.info(
+              `Job ${job.id} completed: server ${serverConfig.name} added to cluster ${clusterName}`,
+            );
+          } catch (err) {
+            logger.error(`Job ${job.id} failed: ${err.message}`);
+            updateJob(job.id, { status: "failed", error: err.message });
+            if (io) {
+              io.emit("job-progress", {
+                jobId: job.id,
+                status: "failed",
+                progress: 0,
+                message: `Failed: ${err.message}`,
+                error: err.message,
+              });
+            }
+          }
+        })();
       } catch (error) {
         logger.error(
           `Failed to add server to cluster ${request.params.clusterName}:`,
           error,
         );
-        const status = error.message.includes("does not exist")
-          ? 404
-          : error.message.includes("already exists")
-            ? 409
-            : 500;
-        return reply.status(status).send({
+        return reply.status(500).send({
           success: false,
           message: error.message,
         });
@@ -1260,12 +1329,10 @@ export default async function clusterRoutes(fastify) {
             targetClusterName = part.value;
         }
         if (!filePart || !targetClusterName) {
-          return reply
-            .status(400)
-            .send({
-              success: false,
-              message: "Missing file or targetClusterName",
-            });
+          return reply.status(400).send({
+            success: false,
+            message: "Missing file or targetClusterName",
+          });
         }
         // Save uploaded ZIP to temp file
         const tmpDir = await fs.mkdtemp(
@@ -1295,12 +1362,10 @@ export default async function clusterRoutes(fastify) {
           backupConfig = JSON.parse(configContent);
         } catch {
           await fs.rm(tmpDir, { recursive: true, force: true });
-          return reply
-            .status(400)
-            .send({
-              success: false,
-              message: "Invalid or missing cluster-config.json in backup",
-            });
+          return reply.status(400).send({
+            success: false,
+            message: "Invalid or missing cluster-config.json in backup",
+          });
         }
         // Check if target cluster exists
         const targetClusterPath = path.join(
@@ -1323,21 +1388,17 @@ export default async function clusterRoutes(fastify) {
             targetConfig = JSON.parse(targetContent);
           } catch {
             await fs.rm(tmpDir, { recursive: true, force: true });
-            return reply
-              .status(400)
-              .send({
-                success: false,
-                message: "Target cluster config not found or invalid",
-              });
+            return reply.status(400).send({
+              success: false,
+              message: "Target cluster config not found or invalid",
+            });
           }
           if (backupConfig.name !== targetConfig.name) {
             await fs.rm(tmpDir, { recursive: true, force: true });
-            return reply
-              .status(400)
-              .send({
-                success: false,
-                message: "Cluster name in backup does not match target",
-              });
+            return reply.status(400).send({
+              success: false,
+              message: "Cluster name in backup does not match target",
+            });
           }
           const backupServers = (backupConfig.servers || [])
             .map((s) => s.name)
@@ -1350,13 +1411,11 @@ export default async function clusterRoutes(fastify) {
             !backupServers.every((v, i) => v === targetServers[i])
           ) {
             await fs.rm(tmpDir, { recursive: true, force: true });
-            return reply
-              .status(400)
-              .send({
-                success: false,
-                message:
-                  "Server names/count in backup do not match target cluster",
-              });
+            return reply.status(400).send({
+              success: false,
+              message:
+                "Server names/count in backup do not match target cluster",
+            });
           }
           // Overwrite saves/configs for matching servers
           for (const serverName of backupServers) {
@@ -1389,12 +1448,10 @@ export default async function clusterRoutes(fastify) {
             await fs.cp(extractedPath, targetClusterPath, { recursive: true });
           } catch (err) {
             await fs.rm(tmpDir, { recursive: true, force: true });
-            return reply
-              .status(500)
-              .send({
-                success: false,
-                message: "Failed to create new cluster from backup",
-              });
+            return reply.status(500).send({
+              success: false,
+              message: "Failed to create new cluster from backup",
+            });
           }
           await fs.rm(tmpDir, { recursive: true, force: true });
           return reply.send({
@@ -1404,12 +1461,10 @@ export default async function clusterRoutes(fastify) {
         }
       } catch (error) {
         logger.error("Failed to restore cluster from backup:", error);
-        return reply
-          .status(500)
-          .send({
-            success: false,
-            message: "Failed to restore cluster from backup",
-          });
+        return reply.status(500).send({
+          success: false,
+          message: "Failed to restore cluster from backup",
+        });
       }
     },
   );
@@ -1595,12 +1650,10 @@ export default async function clusterRoutes(fastify) {
         return reply.send(archive);
       } catch (error) {
         logger.error("Failed to download cluster backup:", error);
-        return reply
-          .status(500)
-          .send({
-            success: false,
-            message: "Failed to download cluster backup",
-          });
+        return reply.status(500).send({
+          success: false,
+          message: "Failed to download cluster backup",
+        });
       }
     },
   );
@@ -1649,12 +1702,10 @@ export default async function clusterRoutes(fastify) {
         return reply.send(archive);
       } catch (error) {
         logger.error("Failed to download server backup:", error);
-        return reply
-          .status(500)
-          .send({
-            success: false,
-            message: "Failed to download server backup",
-          });
+        return reply.status(500).send({
+          success: false,
+          message: "Failed to download server backup",
+        });
       }
     },
   );
@@ -1748,12 +1799,10 @@ export default async function clusterRoutes(fastify) {
         });
       } catch (error) {
         logger.error("Failed to restore server from backup:", error);
-        return reply
-          .status(500)
-          .send({
-            success: false,
-            message: "Failed to restore server from backup",
-          });
+        return reply.status(500).send({
+          success: false,
+          message: "Failed to restore server from backup",
+        });
       }
     },
   );
