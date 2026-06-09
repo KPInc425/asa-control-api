@@ -1,15 +1,15 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { existsSync } from 'fs';
-import logger from '../../utils/logger.js';
-import { 
-  upsertServerConfig, 
-  getAllServerConfigs, 
+import fs from "fs/promises";
+import path from "path";
+import { existsSync } from "fs";
+import logger from "../../utils/logger.js";
+import {
+  upsertServerConfig,
+  getAllServerConfigs,
   deleteServerConfig,
   upsertSharedMod,
   upsertServerMod,
-  upsertServerSettings
-} from '../database.js';
+  upsertServerSettings,
+} from "../database.js";
 
 /**
  * Cluster Manager
@@ -18,7 +18,14 @@ import {
 const inProgressBackups = new Set();
 
 export class ClusterManager {
-  constructor(basePath, clustersPath, serversPath, asaBinariesManager, configGenerator, scriptGenerator) {
+  constructor(
+    basePath,
+    clustersPath,
+    serversPath,
+    asaBinariesManager,
+    configGenerator,
+    scriptGenerator,
+  ) {
     this.basePath = basePath;
     this.clustersPath = clustersPath;
     this.serversPath = serversPath;
@@ -44,21 +51,21 @@ export class ClusterManager {
 
     // Patch: Ensure every server has clusterId and clusterName
     if (Array.isArray(clusterConfig.servers)) {
-      clusterConfig.servers = clusterConfig.servers.map(server => ({
+      clusterConfig.servers = clusterConfig.servers.map((server) => ({
         ...server,
         clusterId: clusterName,
-        clusterName: clusterName
+        clusterName: clusterName,
       }));
     }
 
     // Define step sequence
     const steps = [
-      'Validating configuration',
-      'Creating cluster directory',
-      'Installing ASA binaries',
-      'Writing config files',
-      'Creating scripts',
-      'Finalizing'
+      "Validating configuration",
+      "Creating cluster directory",
+      "Installing ASA binaries",
+      "Writing config files",
+      "Creating scripts",
+      "Finalizing",
     ];
     let currentStep = 0;
     const emit = (msg, stepOverride) => {
@@ -67,34 +74,45 @@ export class ClusterManager {
         step,
         stepName: steps[step],
         percent: Math.round((step / (steps.length - 1)) * 100),
-        message: msg
+        message: msg,
       });
     };
 
     try {
-      emit('Validating configuration...');
+      emit("Validating configuration...");
       // Check required fields
       if (!clusterConfig.name || !clusterConfig.name.trim()) {
-        emit('Cluster name is required', 0);
-        throw new Error('Cluster name is required');
+        emit("Cluster name is required", 0);
+        throw new Error("Cluster name is required");
       }
 
       // Check name format
       if (clusterConfig.name && !/^[a-zA-Z0-9_-]+$/.test(clusterConfig.name)) {
-        emit('Cluster name can only contain letters, numbers, underscores, and hyphens', 0);
-        throw new Error('Cluster name can only contain letters, numbers, underscores, and hyphens');
+        emit(
+          "Cluster name can only contain letters, numbers, underscores, and hyphens",
+          0,
+        );
+        throw new Error(
+          "Cluster name can only contain letters, numbers, underscores, and hyphens",
+        );
       }
 
       // Check server count
-      if (clusterConfig.serverCount && (clusterConfig.serverCount < 1 || clusterConfig.serverCount > 10)) {
-        emit('Server count must be between 1 and 10', 0);
-        throw new Error('Server count must be between 1 and 10');
+      if (
+        clusterConfig.serverCount &&
+        (clusterConfig.serverCount < 1 || clusterConfig.serverCount > 10)
+      ) {
+        emit("Server count must be between 1 and 10", 0);
+        throw new Error("Server count must be between 1 and 10");
       }
 
       // Check base port
-      if (clusterConfig.basePort && (clusterConfig.basePort < 1024 || clusterConfig.basePort > 65535)) {
-        emit('Base port must be between 1024 and 65535', 0);
-        throw new Error('Base port must be between 1024 and 65535');
+      if (
+        clusterConfig.basePort &&
+        (clusterConfig.basePort < 1024 || clusterConfig.basePort > 65535)
+      ) {
+        emit("Base port must be between 1024 and 65535", 0);
+        throw new Error("Base port must be between 1024 and 65535");
       }
 
       // Check if cluster already exists
@@ -117,9 +135,9 @@ export class ClusterManager {
       // Patch: Build servers array with correct port logic
       const servers = clusterConfig.servers.map((server, index) => ({
         ...server,
-        gamePort: server.gamePort ?? (clusterConfig.basePort + (index * 100)),
-        queryPort: server.queryPort ?? (clusterConfig.basePort + 1 + (index * 100)),
-        rconPort: server.rconPort ?? (clusterConfig.basePort + 2 + (index * 100)),
+        gamePort: server.gamePort ?? clusterConfig.basePort + index * 100,
+        queryPort: server.queryPort ?? clusterConfig.basePort + 1 + index * 100,
+        rconPort: server.rconPort ?? clusterConfig.basePort + 2 + index * 100,
       }));
 
       // Save cluster config with correct ports
@@ -127,42 +145,59 @@ export class ClusterManager {
         ...clusterConfig,
         name: clusterName,
         created: new Date().toISOString(),
-        servers
+        servers,
       };
       // --- DB-native: upsert each server config into the DB ---
       for (const server of servers) {
         await upsertServerConfig(server.name, JSON.stringify(server));
       }
-      
+
       // Import global mods from cluster config
       if (clusterConfig.globalMods && Array.isArray(clusterConfig.globalMods)) {
-        logger.info(`[createCluster] Importing ${clusterConfig.globalMods.length} global mods for cluster ${clusterName}`);
+        logger.info(
+          `[createCluster] Importing ${clusterConfig.globalMods.length} global mods for cluster ${clusterName}`,
+        );
         for (const modId of clusterConfig.globalMods) {
           await upsertSharedMod(modId.toString(), null, true);
         }
       }
-      
+
       // Import server-specific mods and settings
       for (const server of servers) {
         // Import server mods
         if (server.mods && Array.isArray(server.mods)) {
-          logger.info(`[createCluster] Importing ${server.mods.length} server mods for ${server.name}`);
+          logger.info(
+            `[createCluster] Importing ${server.mods.length} server mods for ${server.name}`,
+          );
           for (const modId of server.mods) {
             // Validate modId before inserting
-            if (modId !== null && modId !== undefined && modId !== '' && !isNaN(modId)) {
-              await upsertServerMod(server.name, modId.toString(), null, true, server.excludeSharedMods || false);
+            if (
+              modId !== null &&
+              modId !== undefined &&
+              modId !== "" &&
+              !isNaN(modId)
+            ) {
+              await upsertServerMod(
+                server.name,
+                modId.toString(),
+                null,
+                true,
+                server.excludeSharedMods || false,
+              );
             } else {
-              logger.warn(`[createCluster] Skipping invalid modId for server ${server.name}: ${modId}`);
+              logger.warn(
+                `[createCluster] Skipping invalid modId for server ${server.name}: ${modId}`,
+              );
             }
           }
         }
-        
+
         // Import server settings (excludeSharedMods, etc.)
         if (server.excludeSharedMods !== undefined) {
           await upsertServerSettings(server.name, server.excludeSharedMods);
         }
       }
-      
+
       // --- Optionally: upsert cluster metadata to DB here (future) ---
       // await upsertCluster(clusterName, JSON.stringify(clusterConfigFile));
       // --- Remove JSON file write (DB is now source of truth) ---
@@ -177,9 +212,17 @@ export class ClusterManager {
         const serverPath = path.join(clusterPath, serverName);
         // Pass progress callback to sub-managers
         this.asaBinariesManager.setProgressCallback((progress) => {
-          let msg = progress && typeof progress === 'object' && 'message' in progress ? progress.message : progress;
-          if (typeof msg !== 'string') {
-            if (msg && typeof msg === 'object' && 'message' in msg && typeof msg.message === 'string') {
+          let msg =
+            progress && typeof progress === "object" && "message" in progress
+              ? progress.message
+              : progress;
+          if (typeof msg !== "string") {
+            if (
+              msg &&
+              typeof msg === "object" &&
+              "message" in msg &&
+              typeof msg.message === "string"
+            ) {
               msg = msg.message;
             } else {
               msg = JSON.stringify(msg);
@@ -188,9 +231,17 @@ export class ClusterManager {
           emit(msg || `Installing ASA binaries for ${serverName}`, 2);
         });
         this.configGenerator.setProgressCallback?.((progress) => {
-          let msg = progress && typeof progress === 'object' && 'message' in progress ? progress.message : progress;
-          if (typeof msg !== 'string') {
-            if (msg && typeof msg === 'object' && 'message' in msg && typeof msg.message === 'string') {
+          let msg =
+            progress && typeof progress === "object" && "message" in progress
+              ? progress.message
+              : progress;
+          if (typeof msg !== "string") {
+            if (
+              msg &&
+              typeof msg === "object" &&
+              "message" in msg &&
+              typeof msg.message === "string"
+            ) {
               msg = msg.message;
             } else {
               msg = JSON.stringify(msg);
@@ -199,9 +250,17 @@ export class ClusterManager {
           emit(msg || `Writing config for ${serverName}`, 3);
         });
         this.scriptGenerator.setProgressCallback?.((progress) => {
-          let msg = progress && typeof progress === 'object' && 'message' in progress ? progress.message : progress;
-          if (typeof msg !== 'string') {
-            if (msg && typeof msg === 'object' && 'message' in msg && typeof msg.message === 'string') {
+          let msg =
+            progress && typeof progress === "object" && "message" in progress
+              ? progress.message
+              : progress;
+          if (typeof msg !== "string") {
+            if (
+              msg &&
+              typeof msg === "object" &&
+              "message" in msg &&
+              typeof msg.message === "string"
+            ) {
               msg = msg.message;
             } else {
               msg = JSON.stringify(msg);
@@ -213,18 +272,34 @@ export class ClusterManager {
         // Step 2: Installing ASA binaries
         currentStep = 2;
         emit(`Installing ASA binaries for ${serverName}`);
-        await this.asaBinariesManager.installForServerInCluster(clusterName, serverName, foreground);
+        await this.asaBinariesManager.installForServerInCluster(
+          clusterName,
+          serverName,
+          foreground,
+        );
 
         // Step 3: Writing config files
         currentStep = 3;
         emit(`Writing config files for ${serverName}`);
-        await this.configGenerator.createServerConfigInCluster(clusterName, serverPath, serverConfig);
+        await this.configGenerator.createServerConfigInCluster(
+          clusterName,
+          serverPath,
+          serverConfig,
+        );
 
         // Step 4: Creating scripts
         currentStep = 4;
         emit(`Creating scripts for ${serverName}`);
-        await this.scriptGenerator.createStartScriptInCluster(clusterName, serverPath, serverConfig);
-        await this.scriptGenerator.createStopScriptInCluster(clusterName, serverPath, serverName);
+        await this.scriptGenerator.createStartScriptInCluster(
+          clusterName,
+          serverPath,
+          serverConfig,
+        );
+        await this.scriptGenerator.createStopScriptInCluster(
+          clusterName,
+          serverPath,
+          serverName,
+        );
       }
 
       // Step 5: Finalizing
@@ -234,12 +309,110 @@ export class ClusterManager {
       return {
         success: true,
         message: `Cluster "${clusterName}" created successfully`,
-        cluster: clusterConfigFile
+        cluster: clusterConfigFile,
       };
     } catch (error) {
       emit(`Failed to create cluster: ${error.message}`);
       logger.error(`Failed to create cluster ${clusterName}:`, error);
       throw new Error(error.message);
+    }
+  }
+
+  /**
+   * Add a single server to an existing cluster.
+   * Creates directories, installs binaries, generates config/scripts,
+   * and registers the server in the database.
+   */
+  async addServerToCluster(clusterName, serverConfig) {
+    const clusterPath = path.join(this.clustersPath, clusterName);
+
+    try {
+      logger.info(`Adding server to cluster: ${clusterName}`, { serverConfig });
+      this.emitProgress?.(`Adding server to cluster: ${clusterName}`);
+
+      // Check if cluster exists
+      if (!existsSync(clusterPath)) {
+        throw new Error(`Cluster "${clusterName}" does not exist`);
+      }
+
+      const serverName = serverConfig.name;
+      if (!serverName) {
+        throw new Error("Server name is required");
+      }
+
+      const serverPath = path.join(clusterPath, serverName);
+
+      // Check if server already exists in this cluster
+      if (existsSync(serverPath)) {
+        throw new Error(
+          `Server "${serverName}" already exists in cluster "${clusterName}"`,
+        );
+      }
+
+      // Patch in cluster metadata
+      const enrichedConfig = {
+        ...serverConfig,
+        clusterId: clusterName,
+        clusterName: clusterName,
+      };
+
+      // Create server directory structure
+      await fs.mkdir(serverPath, { recursive: true });
+      await fs.mkdir(path.join(serverPath, "binaries"), { recursive: true });
+      await fs.mkdir(path.join(serverPath, "configs"), { recursive: true });
+      await fs.mkdir(path.join(serverPath, "saves"), { recursive: true });
+      await fs.mkdir(path.join(serverPath, "logs"), { recursive: true });
+
+      this.emitProgress?.(`Server directories created: ${serverName}`);
+
+      // Install ASA binaries
+      await this.asaBinariesManager.installForServerInCluster(
+        clusterName,
+        serverName,
+        false,
+      );
+      this.emitProgress?.(`ASA binaries installed: ${serverName}`);
+
+      // Create server configuration files
+      await this.configGenerator.createServerConfigInCluster(
+        clusterName,
+        serverPath,
+        enrichedConfig,
+      );
+      this.emitProgress?.(`Server configuration created: ${serverName}`);
+
+      // Create start and stop scripts
+      await this.scriptGenerator.createStartScriptInCluster(
+        clusterName,
+        serverPath,
+        enrichedConfig,
+      );
+      await this.scriptGenerator.createStopScriptInCluster(
+        clusterName,
+        serverPath,
+        serverName,
+      );
+      this.emitProgress?.(`Server scripts created: ${serverName}`);
+
+      // Register in database
+      const { upsertServerConfig, upsertServerSettings } =
+        await import("../database.js");
+      await upsertServerConfig(serverName, JSON.stringify(enrichedConfig));
+
+      if (serverConfig.excludeSharedMods !== undefined) {
+        await upsertServerSettings(serverName, serverConfig.excludeSharedMods);
+      }
+
+      logger.info(
+        `Server "${serverName}" added to cluster "${clusterName}" successfully`,
+      );
+      return {
+        success: true,
+        message: `Server "${serverName}" added to cluster "${clusterName}" successfully`,
+      };
+    } catch (error) {
+      logger.error(`Failed to add server to cluster ${clusterName}:`, error);
+      throw error;
     }
   }
 
@@ -254,7 +427,7 @@ export class ClusterManager {
       }
       const clusterDirs = await fs.readdir(this.clustersPath);
       // Get all DB configs for mapping
-      const { getAllServerConfigs } = await import('../database.js');
+      const { getAllServerConfigs } = await import("../database.js");
       const dbConfigs = getAllServerConfigs();
       const dbClusterMap = {};
       for (const config of dbConfigs) {
@@ -267,7 +440,7 @@ export class ClusterManager {
           }
         } catch {}
       }
-      const { parseStartBat } = await import('../../utils/parse-start-bat.js');
+      const { parseStartBat } = await import("../../utils/parse-start-bat.js");
       for (const clusterName of clusterDirs) {
         try {
           const clusterPath = path.join(this.clustersPath, clusterName);
@@ -277,7 +450,11 @@ export class ClusterManager {
           let clusterConfig = { name: clusterName, servers: [] };
           if (dbClusterMap[clusterName]) {
             clusterConfig.servers = dbClusterMap[clusterName];
-            clusters.push({ name: clusterName, path: clusterPath, config: clusterConfig });
+            clusters.push({
+              name: clusterName,
+              path: clusterPath,
+              config: clusterConfig,
+            });
             continue;
           }
           // Fallback: scan for start.bat files in subdirs
@@ -285,21 +462,34 @@ export class ClusterManager {
           const fallbackServers = [];
           for (const serverDir of serverDirs) {
             const serverPath = path.join(clusterPath, serverDir);
-            if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
-            const startBatPath = path.join(serverPath, 'start.bat');
+            if (
+              !existsSync(serverPath) ||
+              !(await fs.stat(serverPath)).isDirectory()
+            )
+              continue;
+            const startBatPath = path.join(serverPath, "start.bat");
             if (existsSync(startBatPath)) {
               try {
                 const parsed = await parseStartBat(startBatPath);
                 fallbackServers.push(parsed);
               } catch (e) {
-                logger.warn(`[ClusterManager] Fallback: failed to parse start.bat for server ${serverDir} in cluster ${clusterName}: ${e.message}`);
+                logger.warn(
+                  `[ClusterManager] Fallback: failed to parse start.bat for server ${serverDir} in cluster ${clusterName}: ${e.message}`,
+                );
               }
             }
           }
           if (fallbackServers.length > 0) {
-            logger.warn(`[ClusterManager] Fallback: found cluster on disk not in DB: ${clusterName} with ${fallbackServers.length} servers`);
+            logger.warn(
+              `[ClusterManager] Fallback: found cluster on disk not in DB: ${clusterName} with ${fallbackServers.length} servers`,
+            );
             clusterConfig.servers = fallbackServers;
-            clusters.push({ name: clusterName, path: clusterPath, config: clusterConfig, fallback: true });
+            clusters.push({
+              name: clusterName,
+              path: clusterPath,
+              config: clusterConfig,
+              fallback: true,
+            });
           }
         } catch (error) {
           logger.error(`Error reading cluster ${clusterName}:`, error);
@@ -307,7 +497,7 @@ export class ClusterManager {
       }
       return clusters;
     } catch (error) {
-      logger.error('Failed to list clusters:', error);
+      logger.error("Failed to list clusters:", error);
       return [];
     }
   }
@@ -320,24 +510,30 @@ export class ClusterManager {
     const clusterPath = path.join(this.clustersPath, clusterName);
 
     try {
-      logger.info(`Deleting cluster: ${clusterName} (force: ${force}, backup: ${backup})`);
+      logger.info(
+        `Deleting cluster: ${clusterName} (force: ${force}, backup: ${backup})`,
+      );
 
       // DB-native: Find all servers in the DB with this clusterId/clusterName
       const dbConfigs = getAllServerConfigs();
-      const serversInCluster = dbConfigs.filter(config => {
+      const serversInCluster = dbConfigs.filter((config) => {
         try {
           const serverConfig = JSON.parse(config.config_data);
           return (
             serverConfig.clusterId === clusterName ||
             serverConfig.clusterName === clusterName ||
-            (serverConfig.config && (serverConfig.config.clusterId === clusterName || serverConfig.config.clusterName === clusterName))
+            (serverConfig.config &&
+              (serverConfig.config.clusterId === clusterName ||
+                serverConfig.config.clusterName === clusterName))
           );
         } catch {
           return false;
         }
       });
       if (serversInCluster.length === 0) {
-        throw new Error(`Cluster "${clusterName}" does not exist in the database`);
+        throw new Error(
+          `Cluster "${clusterName}" does not exist in the database`,
+        );
       }
 
       // Create backup if requested (optional, can be skipped or improved for DB-native)
@@ -348,9 +544,14 @@ export class ClusterManager {
           logger.info(`Backup created for cluster: ${clusterName}`);
         } catch (backupError) {
           if (!force) {
-            throw new Error(`Failed to create backup for cluster "${clusterName}": ${backupError.message}`);
+            throw new Error(
+              `Failed to create backup for cluster "${clusterName}": ${backupError.message}`,
+            );
           }
-          logger.warn(`Backup failed for cluster ${clusterName}, but continuing due to force flag:`, backupError);
+          logger.warn(
+            `Backup failed for cluster ${clusterName}, but continuing due to force flag:`,
+            backupError,
+          );
         }
       }
 
@@ -375,7 +576,7 @@ export class ClusterManager {
       return {
         success: true,
         message: `Cluster "${clusterName}" deleted successfully`,
-        backedUp: backup
+        backedUp: backup,
       };
     } catch (error) {
       logger.error(`Failed to delete cluster ${clusterName}:`, error);
@@ -397,10 +598,10 @@ export class ClusterManager {
       }
 
       // Read cluster configuration
-      const configPath = path.join(clusterPath, 'cluster.json');
+      const configPath = path.join(clusterPath, "cluster.json");
       let clusterConfig;
       try {
-        const configContent = await fs.readFile(configPath, 'utf8');
+        const configContent = await fs.readFile(configPath, "utf8");
         clusterConfig = JSON.parse(configContent);
       } catch {
         throw new Error(`Cluster configuration not found for "${clusterName}"`);
@@ -412,23 +613,25 @@ export class ClusterManager {
       for (const server of clusterConfig.servers || []) {
         try {
           const serverPath = path.join(clusterPath, server.name);
-          const startScriptPath = path.join(serverPath, 'start.bat');
+          const startScriptPath = path.join(serverPath, "start.bat");
 
           if (existsSync(startScriptPath)) {
-            logger.info(`Starting server: ${server.name} in cluster ${clusterName}`);
+            logger.info(
+              `Starting server: ${server.name} in cluster ${clusterName}`,
+            );
             // Note: This would typically use a process manager or child_process.spawn
             // For now, we'll just indicate the script is available
             results.push({
               serverName: server.name,
               success: true,
               message: `Start script available for ${server.name}`,
-              scriptPath: startScriptPath
+              scriptPath: startScriptPath,
             });
           } else {
             results.push({
               serverName: server.name,
               success: false,
-              message: `Start script not found for ${server.name}`
+              message: `Start script not found for ${server.name}`,
             });
           }
         } catch (error) {
@@ -436,7 +639,7 @@ export class ClusterManager {
           results.push({
             serverName: server.name,
             success: false,
-            message: error.message
+            message: error.message,
           });
         }
       }
@@ -444,7 +647,7 @@ export class ClusterManager {
       return {
         success: true,
         message: `Cluster "${clusterName}" start initiated`,
-        results: results
+        results: results,
       };
     } catch (error) {
       logger.error(`Failed to start cluster ${clusterName}:`, error);
@@ -461,7 +664,9 @@ export class ClusterManager {
   async backupCluster(clusterName, customDestination = null, options = {}) {
     const maxBackupsPerServer = options.maxBackupsPerServer ?? 2; // Default: 2 backups + main
     if (inProgressBackups.has(clusterName)) {
-      throw new Error(`Backup already in progress for cluster "${clusterName}"`);
+      throw new Error(
+        `Backup already in progress for cluster "${clusterName}"`,
+      );
     }
     inProgressBackups.add(clusterName);
     const clusterPath = path.join(this.clustersPath, clusterName);
@@ -470,9 +675,10 @@ export class ClusterManager {
       if (!existsSync(clusterPath)) {
         throw new Error(`Cluster "${clusterName}" does not exist`);
       }
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
       const backupName = `${clusterName}-${timestamp}`;
-      const backupDestination = customDestination || path.join(this.basePath, 'backups', 'clusters');
+      const backupDestination =
+        customDestination || path.join(this.basePath, "backups", "clusters");
       await fs.mkdir(backupDestination, { recursive: true });
       const backupPath = path.join(backupDestination, backupName);
       await fs.mkdir(backupPath, { recursive: true });
@@ -483,26 +689,37 @@ export class ClusterManager {
         const serverPath = path.join(clusterPath, serverDir);
         const stat = await fs.stat(serverPath);
         if (!stat.isDirectory()) continue;
-        const savedPath = path.join(serverPath, 'ShooterGame', 'Saved');
+        const savedPath = path.join(serverPath, "ShooterGame", "Saved");
         if (existsSync(savedPath)) {
-          const destSaved = path.join(backupPath, serverDir, 'ShooterGame', 'Saved');
+          const destSaved = path.join(
+            backupPath,
+            serverDir,
+            "ShooterGame",
+            "Saved",
+          );
           await fs.mkdir(destSaved, { recursive: true });
           const entries = await fs.readdir(savedPath, { withFileTypes: true });
           // Filter for .ark files only
-          const arkFiles = entries.filter(e => e.isFile() && e.name.endsWith('.ark'));
+          const arkFiles = entries.filter(
+            (e) => e.isFile() && e.name.endsWith(".ark"),
+          );
           // Get stats and sort by mtime descending
           const arkFilesWithStats = await Promise.all(
-            arkFiles.map(async e => {
+            arkFiles.map(async (e) => {
               const filePath = path.join(savedPath, e.name);
               const stat = await fs.stat(filePath);
               return { name: e.name, mtime: stat.mtime, path: filePath };
-            })
+            }),
           );
           arkFilesWithStats.sort((a, b) => b.mtime - a.mtime);
           // Always include the main save (e.g., TheIsland.ark)
-          const mainSave = arkFilesWithStats.find(f => /^[^.]+\.ark$/i.test(f.name));
+          const mainSave = arkFilesWithStats.find((f) =>
+            /^[^.]+\.ark$/i.test(f.name),
+          );
           // Take only the latest N backup saves (excluding the main save)
-          const backupSaves = arkFilesWithStats.filter(f => !/^[^.]+\.ark$/i.test(f.name)).slice(0, maxBackupsPerServer);
+          const backupSaves = arkFilesWithStats
+            .filter((f) => !/^[^.]+\.ark$/i.test(f.name))
+            .slice(0, maxBackupsPerServer);
           const filesToCopy = [mainSave, ...backupSaves].filter(Boolean);
           for (const file of filesToCopy) {
             await fs.copyFile(file.path, path.join(destSaved, file.name));
@@ -517,20 +734,20 @@ export class ClusterManager {
         created: new Date().toISOString(),
         originalPath: clusterPath,
         backupPath: backupPath,
-        type: 'cluster',
+        type: "cluster",
         note: `Only ShooterGame/Saved/* was backed up for each server. Main save + up to ${maxBackupsPerServer} backup saves per server.`,
-        maxBackupsPerServer
+        maxBackupsPerServer,
       };
       await fs.writeFile(
-        path.join(backupPath, 'backup-info.json'),
-        JSON.stringify(backupInfo, null, 2)
+        path.join(backupPath, "backup-info.json"),
+        JSON.stringify(backupInfo, null, 2),
       );
       logger.info(`Cluster backup created: ${backupPath}`);
       return {
         success: true,
         message: `Cluster "${clusterName}" backed up successfully`,
         backupPath: backupPath,
-        backupName: backupName
+        backupName: backupName,
       };
     } catch (error) {
       logger.error(`Failed to backup cluster ${clusterName}:`, error);
@@ -556,14 +773,16 @@ export class ClusterManager {
 
       // Check if cluster already exists
       if (existsSync(clusterPath)) {
-        throw new Error(`Cluster "${clusterName}" already exists. Delete it first or choose a different name.`);
+        throw new Error(
+          `Cluster "${clusterName}" already exists. Delete it first or choose a different name.`,
+        );
       }
 
       // Copy backup to cluster location
       await this.copyDirectory(sourcePath, clusterPath);
 
       // Remove backup metadata file from restored cluster
-      const backupInfoPath = path.join(clusterPath, 'backup-info.json');
+      const backupInfoPath = path.join(clusterPath, "backup-info.json");
       if (existsSync(backupInfoPath)) {
         await fs.unlink(backupInfoPath);
       }
@@ -572,7 +791,7 @@ export class ClusterManager {
       return {
         success: true,
         message: `Cluster "${clusterName}" restored successfully`,
-        clusterPath: clusterPath
+        clusterPath: clusterPath,
       };
     } catch (error) {
       logger.error(`Failed to restore cluster ${clusterName}:`, error);
@@ -599,7 +818,10 @@ export class ClusterManager {
         }
       }
     } catch (error) {
-      logger.error(`Failed to copy directory from ${source} to ${destination}:`, error);
+      logger.error(
+        `Failed to copy directory from ${source} to ${destination}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -622,7 +844,7 @@ export class ClusterManager {
 
       await fs.rmdir(dirPath);
     } catch (error) {
-      if (error.code !== 'ENOENT') {
+      if (error.code !== "ENOENT") {
         throw error;
       }
     }
@@ -635,31 +857,39 @@ export class ClusterManager {
     const validation = {
       valid: true,
       errors: [],
-      warnings: []
+      warnings: [],
     };
 
     // Check required fields
     if (!config.name || !config.name.trim()) {
       validation.valid = false;
-      validation.errors.push('Cluster name is required');
+      validation.errors.push("Cluster name is required");
     }
 
     // Check name format
     if (config.name && !/^[a-zA-Z0-9_-]+$/.test(config.name)) {
       validation.valid = false;
-      validation.errors.push('Cluster name can only contain letters, numbers, underscores, and hyphens');
+      validation.errors.push(
+        "Cluster name can only contain letters, numbers, underscores, and hyphens",
+      );
     }
 
     // Check server count
-    if (config.serverCount && (config.serverCount < 1 || config.serverCount > 10)) {
+    if (
+      config.serverCount &&
+      (config.serverCount < 1 || config.serverCount > 10)
+    ) {
       validation.valid = false;
-      validation.errors.push('Server count must be between 1 and 10');
+      validation.errors.push("Server count must be between 1 and 10");
     }
 
     // Check base port
-    if (config.basePort && (config.basePort < 1024 || config.basePort > 65535)) {
+    if (
+      config.basePort &&
+      (config.basePort < 1024 || config.basePort > 65535)
+    ) {
       validation.valid = false;
-      validation.errors.push('Base port must be between 1024 and 65535');
+      validation.errors.push("Base port must be between 1024 and 65535");
     }
 
     // Check if cluster already exists
@@ -689,35 +919,41 @@ export class ClusterManager {
   async listClusterBackups(clusterName) {
     try {
       const backups = [];
-      const backupsPath = path.join(this.basePath, 'backups', 'clusters');
+      const backupsPath = path.join(this.basePath, "backups", "clusters");
       logger.info(`[listClusterBackups] Checking backupsPath: ${backupsPath}`);
       if (!existsSync(backupsPath)) {
-        logger.warn(`[listClusterBackups] backupsPath does not exist: ${backupsPath}`);
+        logger.warn(
+          `[listClusterBackups] backupsPath does not exist: ${backupsPath}`,
+        );
         return backups;
       }
       const backupDirs = await fs.readdir(backupsPath);
-      logger.info(`[listClusterBackups] Found backupDirs: ${JSON.stringify(backupDirs)}`);
+      logger.info(
+        `[listClusterBackups] Found backupDirs: ${JSON.stringify(backupDirs)}`,
+      );
       for (const backupDir of backupDirs) {
         // Match clusterName-... (not requiring _backup_)
-        if (!backupDir.startsWith(clusterName + '-')) continue;
+        if (!backupDir.startsWith(clusterName + "-")) continue;
         try {
           const backupPath = path.join(backupsPath, backupDir);
           const stat = await fs.stat(backupPath);
           if (stat.isDirectory()) {
-            const backupInfoPath = path.join(backupPath, 'backup-info.json');
+            const backupInfoPath = path.join(backupPath, "backup-info.json");
             let backupInfo = {
               clusterName,
               backupName: backupDir,
               created: stat.birthtime.toISOString(),
               backupPath,
               size: stat.size,
-              type: 'cluster',
-              hasMetadata: false
+              type: "cluster",
+              hasMetadata: false,
             };
             if (existsSync(backupInfoPath)) {
               try {
-                const infoContent = await fs.readFile(backupInfoPath, 'utf8');
-                Object.assign(backupInfo, JSON.parse(infoContent), { hasMetadata: true });
+                const infoContent = await fs.readFile(backupInfoPath, "utf8");
+                Object.assign(backupInfo, JSON.parse(infoContent), {
+                  hasMetadata: true,
+                });
               } catch {}
             }
             backups.push(backupInfo);
@@ -726,11 +962,13 @@ export class ClusterManager {
           logger.error(`Error reading cluster backup ${backupDir}:`, error);
         }
       }
-      logger.info(`[listClusterBackups] Returning ${backups.length} backups for cluster ${clusterName}`);
+      logger.info(
+        `[listClusterBackups] Returning ${backups.length} backups for cluster ${clusterName}`,
+      );
       return backups.sort((a, b) => new Date(b.created) - new Date(a.created));
     } catch (error) {
-      logger.error('Failed to list cluster backups:', error);
+      logger.error("Failed to list cluster backups:", error);
       return [];
     }
   }
-} 
+}
