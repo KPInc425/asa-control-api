@@ -54,7 +54,7 @@ export class ScriptGenerator {
 echo Starting ${serverConfig.name}...
 
 REM Start the ASA server with proper parameters
-"${path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" "${serverConfig.map || 'TheIsland'}_WP?SessionName=${serverConfig.name}?Port=${serverConfig.gamePort || 7777}?QueryPort=${serverConfig.queryPort || 27015}?RCONPort=${serverConfig.rconPort || 32330}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ''}${customUrlArg}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig${battleEyeArg}
+"${path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" "${serverConfig.map || 'TheIsland'}_WP?SessionName=${serverConfig.name}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ''}${customUrlArg}" -Port=${serverConfig.gamePort || 7777} -QueryPort=${serverConfig.queryPort || 27015} -RCONPort=${serverConfig.rconPort || 32330}${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig${battleEyeArg}
 
 echo Server ${serverConfig.name} has stopped.
 pause`;
@@ -174,11 +174,10 @@ pause`;
       const battleEyeArg = serverConfig.disableBattleEye ? ' -NoBattleEye' : '';
       
       // Build the query string for the server parameters (without passwords)
+      // NOTE: Port, QueryPort, and RCONPort are passed as command-line args
+      // because ASA ignores them in the URL query string
       let queryParams = [
         `SessionName=${serverName}`,
-        `Port=${serverConfig.gamePort}`,
-        `QueryPort=${serverConfig.queryPort}`,
-        `RCONPort=${serverConfig.rconPort}`,
         `RCONEnabled=True`,
         `WinLivePlayers=${serverConfig.maxPlayers}`
       ];
@@ -197,7 +196,7 @@ pause`;
 echo Starting ${serverName}...
 
 REM Start the ASA server with proper parameters
-      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}_WP?${queryString}"${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
+      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}_WP?${queryString}" -Port=${serverConfig.gamePort} -QueryPort=${serverConfig.queryPort} -RCONPort=${serverConfig.rconPort}${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
 
 echo Server ${serverName} has stopped.
 pause`;

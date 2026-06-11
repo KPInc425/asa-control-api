@@ -1,5 +1,8 @@
 import Rcon from 'rcon';
 import { spawn } from 'child_process';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { existsSync } from 'fs';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import { 
@@ -23,8 +26,9 @@ class RconService {
     const commandType = this.getCommandType(command);
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      let startTime;
       try {
-        const startTime = Date.now();
+        startTime = Date.now();
         const connection = await this.getConnection(containerName, options);
         
         const response = await new Promise((resolve, reject) => {
@@ -434,6 +438,54 @@ class RconService {
   }
 
   /**
+   * Resolve server RCON configuration from server-config.json on disk
+   * Uses the containerName (server name) to find the correct RCON port and password
+   */
+  async resolveServerConfig(serverName) {
+    try {
+      // Determine possible paths for server-config.json
+      const nativeBasePath = config.server.native.basePath || 'C:\\ARK';
+      const clustersPath = config.server.native.clustersPath || path.join(nativeBasePath, 'clusters');
+      const serversPath = path.join(nativeBasePath, 'servers');
+
+      // Search clusters first
+      if (existsSync(clustersPath)) {
+        const clusterDirs = await fs.readdir(clustersPath);
+        for (const clusterName of clusterDirs) {
+          const clusterPath = path.join(clustersPath, clusterName);
+          const serverConfigPath = path.join(clusterPath, serverName, 'server-config.json');
+          if (existsSync(serverConfigPath)) {
+            const data = await fs.readFile(serverConfigPath, 'utf8');
+            const parsed = JSON.parse(data);
+            return {
+              host: '127.0.0.1',
+              port: parsed.rconPort || parsed.port || config.rcon.defaultPort,
+              password: parsed.rconPassword || parsed.adminPassword || config.rcon.password
+            };
+          }
+        }
+      }
+
+      // Fallback to standalone servers path
+      if (existsSync(serversPath)) {
+        const serverConfigPath = path.join(serversPath, serverName, 'server-config.json');
+        if (existsSync(serverConfigPath)) {
+          const data = await fs.readFile(serverConfigPath, 'utf8');
+          const parsed = JSON.parse(data);
+          return {
+            host: '127.0.0.1',
+            port: parsed.rconPort || parsed.port || config.rcon.defaultPort,
+            password: parsed.rconPassword || parsed.adminPassword || config.rcon.password
+          };
+        }
+      }
+    } catch (err) {
+      logger.warn(`[RconService] Failed to resolve server config for ${serverName}: ${err.message}`);
+    }
+    return null;
+  }
+
+  /**
    * Get or create RCON connection
    */
   async getConnection(containerName, options = {}) {
@@ -444,8 +496,27 @@ class RconService {
     if (!containerName) {
       throw new Error('Container name is required for RCON connection');
     }
+
+    // Auto-resolve server config if host/port/password not provided
+    let resolvedHost = safeOptions.host;
+    let resolvedPort = safeOptions.port;
+    let resolvedPassword = safeOptions.password;
+
+    if (!resolvedHost || !resolvedPort || !resolvedPassword) {
+      const serverConfig = await this.resolveServerConfig(containerName);
+      if (serverConfig) {
+        resolvedHost = resolvedHost || serverConfig.host;
+        resolvedPort = resolvedPort || serverConfig.port;
+        resolvedPassword = resolvedPassword || serverConfig.password;
+        logger.info(`[RconService] Resolved config for ${containerName}: port=${resolvedPort}`);
+      }
+    }
+
+    const resolvedHostFinal = resolvedHost || 'localhost';
+    const resolvedPortFinal = resolvedPort || config.rcon.defaultPort;
+    const resolvedPasswordFinal = resolvedPassword || config.rcon.password;
     
-    const connectionKey = `${containerName}-${safeOptions.host || 'localhost'}-${safeOptions.port || config.rcon.defaultPort}`;
+    const connectionKey = `${containerName}-${resolvedHostFinal}-${resolvedPortFinal}`;
     
     if (this.connections.has(connectionKey)) {
       const connection = this.connections.get(connectionKey);
@@ -458,9 +529,9 @@ class RconService {
 
     return new Promise((resolve, reject) => {
     const connection = new Rcon(
-      safeOptions.host || 'localhost',
-      safeOptions.port || config.rcon.defaultPort,
-        safeOptions.password || config.rcon.password
+      resolvedHostFinal,
+      resolvedPortFinal,
+      resolvedPasswordFinal
     );
 
       connection.on('auth', () => {
