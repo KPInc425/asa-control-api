@@ -300,10 +300,10 @@ export default async function configRoutes(fastify) {
       const { serverName, fileName } = request.params;
       
       // Validate fileName
-      if (!['Game.ini', 'GameUserSettings.ini'].includes(fileName)) {
+      if (!['Game.ini', 'GameUserSettings.ini', 'Engine.ini'].includes(fileName)) {
         return reply.status(400).send({
           success: false,
-          message: 'Invalid config file name. Must be Game.ini or GameUserSettings.ini'
+          message: 'Invalid config file name. Must be Game.ini, GameUserSettings.ini, or Engine.ini'
         });
       }
 
@@ -341,10 +341,10 @@ export default async function configRoutes(fastify) {
       }
       
       // Validate fileName
-      if (!['Game.ini', 'GameUserSettings.ini'].includes(fileName)) {
+      if (!['Game.ini', 'GameUserSettings.ini', 'Engine.ini'].includes(fileName)) {
         return reply.status(400).send({
           success: false,
-          message: 'Invalid config file name. Must be Game.ini or GameUserSettings.ini'
+          message: 'Invalid config file name. Must be Game.ini, GameUserSettings.ini, or Engine.ini'
         });
       }
 

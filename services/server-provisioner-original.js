@@ -581,6 +581,10 @@ export class ServerProvisioner {
       const gameUserSettings = this.generateGameUserSettings(serverConfig);
       await fs.writeFile(path.join(configsPath, 'GameUserSettings.ini'), gameUserSettings);
       
+      // Create Engine.ini (required for EOS/OnlineSubsystem - needed for server browser visibility)
+      const engineIni = this.configGenerator.generateEngineIni(serverConfig);
+      await fs.writeFile(path.join(configsPath, 'Engine.ini'), engineIni);
+      
       // Create server-config.json
       const serverConfigFile = {
         name: serverConfig.name,

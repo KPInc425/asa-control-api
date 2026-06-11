@@ -19,8 +19,6 @@ export class ConfigGenerator {
   generateGameUserSettings(serverConfig) {
     const settings = `[ServerSettings]
 SessionName=${serverConfig.name || 'ASA Server'}
-Port=${serverConfig.gamePort || 7777}
-QueryPort=${serverConfig.queryPort || 27015}
 RCONEnabled=True
 RCONPort=${serverConfig.rconPort || 32330}
 AdminPassword=${serverConfig.adminPassword || 'admin123'}
@@ -141,6 +139,32 @@ OverrideOfficialDifficulty=5.0
   }
 
   /**
+   * Generate Engine.ini content with EOS/OnlineSubsystem configuration
+   * Required for ASA server to register with Epic Online Services for browser visibility
+   */
+  generateEngineIni(serverConfig) {
+    const settings = `[OnlineSubsystem]
+DefaultPlatformService=EOS
+bUseDefaultEOSAttributeSystem=True
+
+[OnlineSubsystemEOS]
+bEnabled=True
+bUseEOSSpeech=False
+bUseEOSSessions=True
+bUseEOSConnect=True
+bUseEOSVoice=False
+
+[/Script/Engine.GameEngine]
+!OnlineSubsystemDefinitions=ClearArray
++OnlineSubsystemDefinitions=(ConfigName=EOS,DriverClassName=OnlineSubsystemEOS)
+
+[/Script/OnlineSubsystemEOS.EOSSettings]
+bUseDevAuth=False
+`;
+    return settings;
+  }
+
+  /**
    * Create server configuration files for standalone server
    */
   async createServerConfig(serverPath, serverConfig) {
@@ -154,6 +178,10 @@ OverrideOfficialDifficulty=5.0
       // Create GameUserSettings.ini
       const gameUserSettings = this.generateGameUserSettings(serverConfig);
       await fs.writeFile(path.join(configsPath, 'GameUserSettings.ini'), gameUserSettings);
+      
+      // Create Engine.ini (required for EOS/OnlineSubsystem - needed for server browser visibility)
+      const engineIni = this.generateEngineIni(serverConfig);
+      await fs.writeFile(path.join(configsPath, 'Engine.ini'), engineIni);
       
       // Create server-config.json
       const serverConfigFile = {
@@ -219,6 +247,10 @@ OverrideOfficialDifficulty=5.0
       // Create GameUserSettings.ini
       const gameUserSettings = finalConfigs.gameUserSettings || this.generateGameUserSettings(serverConfig);
       await fs.writeFile(path.join(configsPath, 'GameUserSettings.ini'), gameUserSettings);
+      
+      // Create Engine.ini (required for EOS/OnlineSubsystem - needed for server browser visibility)
+      const engineIni = finalConfigs.engineIni || this.generateEngineIni(serverConfig);
+      await fs.writeFile(path.join(configsPath, 'Engine.ini'), engineIni);
       
       // Create server-config.json
       const serverConfigFile = {

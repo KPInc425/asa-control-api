@@ -50,11 +50,14 @@ export class ScriptGenerator {
       const customUrl = serverConfig.customDynamicConfigUrl || '';
       const customUrlArg = customUrl ? `?customdynamicconfigurl=\"${customUrl}\"` : '';
       
+      // Only use -UseDynamicConfig if a custom dynamic config URL is actually provided
+      const useDynamicConfigArg = (serverConfig.customDynamicConfigUrl && serverConfig.customDynamicConfigUrl.trim() !== '') ? ' -UseDynamicConfig' : '';
+
       const startScript = `@echo off
 echo Starting ${serverConfig.name}...
 
 REM Start the ASA server with proper parameters
-"${path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" "${serverConfig.map || 'TheIsland'}_WP?SessionName=${serverConfig.name}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ''}${customUrlArg}" -Port=${serverConfig.gamePort || 7777} -QueryPort=${serverConfig.queryPort || 27015} -RCONPort=${serverConfig.rconPort || 32330}${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig${battleEyeArg}
+"${path.join(binariesPath, 'ShooterGame', 'Binaries', 'Win64', 'ArkAscendedServer.exe')}" "${serverConfig.map || 'TheIsland'}_WP?SessionName=${serverConfig.name}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ''}${customUrlArg}" -Port=${serverConfig.gamePort || 7777} -QueryPort=${serverConfig.queryPort || 27015} -RCONPort=${serverConfig.rconPort || 32330}${modsArg} -servergamelog -NotifyAdminCommandsInChat${useDynamicConfigArg}${battleEyeArg}
 
 echo Server ${serverConfig.name} has stopped.
 pause`;
@@ -192,11 +195,14 @@ pause`;
       }
       const queryString = queryParams.join('?');
 
+      // Only use -UseDynamicConfig if a custom dynamic config URL is actually provided
+      const useDynamicConfigArg = (serverConfig.customDynamicConfigUrl && serverConfig.customDynamicConfigUrl.trim() !== '') ? ' -UseDynamicConfig' : '';
+
       const startScript = `@echo off
 echo Starting ${serverName}...
 
 REM Start the ASA server with proper parameters
-      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}_WP?${queryString}" -Port=${serverConfig.gamePort} -QueryPort=${serverConfig.queryPort} -RCONPort=${serverConfig.rconPort}${modsArg} -servergamelog -NotifyAdminCommandsInChat -UseDynamicConfig -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
+      "${path.join(binariesPath, 'ArkAscendedServer.exe')}" "${serverConfig.map}_WP?${queryString}" -Port=${serverConfig.gamePort} -QueryPort=${serverConfig.queryPort} -RCONPort=${serverConfig.rconPort}${modsArg} -servergamelog -NotifyAdminCommandsInChat${useDynamicConfigArg} -ClusterDirOverride=${clusterDataPath.replace(/\\/g, '\\\\')} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
 
 echo Server ${serverName} has stopped.
 pause`;
