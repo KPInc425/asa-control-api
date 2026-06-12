@@ -4,6 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
 import logger from "../../utils/logger.js";
+import { gameFor } from "../../games/index.js";
 
 const execAsync = promisify(exec);
 
@@ -12,11 +13,18 @@ const execAsync = promisify(exec);
  * Handles ASA server binary installation, verification, and management
  */
 export class ASABinariesManager {
-  constructor(steamCmdManager, basePath, clustersPath, serversPath) {
+  constructor(
+    steamCmdManager,
+    basePath,
+    clustersPath,
+    serversPath,
+    gameType = "ark",
+  ) {
     this.steamCmdManager = steamCmdManager;
     this.basePath = basePath;
     this.clustersPath = clustersPath;
     this.serversPath = serversPath;
+    this.gameType = gameType;
     this.emitProgress = null;
   }
 
@@ -72,12 +80,8 @@ export class ASABinariesManager {
 
       // Create installation script
       const scriptPath = path.join(serverPath, "install_asa.txt");
-      const scriptContent = `@ShutdownOnFailedCommand 1
-@NoPromptForPassword 1
-force_install_dir "${binariesPath}"
-login anonymous
-app_update 2430930
-quit`;
+      const adapter = gameFor(this.gameType || "ark");
+      const scriptContent = adapter.buildInstallScript(binariesPath);
 
       await fs.writeFile(scriptPath, scriptContent);
 
@@ -90,13 +94,7 @@ quit`;
       }
 
       // Verify installation
-      const serverExe = path.join(
-        binariesPath,
-        "ShooterGame",
-        "Binaries",
-        "Win64",
-        "ArkAscendedServer.exe",
-      );
+      const serverExe = path.join(binariesPath, adapter.binaryExeRelPath);
       const exists = await fs
         .access(serverExe)
         .then(() => true)
@@ -143,9 +141,10 @@ quit`;
       // Use the correct SteamCMD path with proper escaping
       const steamCmdExe = this.steamCmdManager.getExecutablePath();
       const installPath = serverPath; // Install directly to server folder, not a binaries subfolder
+      const adapter = gameFor(this.gameType || "ark");
 
       // Build the full SteamCMD command with proper error handling
-      const steamCmdCommand = `"${steamCmdExe}" +force_install_dir "${installPath}" +login anonymous +app_update 2430930 validate +quit`;
+      const steamCmdCommand = `"${steamCmdExe}" +force_install_dir "${installPath}" +login anonymous +app_update ${adapter.steamAppId} validate +quit`;
 
       if (foreground) {
         console.log(`Installing ASA binaries for ${serverName}...`);
@@ -196,11 +195,11 @@ echo Installation completed with exit code: %ERRORLEVEL%
 if %ERRORLEVEL% NEQ 0 (
     echo SteamCMD exited with error code: %ERRORLEVEL%
     echo Checking if files were actually downloaded...
-    if exist "${path.join(serverPath, "ShooterGame", "Binaries", "Win64", "ArkAscendedServer.exe")}" (
-        echo ASA server executable found - installation may have succeeded despite error code
+    if exist "${path.join(serverPath, adapter.binaryExeRelPath)}" (
+        echo Server executable found - installation may have succeeded despite error code
         exit 0
     ) else (
-        echo ASA server executable not found - installation failed
+        echo Server executable not found - installation failed
         exit 1
     )
 ) else (
@@ -237,13 +236,7 @@ if %ERRORLEVEL% NEQ 0 (
           }
 
           // Check if the installation was successful by looking for key files
-          const arkServerExe = path.join(
-            serverPath,
-            "ShooterGame",
-            "Binaries",
-            "Win64",
-            "ArkAscendedServer.exe",
-          );
+          const arkServerExe = path.join(serverPath, adapter.binaryExeRelPath);
           const exists = await fs
             .access(arkServerExe)
             .then(() => true)
@@ -263,13 +256,7 @@ if %ERRORLEVEL% NEQ 0 (
           );
 
           // Check if the installation actually succeeded despite the error
-          const arkServerExe = path.join(
-            serverPath,
-            "ShooterGame",
-            "Binaries",
-            "Win64",
-            "ArkAscendedServer.exe",
-          );
+          const arkServerExe = path.join(serverPath, adapter.binaryExeRelPath);
           const exists = await fs
             .access(arkServerExe)
             .then(() => true)
@@ -298,29 +285,26 @@ if %ERRORLEVEL% NEQ 0 (
       }
 
       // Verify installation by checking for key files
-      const arkServerExe = path.join(
-        serverPath,
-        "ShooterGame",
-        "Binaries",
-        "Win64",
-        "ArkAscendedServer.exe",
-      );
-      const shooterGameDir = path.join(serverPath, "ShooterGame");
+      const serverExe = path.join(serverPath, adapter.binaryExeRelPath);
+      const gameDir = path.dirname(path.dirname(path.dirname(serverExe)));
+      const gameDirName = path.basename(gameDir);
 
       try {
-        await fs.access(arkServerExe);
-        logger.info(`ASA server executable verified: ${arkServerExe}`);
+        await fs.access(serverExe);
+        logger.info(`Server executable verified: ${serverExe}`);
 
-        // Check if ShooterGame directory exists and has content
-        const shooterGameStats = await fs.stat(shooterGameDir);
-        if (shooterGameStats.isDirectory()) {
-          const contents = await fs.readdir(shooterGameDir);
-          logger.info(`ShooterGame directory contents: ${contents.join(", ")}`);
+        // Check if game directory exists and has content
+        const gameDirStats = await fs.stat(gameDir);
+        if (gameDirStats.isDirectory()) {
+          const contents = await fs.readdir(gameDir);
+          logger.info(
+            `${gameDirName} directory contents: ${contents.join(", ")}`,
+          );
         }
 
-        this.emitProgress?.(`ASA binaries installed for server: ${serverName}`);
+        this.emitProgress?.(`Binaries installed for server: ${serverName}`);
         logger.info(
-          `ASA binaries installed for server: ${serverName} in cluster ${clusterName}`,
+          `Binaries installed for server: ${serverName} in cluster ${clusterName}`,
         );
       } catch (accessError) {
         logger.error(
@@ -328,7 +312,7 @@ if %ERRORLEVEL% NEQ 0 (
           accessError,
         );
         throw new Error(
-          `ASA server executable not found at ${arkServerExe} after installation`,
+          `Server executable not found at ${serverExe} after installation`,
         );
       }
     } catch (error) {
@@ -349,8 +333,8 @@ if %ERRORLEVEL% NEQ 0 (
           errorMessage = `SteamCMD installation timed out for server ${serverName}. Please try again.`;
         } else if (error.message.includes("steamcmd")) {
           errorMessage = `SteamCMD installation failed for server ${serverName}. Please check if SteamCMD is properly installed.`;
-        } else if (error.message.includes("ArkAscendedServer.exe")) {
-          errorMessage = `ASA server files not found after installation for server ${serverName}. Installation may have failed.`;
+        } else if (error.message.includes("executable not found")) {
+          errorMessage = `Server files not found after installation for server ${serverName}. Installation may have failed.`;
         } else {
           errorMessage = error.message;
         }
@@ -451,24 +435,12 @@ if %ERRORLEVEL% NEQ 0 (
    */
   async verifyInstallation(serverPath, serverType = "cluster") {
     try {
+      const adapter = gameFor(this.gameType || "ark");
       let exePath;
       if (serverType === "cluster") {
-        exePath = path.join(
-          serverPath,
-          "ShooterGame",
-          "Binaries",
-          "Win64",
-          "ArkAscendedServer.exe",
-        );
+        exePath = path.join(serverPath, adapter.binaryExeRelPath);
       } else {
-        exePath = path.join(
-          serverPath,
-          "binaries",
-          "ShooterGame",
-          "Binaries",
-          "Win64",
-          "ArkAscendedServer.exe",
-        );
+        exePath = path.join(serverPath, "binaries", adapter.binaryExeRelPath);
       }
 
       await fs.access(exePath);

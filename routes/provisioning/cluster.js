@@ -51,6 +51,7 @@ export default async function clusterRoutes(fastify) {
                 sessionName: { type: "string" },
                 disableBattleEye: { type: "boolean" },
                 customDynamicConfigUrl: { type: "string" },
+                gameType: { type: "string" },
               },
             },
             regenerateConfigs: { type: "boolean" },
@@ -67,6 +68,11 @@ export default async function clusterRoutes(fastify) {
           regenerateConfigs = true,
           regenerateScripts = true,
         } = request.body;
+
+        // Default gameType in settings if not provided
+        if (settings.gameType === undefined) {
+          settings.gameType = "ark";
+        }
 
         logger.info(`Updating server settings for ${serverName}`, {
           disableBattleEye: settings.disableBattleEye,
@@ -124,6 +130,7 @@ export default async function clusterRoutes(fastify) {
             tamingMultiplier: { type: "number" },
             disableBattleEye: { type: "boolean" },
             customDynamicConfigUrl: { type: "string" },
+            gameType: { type: "string" },
           },
         },
       },
@@ -144,6 +151,7 @@ export default async function clusterRoutes(fastify) {
           tamingMultiplier = 5.0,
           disableBattleEye = false,
           customDynamicConfigUrl = "",
+          gameType = "ark",
         } = request.body;
 
         if (!name) {
@@ -167,6 +175,7 @@ export default async function clusterRoutes(fastify) {
           tamingMultiplier,
           disableBattleEye,
           customDynamicConfigUrl,
+          gameType,
         };
 
         const result = await provisioner.createServer(serverConfig);
@@ -209,6 +218,7 @@ export default async function clusterRoutes(fastify) {
             tamingMultiplier: { type: "number" },
             foreground: { type: "boolean" },
             disableBattleEye: { type: "boolean" },
+            gameType: { type: "string" },
           },
         },
       },
@@ -230,6 +240,7 @@ export default async function clusterRoutes(fastify) {
           tamingMultiplier = 5.0,
           foreground = false,
           disableBattleEye = false,
+          gameType = "ark",
         } = request.body;
 
         if (!name) {
@@ -258,6 +269,7 @@ export default async function clusterRoutes(fastify) {
           xpMultiplier,
           tamingMultiplier,
           disableBattleEye,
+          gameType,
         };
         // Check if SteamCMD is installed before creating cluster
         const steamCmdStatus = await provisioner.checkSteamCmdAvailability();
@@ -1123,6 +1135,7 @@ export default async function clusterRoutes(fastify) {
                 sessionName: { type: "string" },
                 disableBattleEye: { type: "boolean" },
                 customDynamicConfigUrl: { type: "string" },
+                gameType: { type: "string" },
               },
             },
             regenerateConfigs: { type: "boolean" },
@@ -1139,6 +1152,11 @@ export default async function clusterRoutes(fastify) {
           regenerateConfigs = true,
           regenerateScripts = true,
         } = request.body;
+
+        // Default gameType in config if not provided
+        if (config.gameType === undefined) {
+          config.gameType = "ark";
+        }
 
         logger.info(`Updating server config for ${serverName}`, {
           disableBattleEye: config.disableBattleEye,
