@@ -1038,20 +1038,21 @@ export class NativeServerManager extends ServerManager {
       }
 
       const logFiles = [];
-      const possibleLogDirs = [
-        path.join(serverPath, "ShooterGame", "Saved", "Logs"),
-        path.join(serverPath, "logs"),
-        serverPath,
-      ];
+      // Resolve game-specific log directories via the game adapter
+      const dbRow = getServerConfig(name);
+      const adapter = gameFor(dbRow?.game_type || 'ark');
+      const logSubDirs = adapter.getLogSubDirectories();
+      const logPatterns = adapter.getLogFilePatterns();
+      const possibleLogDirs = logSubDirs.map(sub => path.join(serverPath, sub));
 
       for (const logDir of possibleLogDirs) {
         try {
           const files = await fs.readdir(logDir);
           for (const file of files) {
+            const lowerName = file.toLowerCase();
             if (
               file.endsWith(".log") ||
-              file.includes("ShooterGame") ||
-              file.includes("WindowsServer")
+              (logPatterns.length > 0 && logPatterns.some(p => lowerName.includes(p)))
             ) {
               const filePath = path.join(logDir, file);
               const stat = await fs.stat(filePath);

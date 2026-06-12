@@ -6,6 +6,8 @@ import { EventEmitter } from 'events';
 import logger from '../utils/logger.js';
 import config from '../config/index.js';
 import { createServerManager } from './server-manager.js';
+import { gameFor } from '../games/index.js';
+import { getServerConfig } from './database.js';
 
 // __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -146,12 +148,13 @@ class ArkLogsService {
 
       logger.info(`Using server path for logs: ${serverPath}`);
 
-      // Look for logs in the server's Saved directory structure only
-      const possibleLogDirs = [
-        path.join(serverPath, 'ShooterGame', 'Saved', 'Logs'),
-        path.join(serverPath, 'logs'),
-        serverPath
-      ];
+      // Resolve game-specific log sub-directories via the game adapter
+      const dbRow = getServerConfig(serverName);
+      const adapter = gameFor(dbRow?.game_type || 'ark');
+      const logSubDirs = adapter.getLogSubDirectories();
+      const logPatterns = adapter.getLogFilePatterns();
+
+      const possibleLogDirs = logSubDirs.map(sub => path.join(serverPath, sub));
 
       logger.info(`Checking log directories for ${serverName}:`, possibleLogDirs);
       
@@ -172,17 +175,11 @@ class ArkLogsService {
           logger.info(`Found ${files.length} files in ${logDir}`);
           
           for (const file of files) {
-            // Server-specific log file detection
-            const isLogFile = file.endsWith('.log') || 
+            // Game-agnostic log file detection — uses adapter patterns
+            const lowerName = file.toLowerCase();
+            const isLogFile = file.endsWith('.log') ||
                              file.endsWith('.txt') ||
-                             file.includes('ShooterGame') ||
-                             file.includes('WindowsServer') ||
-                             file.includes('ServGame') ||
-                             file.includes('crashcallstack') ||
-                             file.includes('FailedWaterDinoSpawns') ||
-                             file.includes('steam') ||
-                             file.includes('ark') ||
-                             file.includes('asa');
+                             (logPatterns.length > 0 && logPatterns.some(p => lowerName.includes(p)));
             
             if (isLogFile) {
               const filePath = path.join(logDir, file);
@@ -191,9 +188,9 @@ class ArkLogsService {
                 name: file,
                 path: filePath,
                 size: size,
-                type: this.categorizeLogFile(file, logDir)
+                type: this.categorizeLogFile(file, logDir, serverName)
               });
-              logger.info(`Added log file: ${file} (${size} bytes) - Type: ${this.categorizeLogFile(file, logDir)}`);
+              logger.info(`Added log file: ${file} (${size} bytes) - Type: ${this.categorizeLogFile(file, logDir, serverName)}`);
             }
           }
         } catch (error) {
@@ -240,45 +237,37 @@ class ArkLogsService {
     const lowerName = fileName.toLowerCase();
     const lowerDir = logDir.toLowerCase();
     
-    // Server-specific logs
-    if (lowerName.includes('shootergame') || lowerName.includes('servergame') || lowerName.includes('windowsserver')) {
+    // Use the adapter patterns to detect server logs
+    const dbRow = getServerConfig(this._lastServerName);
+    const adapter = gameFor(dbRow?.game_type || 'ark');
+    const patterns = adapter.getLogFilePatterns();
+    if (patterns.length > 0 && patterns.some(p => lowerName.includes(p))) {
       return 'server';
     }
-    
+
+    // Game-agnostic categories
     // API and system logs
-    if (lowerName.includes('asa-api-service') || lowerName.includes('application') || lowerName.includes('system')) {
+    if (lowerName.includes('app') || lowerName.includes('system') || lowerName.includes('api')) {
       return 'api';
     }
-    
+
     // Steam and update logs
     if (lowerName.includes('steam') || lowerName.includes('update') || lowerName.includes('install')) {
       return 'steam';
     }
-    
+
     // Error and crash logs
     if (lowerName.includes('error') || lowerName.includes('crash') || lowerName.includes('failed')) {
       return 'error';
     }
-    
+
     // Debug and info logs
     if (lowerName.includes('debug') || lowerName.includes('info') || lowerName.includes('warn')) {
       return 'debug';
     }
-    
-    // General ARK/ASA logs
-    if (lowerName.includes('ark') || lowerName.includes('asa')) {
-      return 'game';
-    }
-    
-    // Windows system logs
-    if (lowerDir.includes('winevt') || lowerDir.includes('system32')) {
-      return 'system';
-    }
-    
+
     return 'other';
   }
-
-
 
   /**
    * Get file size in bytes
@@ -362,11 +351,13 @@ class ArkLogsService {
       }
     }
 
-    // Look for the log file in multiple possible locations
+    // Look for the log file in multiple possible locations using game adapter
+    const dbRow = serverName ? getServerConfig(serverName) : null;
+    const adapter = gameFor(dbRow?.game_type || 'ark');
+    const logSubDirs = adapter.getLogSubDirectories();
     const possibleLogPaths = [
-      path.join(serverPath, 'ShooterGame', 'Saved', 'Logs', logFileName),
-      path.join(serverPath, 'logs', logFileName),
-      path.join(serverPath, logFileName)
+      ...logSubDirs.map(sub => path.join(serverPath, sub, logFileName)),
+      path.join(serverPath, logFileName),
     ];
 
     let logPath = null;
@@ -511,7 +502,7 @@ class ArkLogsService {
               name: file,
               path: filePath,
               size: size,
-              type: this.categorizeLogFile(file, logDir)
+              type: this.categorizeLogFile(file, logDir, serverName)
             });
             logger.info(`Added log file: ${file} (${size} bytes)`);
           }

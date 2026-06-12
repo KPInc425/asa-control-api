@@ -77,12 +77,8 @@ export class AutoUpdateService extends EventEmitter {
     super();
     
     // Service dependencies
-    this.serverProvisioner = new ServerProvisioner();
-    this.nativeServerManager = new NativeServerManager();
-    this.discordService = new DiscordService();
-    this.notificationService = null; // Will be set during initialization or via setNotificationService
-    
-    // Scheduler state
+    this.serverProvisioner = null; // Lazy, created per-game-type
+    this._provisionersByGame = new Map(); // gameType -> ServerProvisioner
     this.schedulers = new Map(); // serverName -> intervalId
     this.updateStatus = new Map(); // serverName -> status object
     this.warningTimers = new Map(); // serverName -> array of timeouts
@@ -97,6 +93,41 @@ export class AutoUpdateService extends EventEmitter {
     
     logger.info('[AutoUpdateService] Initialized');
   }
+
+  // -----------------------------------------------------------------------
+  // Game-type-aware provisioner resolution
+  // -----------------------------------------------------------------------
+
+  /**
+   * Get (or create) a ServerProvisioner for the given game type.
+   * @param {string} gameType
+   * @returns {ServerProvisioner}
+   */
+  _provisionerFor(gameType) {
+    if (!this._provisionersByGame.has(gameType)) {
+      const p = new ServerProvisioner(gameType);
+      this._provisionersByGame.set(gameType, p);
+    }
+    return this._provisionersByGame.get(gameType);
+  }
+
+  /**
+   * Resolve the game type for a server from its DB config.
+   * @param {string} serverName
+   * @returns {string}
+   */
+  _gameTypeFor(serverName) {
+    try {
+      const cfg = getServerUpdateConfig(serverName);
+      return cfg?.game_type || 'ark';
+    } catch {
+      return 'ark';
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Socket.io
+  // -----------------------------------------------------------------------
 
   /**
    * Set the Socket.io instance for real-time broadcasts
@@ -127,9 +158,14 @@ export class AutoUpdateService extends EventEmitter {
     try {
       logger.info('[AutoUpdateService] Starting initialization...');
       
-      // Initialize the server provisioner
-      await this.serverProvisioner.initialize();
-      
+      // Initialize provisioners per game type from DB configs
+      const configs = getAllServerUpdateConfigs();
+      const gameTypes = new Set(configs.map(c => c.game_type || 'ark'));
+      for (const gameType of gameTypes) {
+        const prov = this._provisionerFor(gameType);
+        await prov.initialize();
+      }
+
       // Initialize notification service if not already set
       if (!this.notificationService) {
         // Use global notification service if available, otherwise create new instance
@@ -144,9 +180,8 @@ export class AutoUpdateService extends EventEmitter {
       if (!this.io && global.io) {
         this.setSocketIO(global.io);
       }
-      
-      // Load all server update configurations
-      const configs = getAllServerUpdateConfigs();
+
+      // Reuse the configs already loaded above for game type detection
       logger.info(`[AutoUpdateService] Loaded ${configs.length} server update configurations`);
       
       // Register RCON configs for each server
@@ -309,7 +344,8 @@ export class AutoUpdateService extends EventEmitter {
       updateLastCheckTime(serverName);
 
       // Get update status from server provisioner
-      const updateStatus = await this.serverProvisioner.checkServerUpdateStatus(serverName);
+      const provisioner = this._provisionerFor(this._gameTypeFor(serverName));
+      const updateStatus = await provisioner.checkServerUpdateStatus(serverName);
       
       if (updateStatus.needsUpdate) {
         logger.info(`[AutoUpdateService] Update available for ${serverName}: ${updateStatus.reason}`);
@@ -713,7 +749,7 @@ export class AutoUpdateService extends EventEmitter {
       emitProgress(steps[3], 50);
       logger.info(`[AutoUpdateService] ${serverName}: ${steps[3]}`);
       
-      await this.serverProvisioner.updateServerBinaries(serverName);
+      await this._provisionerFor(this._gameTypeFor(serverName)).updateServerBinaries(serverName);
       logger.info(`[AutoUpdateService] ${serverName}: Binaries updated`);
       
       // Update last update time in database
@@ -942,7 +978,8 @@ export class AutoUpdateService extends EventEmitter {
 
     logger.info(`[AutoUpdateService] Running update-on-start check for ${serverName}`);
 
-    const updateStatus = await this.serverProvisioner.checkServerUpdateStatus(serverName);
+    const provisioner = this._provisionerFor(this._gameTypeFor(serverName));
+    const updateStatus = await provisioner.checkServerUpdateStatus(serverName);
     updateLastCheckTime(serverName);
 
     if (updateStatus.needsUpdate) {
@@ -1125,7 +1162,8 @@ export class AutoUpdateService extends EventEmitter {
   async getServerRconConfig(serverName) {
     try {
       // Try to get from server provisioner
-      const servers = await this.serverProvisioner.listServers();
+      const provisioner = this._provisionerFor(this._gameTypeFor(serverName));
+      const servers = await provisioner.listServers();
       const server = servers.find(s => s.name === serverName);
       
       if (server && server.rconPort) {
@@ -1137,7 +1175,7 @@ export class AutoUpdateService extends EventEmitter {
       }
       
       // Try clusters
-      const clusters = await this.serverProvisioner.listClusters();
+      const clusters = await provisioner.listClusters();
       for (const cluster of clusters) {
         if (cluster.servers) {
           const clusterServer = cluster.servers.find(s => s.name === serverName);
@@ -1334,6 +1372,7 @@ export class AutoUpdateService extends EventEmitter {
       const status = this.getUpdateStatus(config.server_name);
       statuses.push({
         ...status,
+        gameType: config.game_type || 'ark',
         config: this.getConfig(config.server_name),
         schedulerActive: this.schedulers.has(config.server_name)
       });

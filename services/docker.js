@@ -1,37 +1,58 @@
 import Docker from 'dockerode';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
-import { 
-  incrementContainerOperation, 
+import { gameRegistry } from '../games/index.js';
+import {
+  incrementContainerOperation,
   recordContainerOperationDuration,
-  updateArkServerStatus 
+  updateArkServerStatus,
 } from '../metrics/index.js';
 
 class DockerService {
   constructor() {
     this.docker = new Docker({
-      socketPath: config.docker.socketPath
+      socketPath: config.docker.socketPath,
     });
     this.activeLogStreams = new Map(); // Track active log streams
   }
 
   /**
-   * List all ASA containers with their status
+   * List all game server containers with their status
+   * Filters containers by checking if their names or images match known game
+   * adapters.  Falls back to accepting all containers when the registry is
+   * empty (no adapters loaded yet) or when DOCKER_FILTER_ALL=true.
    */
   async listContainers() {
     try {
       const containers = await this.docker.listContainers({ all: true });
-      
-      // Filter for ASA containers (you may need to adjust this filter based on your naming convention)
-      const asaContainers = containers.filter(container => 
-        container.Names.some(name => name.includes('asa') || name.includes('ark'))
-      );
+
+      // Determine which containers are game-related
+      const filterAll =
+        process.env.DOCKER_FILTER_ALL === 'true' || false;
+      const knownPatterns = ['asa', 'ark', 'game', 'server'];
+
+      // Add game adapter process/binary names as filter keywords
+      for (const adapter of gameRegistry.all) {
+        for (const pn of adapter.processNames) {
+          const keyword = pn.replace(/\.exe$/i, '').toLowerCase();
+          if (!knownPatterns.includes(keyword)) knownPatterns.push(keyword);
+        }
+      }
+
+      const gameContainers = filterAll
+        ? containers
+        : containers.filter((container) =>
+            container.Names.some((name) => {
+              const lower = name.toLowerCase();
+              return knownPatterns.some((p) => lower.includes(p));
+            }),
+          );
 
       const containerDetails = await Promise.all(
-        asaContainers.map(async (container) => {
+        gameContainers.map(async (container) => {
           const containerObj = this.docker.getContainer(container.Id);
           const stats = await containerObj.stats({ stream: false });
-          
+
           return {
             id: container.Id,
             name: container.Names[0].replace('/', ''),
@@ -41,25 +62,33 @@ class DockerService {
             ports: container.Ports,
             labels: container.Labels,
             memoryUsage: stats?.memory_stats?.usage || 0,
-            cpuUsage: stats?.cpu_stats?.cpu_usage?.total_usage || 0
+            cpuUsage: stats?.cpu_stats?.cpu_usage?.total_usage || 0,
           };
-        })
+        }),
       );
 
       // Update metrics
-      const runningCount = containerDetails.filter(c => c.status === 'running').length;
-      containerDetails.forEach(container => {
-        updateArkServerStatus(container.name, container.labels?.map_name || 'unknown', container.status === 'running');
+      containerDetails.forEach((container) => {
+        updateArkServerStatus(
+          container.name,
+          container.labels?.map_name || 'unknown',
+          container.status === 'running',
+        );
       });
 
       return containerDetails;
     } catch (error) {
       // Check if it's a Docker connection error
-      if (error.code === 'ENOENT' && error.message.includes('docker_engine')) {
-        logger.warn('Docker is not running or not accessible. Returning empty container list.');
+      if (
+        error.code === 'ENOENT' &&
+        error.message.includes('docker_engine')
+      ) {
+        logger.warn(
+          'Docker is not running or not accessible. Returning empty container list.',
+        );
         return [];
       }
-      
+
       logger.error('Error listing containers:', error);
       throw new Error('Failed to list containers');
     }

@@ -162,6 +162,29 @@ export class GameAdapter {
   }
 
   // -------------------------------------------------------------------------
+  // Log paths (optional override)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Return an array of directory paths (relative to the server root) to
+   * search for log files, in priority order.
+   * @param {object} [options]
+   * @returns {string[]}
+   */
+  getLogSubDirectories(options = {}) {
+    return ['logs', '.'];
+  }
+
+  /**
+   * Return an array of log filename patterns (lowercase) to filter by.
+   * An empty array means "accept all .log/.txt files".
+   * @returns {string[]}
+   */
+  getLogFilePatterns() {
+    return [];
+  }
+
+  // -------------------------------------------------------------------------
   // Environment variables block name (for config/index.js)
   // -------------------------------------------------------------------------
 

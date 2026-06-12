@@ -229,6 +229,23 @@ export class ArkAdapter extends GameAdapter {
   }
 
   // -----------------------------------------------------------------------
+  // Log paths — ARK-specific
+  // -----------------------------------------------------------------------
+
+  getLogSubDirectories(options = {}) {
+    return [
+      'ShooterGame/Saved/Logs',
+      'Saved/Logs',
+      'logs',
+      '.',
+    ];
+  }
+
+  getLogFilePatterns() {
+    return ['shootergame', 'windowsserver', 'servergame', 'crashcallstack'];
+  }
+
+  // -----------------------------------------------------------------------
   // Server browser query (EOS-based)
   // -----------------------------------------------------------------------
 

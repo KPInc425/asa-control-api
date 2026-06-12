@@ -54,6 +54,7 @@ export default async function autoUpdateRoutes(fastify, options) {
                   type: "object",
                   properties: {
                     serverName: { type: "string" },
+                    gameType: { type: "string" },
                     status: { type: "string" },
                     lastCheck: { type: "string", nullable: true },
                     nextCheck: { type: "string", nullable: true },
@@ -88,6 +89,7 @@ export default async function autoUpdateRoutes(fastify, options) {
 
           return {
             serverName: status.serverName,
+            gameType: status.gameType || "ark",
             status: status.status || UPDATE_STATUS.IDLE,
             lastCheck: status.updatedAt ? status.updatedAt.toISOString() : null,
             nextCheck,
@@ -96,6 +98,7 @@ export default async function autoUpdateRoutes(fastify, options) {
             latestVersion: status.latestBuildId || null,
             message: status.reason || status.error || null,
             enabled: status.config?.enabled || false,
+            gameType: status.gameType || "ark",
             schedulerActive: status.schedulerActive || false,
           };
         });
