@@ -1117,7 +1117,6 @@ export default async function clusterRoutes(fastify) {
         },
         body: {
           type: "object",
-          required: ["config"],
           properties: {
             config: {
               type: "object",
@@ -1140,6 +1139,9 @@ export default async function clusterRoutes(fastify) {
             },
             regenerateConfigs: { type: "boolean" },
             regenerateScripts: { type: "boolean" },
+            force: { type: "boolean" },
+            updateConfig: { type: "boolean" },
+            background: { type: "boolean" },
           },
         },
       },
@@ -1149,38 +1151,68 @@ export default async function clusterRoutes(fastify) {
         const { serverName } = request.params;
         const {
           config,
+          force,
+          updateConfig: shouldUpdateConfig,
+          background,
           regenerateConfigs = true,
           regenerateScripts = true,
         } = request.body;
 
-        // Default gameType in config if not provided
-        if (config.gameType === undefined) {
-          config.gameType = "ark";
-        }
-
-        logger.info(`Updating server config for ${serverName}`, {
-          disableBattleEye: config.disableBattleEye,
+        logger.info(`Update for server ${serverName}`, {
+          hasConfig: !!config,
+          force,
+          updateConfig: shouldUpdateConfig,
+          background,
           regenerateConfigs,
           regenerateScripts,
         });
 
-        const result = await provisioner.updateServerSettings(
-          serverName,
-          config,
-          {
+        // If config is provided, update server settings/config first
+        if (config) {
+          // Default gameType in config if not provided
+          if (config.gameType === undefined) {
+            config.gameType = "ark";
+          }
+
+          logger.info(`Updating server config for ${serverName}`, {
+            disableBattleEye: config.disableBattleEye,
             regenerateConfigs,
             regenerateScripts,
-          },
+          });
+
+          const configResult = await provisioner.updateServerSettings(
+            serverName,
+            config,
+            {
+              regenerateConfigs,
+              regenerateScripts,
+            },
+          );
+
+          logger.info(
+            `Server config updated for ${serverName}: ${configResult.message}`,
+          );
+        }
+
+        // Then trigger binary update via SteamCMD
+        logger.info(`Triggering binary update for ${serverName}`);
+        const updateResult = await provisioner.updateServerBinaries(
+          serverName,
+          force,
         );
 
         return {
           success: true,
-          message: result.message,
-          data: result,
+          message: `Server ${serverName} updated successfully`,
+          data: {
+            ...updateResult,
+            configUpdated: !!config,
+            background: !!background,
+          },
         };
       } catch (error) {
         logger.error(
-          `Failed to update server config for ${request.params.serverName}:`,
+          `Failed to update server ${request.params.serverName}:`,
           error,
         );
         return reply.status(500).send({
