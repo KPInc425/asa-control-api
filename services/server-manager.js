@@ -293,6 +293,21 @@ export class NativeServerManager extends ServerManager {
 
       logger.info(`Process spawned with PID: ${childProcess.pid}`);
 
+      // Auto-create firewall rules for this server's game/query/rcon ports
+      try {
+        const { allowArkServerPorts } = await import("../utils/firewall.js");
+        allowArkServerPorts({
+          gamePort: serverInfo.gamePort,
+          queryPort: serverInfo.queryPort,
+          rconPort: serverInfo.rconPort,
+          serverName: name,
+        }).catch((fwErr) => {
+          logger.warn(`Firewall rule creation skipped (non-admin): ${fwErr.message}`);
+        });
+      } catch {
+        // firewall module unavailable — non-critical
+      }
+
       // Store process info with enhanced monitoring
       if (!this.processes) {
         this.processes = new Map();

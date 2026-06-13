@@ -101,9 +101,11 @@ export class ASABinariesManager {
         .catch(() => false);
 
       if (!exists) {
-        throw new Error(
-          `ASA server executable not found at ${serverExe} after installation`,
+        // Fallback: try to copy binaries from the global SteamCMD install
+        logger.warn(
+          `SteamCMD install failed for ${serverName}, trying fallback from global SteamCMD install...`,
         );
+        await this._copyFromGlobalInstall(serverPath, serverName, adapter);
       }
 
       // Clean up script
@@ -252,7 +254,7 @@ if %ERRORLEVEL% NEQ 0 (
         } catch (execError) {
           logger.error(
             `SteamCMD execution failed for ${serverName}:`,
-            execError,
+            execError.message,
           );
 
           // Check if the installation actually succeeded despite the error
@@ -267,20 +269,17 @@ if %ERRORLEVEL% NEQ 0 (
               `ASA server executable found despite error, continuing: ${arkServerExe}`,
             );
           } else {
-            // If it's a timeout error, provide a more helpful message
-            if (
-              execError.code === "ETIMEDOUT" ||
-              execError.message.includes("timeout")
-            ) {
-              throw new Error(
-                `SteamCMD update timed out for ${serverName}. The update may still be running in the background. Please check the server files or try again later.`,
-              );
-            }
-            throw execError;
+            // Fallback: try to copy binaries from the global SteamCMD install
+            // This handles the case where SteamCMD's force_install_dir fails
+            // (state 0x6) but the global install already has updated binaries.
+            logger.warn(
+              `SteamCMD direct install failed for ${serverName}, trying fallback from global SteamCMD install...`,
+            );
+            await this._copyFromGlobalInstall(serverPath, serverName, adapter);
           }
         } finally {
           // Clean up .bat file
-          await fs.unlink(batPath);
+          try { await fs.unlink(batPath); } catch {}
         }
       }
 
@@ -464,6 +463,84 @@ if %ERRORLEVEL% NEQ 0 (
   /**
    * Helper method to list clusters (needed for updateForServer)
    */
+  /**
+   * Fallback: copy binaries from the global SteamCMD install when
+   * force_install_dir fails (state 0x6 - cross-install conflict).
+   * The global install in steamcmd/steamapps/common/ is always kept
+   * up to date by SteamCMD's own update mechanism.
+   */
+  async _copyFromGlobalInstall(serverPath, serverName, adapter) {
+    const globalInstallPath = path.join(
+      this.steamCmdManager.steamCmdPath,
+      "steamapps",
+      "common",
+      "ARK Survival Ascended Dedicated Server",
+    );
+    const globalExe = path.join(globalInstallPath, adapter.binaryExeRelPath);
+    const globalExists = await fs
+      .access(globalExe)
+      .then(() => true)
+      .catch(() => false);
+
+    if (!globalExists) {
+      throw new Error(
+        `No global install found at ${globalInstallPath} and SteamCMD install failed for ${serverName}`,
+      );
+    }
+
+    logger.info(
+      `Falling back to global install at ${globalInstallPath} for ${serverName}...`,
+    );
+
+    // Copy the main executable
+    const serverExe = path.join(serverPath, adapter.binaryExeRelPath);
+    await fs.mkdir(path.dirname(serverExe), { recursive: true });
+    await fs.copyFile(globalExe, serverExe);
+
+    // Copy supporting DLLs from the root of the global install
+    const globalRootFiles = [
+      "steamclient.dll",
+      "steamclient64.dll",
+      "steamwebrtc.dll",
+      "steamwebrtc64.dll",
+      "tier0_s.dll",
+      "tier0_s64.dll",
+      "vstdlib_s.dll",
+      "vstdlib_s64.dll",
+    ];
+    for (const file of globalRootFiles) {
+      const srcPath = path.join(globalInstallPath, file);
+      const dstPath = path.join(serverPath, file);
+      try {
+        await fs.copyFile(srcPath, dstPath);
+      } catch {
+        logger.warn(`Could not copy ${file} from global install`);
+      }
+    }
+
+    // Copy the appmanifest to track the correct build ID
+    const manifestSrc = path.join(
+      this.steamCmdManager.steamCmdPath,
+      "steamapps",
+      `appmanifest_${adapter.steamAppId}.acf`,
+    );
+    const manifestDst = path.join(
+      serverPath,
+      "steamapps",
+      `appmanifest_${adapter.steamAppId}.acf`,
+    );
+    try {
+      await fs.mkdir(path.dirname(manifestDst), { recursive: true });
+      await fs.copyFile(manifestSrc, manifestDst);
+    } catch {
+      logger.warn(`Could not copy appmanifest from global install`);
+    }
+
+    logger.info(
+      `Fallback binary copy completed for ${serverName} (from global install)`,
+    );
+  }
+
   async listClusters() {
     try {
       const clusters = [];
