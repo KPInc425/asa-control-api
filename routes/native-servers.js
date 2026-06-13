@@ -561,20 +561,31 @@ export default async function nativeServerRoutes(fastify, options) {
           // For individual servers, optionally run update-on-start before launch.
           (async () => {
             try {
-              const updateResult =
-                await autoUpdateService.runUpdateOnStart(name);
+              // Use a short timeout so SteamCMD failure doesn't block start for 15 minutes
+              const updateResult = await Promise.race([
+                autoUpdateService.runUpdateOnStart(name),
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('SteamCMD check timed out (30s)')), 30000)
+                )
+              ]);
               if (updateResult?.success && !updateResult?.skipped) {
                 fastify.log.info(
                   `Update-on-start triggered for ${name}; delaying server start until update flow completes`,
                 );
                 return;
               }
+            } catch (updateError) {
+              fastify.log.warn(
+                `Update-on-start failed for ${name} (SteamCMD may be down), proceeding with direct start: ${updateError.message}`,
+              );
+            }
 
+            try {
               await serverManager.start(name);
-            } catch (error) {
+            } catch (startError) {
               fastify.log.error(
                 `Background server start failed for ${name}:`,
-                error,
+                startError,
               );
             }
           })();

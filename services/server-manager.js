@@ -226,7 +226,7 @@ export class NativeServerManager extends ServerManager {
       // Check if server is already running
       const isCurrentlyRunning = await this.isRunning(name);
       if (isCurrentlyRunning) {
-        console.log(
+        logger.info(
           `Server ${name} is already running. Stopping existing instance to prevent duplicates...`,
         );
         await this.stop(name);
@@ -235,14 +235,14 @@ export class NativeServerManager extends ServerManager {
       }
 
       // Regenerate start.bat with latest mods and config before starting
-      console.log(
+      logger.info(
         `Regenerating start.bat for server ${name} with latest configuration...`,
       );
       try {
         await this.regenerateServerStartScript(name);
-        console.log(`Successfully regenerated start.bat for server ${name}`);
+        logger.info(`Successfully regenerated start.bat for server ${name}`);
       } catch (regenerateError) {
-        console.warn(
+        logger.warn(
           `Failed to regenerate start.bat for server ${name}:`,
           regenerateError.message,
         );
@@ -255,41 +255,13 @@ export class NativeServerManager extends ServerManager {
         throw new Error(`Server configuration not found: ${name}`);
       }
 
-      // Check if update on start is enabled
-      try {
-        const { ServerProvisioner } = await import("./server-provisioner.js");
-        const provisioner = new ServerProvisioner();
-        const updateConfig = await provisioner.getServerUpdateConfig(name);
-
-        if (updateConfig.updateEnabled && updateConfig.updateOnStart) {
-          console.log(
-            `Update on start enabled for server ${name}. Checking for updates...`,
-          );
-          try {
-            await provisioner.updateServerBinaries(name, false);
-            console.log(`Server ${name} updated successfully before start`);
-          } catch (updateError) {
-            console.warn(
-              `Failed to update server ${name} before start:`,
-              updateError.message,
-            );
-            // Continue with start even if update fails
-          }
-        } else {
-          console.log(
-            `Update on start disabled for server ${name}. Skipping update check.`,
-          );
-        }
-      } catch (configError) {
-        console.warn(
-          `Failed to check update configuration for server ${name}:`,
-          configError.message,
-        );
-        // Continue with start even if config check fails
-      }
+      // Note: Update-on-start is handled by the route layer (autoUpdateService)
+      // before calling this method, so we skip it here to avoid blocking the
+      // process spawn (which would cause state reconciliation to falsely detect
+      // a crash due to no process running).
 
       // Debug: Log the server info to see what ports we have
-      console.log(`Server info for ${name}:`, {
+      logger.info(`Server info for ${name}:`, {
         name: serverInfo.name,
         gamePort: serverInfo.gamePort,
         port: serverInfo.port,
@@ -309,8 +281,8 @@ export class NativeServerManager extends ServerManager {
         throw new Error(`Start.bat file not found: ${startBatPath}`);
       }
 
-      console.log(`Using start.bat file: ${startBatPath}`);
-      console.log(`Working directory: ${serverInfo.serverPath}`);
+      logger.info(`Using start.bat file: ${startBatPath}`);
+      logger.info(`Working directory: ${serverInfo.serverPath}`);
 
       // Start the server using the start.bat file
       const childProcess = spawn("cmd", ["/c", "start.bat"], {
@@ -319,7 +291,7 @@ export class NativeServerManager extends ServerManager {
         stdio: ["ignore", "pipe", "pipe"],
       });
 
-      console.log(`Process spawned with PID: ${childProcess.pid}`);
+      logger.info(`Process spawned with PID: ${childProcess.pid}`);
 
       // Store process info with enhanced monitoring
       if (!this.processes) {
@@ -343,25 +315,25 @@ export class NativeServerManager extends ServerManager {
       childProcess.stdout.on("data", (data) => {
         const output = data.toString();
         processInfo.startupOutput += output;
-        console.log(`[${name}] STDOUT: ${output.trim()}`);
+        logger.info(`[${name}] STDOUT: ${output.trim()}`);
       });
 
       childProcess.stderr.on("data", (data) => {
         const error = data.toString();
         processInfo.startupErrors += error;
-        console.error(`[${name}] STDERR: ${error.trim()}`);
+        logger.error(`[${name}] STDERR: ${error.trim()}`);
       });
 
       // Add process event listeners for debugging
       childProcess.on("error", (error) => {
-        console.error(`[${name}] Process error event:`, error);
+        logger.error(`[${name}] Process error event:`, error.message);
         processInfo.status = "error";
         processInfo.error = error.message;
         processInfo.errorTime = new Date();
       });
 
       childProcess.on("exit", (code, signal) => {
-        console.log(
+        logger.info(
           `[${name}] Process exit event - Code: ${code}, Signal: ${signal}`,
         );
         processInfo.status = "exited";
@@ -371,7 +343,7 @@ export class NativeServerManager extends ServerManager {
       });
 
       childProcess.on("close", (code, signal) => {
-        console.log(
+        logger.info(
           `[${name}] Process close event - Code: ${code}, Signal: ${signal}`,
         );
         processInfo.status = "closed";
@@ -400,7 +372,7 @@ export class NativeServerManager extends ServerManager {
       // Set up crash detection
       this.setupCrashDetection(name, childProcess);
 
-      console.log(
+      logger.info(
         `Server ${name} started successfully with PID: ${childProcess.pid}`,
       );
       return {
@@ -410,7 +382,7 @@ export class NativeServerManager extends ServerManager {
         startupTime: Date.now() - processInfo.startTime.getTime(),
       };
     } catch (error) {
-      console.error(`Failed to start server ${name}:`, error);
+      logger.error(`Failed to start server ${name}:`, error);
       throw error;
     }
   }
@@ -516,7 +488,7 @@ export class NativeServerManager extends ServerManager {
 
   setupCrashDetection(name, childProcess) {
     childProcess.on("exit", (code, signal) => {
-      console.log(
+      logger.info(
         `Server ${name} process exited with code ${code} and signal ${signal}`,
       );
 
@@ -552,7 +524,7 @@ export class NativeServerManager extends ServerManager {
     });
 
     childProcess.on("error", (error) => {
-      console.error(`Server ${name} process error:`, error);
+      logger.error(`Server ${name} process error:`, error.message);
 
       const processInfo = this.processes.get(name);
       if (processInfo) {
