@@ -502,7 +502,7 @@ class ArkLogsService {
               name: file,
               path: filePath,
               size: size,
-              type: this.categorizeLogFile(file, logDir, serverName)
+              type: this.categorizeLogFile(file, logDir)
             });
             logger.info(`Added log file: ${file} (${size} bytes)`);
           }
