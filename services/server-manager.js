@@ -1919,8 +1919,23 @@ export class NativeServerManager extends ServerManager {
           isMatch = true;
         }
 
-        // Strategy 4: Server name in command line (fallback)
-        if (!isMatch && commandLine.includes(name)) {
+        // Strategy 4: Server name in command line (fallback - must be more specific)
+        // Use exact session name match to avoid false positives from cluster IDs
+        if (
+          !isMatch &&
+          commandLine.includes(`SessionName=${name}`)
+        ) {
+          console.log(`Session name exact match: found running server ${name}`);
+          isMatch = true;
+        }
+
+        // Strategy 5: Server name in command line (broad fallback)
+        // Only use this if the name is long enough to avoid false matches
+        if (
+          !isMatch &&
+          name.length > 10 &&
+          commandLine.includes(name)
+        ) {
           console.log(`Name match: found running server ${name}`);
           isMatch = true;
         }
