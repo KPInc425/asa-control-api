@@ -186,7 +186,14 @@ bUseDevAuth=False
    */
   async createServerConfig(serverPath, serverConfig) {
     try {
-      const configsPath = path.join(serverPath, "configs");
+      // Write configs to the path the game actually reads from
+      const configsPath = path.join(
+        serverPath,
+        "ShooterGame",
+        "Saved",
+        "Config",
+        "WindowsServer",
+      );
       await fs.mkdir(configsPath, { recursive: true });
 
       // Get final configs for this server (global + server-specific)
@@ -234,10 +241,10 @@ bUseDevAuth=False
         customDynamicConfigUrl: serverConfig.customDynamicConfigUrl || "",
         disableBattleEye: serverConfig.disableBattleEye || false,
         created: new Date().toISOString(),
-        binariesPath: path.join(serverPath, "binaries"),
+        binariesPath: path.join(serverPath, "ShooterGame", "Binaries", "Win64"),
         configsPath: configsPath,
-        savesPath: path.join(serverPath, "saves"),
-        logsPath: path.join(serverPath, "logs"),
+        savesPath: path.join(serverPath, "ShooterGame", "Saved", "SaveGames"),
+        logsPath: path.join(serverPath, "ShooterGame", "Saved", "Logs"),
         mods: serverConfig.mods || [],
       };
 

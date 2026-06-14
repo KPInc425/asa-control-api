@@ -44,9 +44,6 @@ export class ServerManager {
 
       // Create server directory structure
       await fs.mkdir(serverPath, { recursive: true });
-      await fs.mkdir(path.join(serverPath, 'configs'), { recursive: true });
-      await fs.mkdir(path.join(serverPath, 'saves'), { recursive: true });
-      await fs.mkdir(path.join(serverPath, 'logs'), { recursive: true });
 
       this.emitProgress?.(`Server directories created: ${serverName}`);
 

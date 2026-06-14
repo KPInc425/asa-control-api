@@ -85,9 +85,15 @@ export class ScriptGenerator {
 
       logger.info(`Creating start script for server: ${serverConfig.name}`);
 
-      const configsPath = path.join(serverPath, "configs");
-      const savesPath = path.join(serverPath, "saves");
-      const logsPath = path.join(serverPath, "logs");
+      const configsPath = path.join(
+        serverPath,
+        "ShooterGame",
+        "Saved",
+        "Config",
+        "WindowsServer",
+      );
+      const savesPath = path.join(serverPath, "ShooterGame", "Saved", "SaveGames");
+      const logsPath = path.join(serverPath, "ShooterGame", "Saved", "Logs");
 
       // Get final mod list using database-based logic
       const { NativeServerManager } = await import("../server-manager.js");

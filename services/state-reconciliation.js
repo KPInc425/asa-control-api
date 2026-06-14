@@ -284,8 +284,18 @@ class StateReconciliationService {
           this.recordSuccessfulProbe(serverId, DataSource.PROCESS);
         }
       } else {
-        // Process not running
-        if (this.isInStoppingTransition(serverId)) {
+        // Process not running — but first check if RCON or query says it IS
+        // (this covers cases where isRunning() fails to match but the server
+        //  is actually alive and responding on the network)
+        if (rconData?.success) {
+          status = ServerStatus.RUNNING;
+          source = DataSource.RCON;
+          this.recordSuccessfulProbe(serverId, DataSource.RCON, rconData);
+        } else if (queryData?.success || queryData?.sessionName) {
+          status = ServerStatus.RUNNING;
+          source = DataSource.QUERY;
+          this.recordSuccessfulProbe(serverId, DataSource.QUERY, queryData);
+        } else if (this.isInStoppingTransition(serverId)) {
           // We were stopping and now stopped
           status = ServerStatus.STOPPED;
           this.recordServerStopped(serverId, processData.exitInfo);
