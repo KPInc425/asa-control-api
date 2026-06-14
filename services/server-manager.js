@@ -1877,6 +1877,7 @@ export class NativeServerManager extends ServerManager {
       }
 
       const processes = await this.getRunningProcesses();
+      console.log(`[isRunning] Checking ${name}, found ${processes.length} running processes`);
 
       for (const process of processes) {
         const commandLine = process.commandLine || "";
@@ -1894,7 +1895,7 @@ export class NativeServerManager extends ServerManager {
           commandLine.includes(serverPorts.map) &&
           commandLine.includes(`SessionName=${serverPorts.sessionName}`)
         ) {
-          console.log(`Strict match: found running server ${name}`);
+          console.log(`[isRunning] Strict match: found running server ${name}`);
           isMatch = true;
         }
 
@@ -1904,7 +1905,7 @@ export class NativeServerManager extends ServerManager {
           serverPorts &&
           commandLine.includes(`SessionName=${serverPorts.sessionName}`)
         ) {
-          console.log(`Session name match: found running server ${name}`);
+          console.log(`[isRunning] Session name match: found running server ${name}`);
           isMatch = true;
         }
 
@@ -1915,28 +1916,38 @@ export class NativeServerManager extends ServerManager {
           commandLine.includes(`Port=${serverPorts.gamePort}`) &&
           commandLine.includes(`QueryPort=${serverPorts.queryPort}`)
         ) {
-          console.log(`Port match: found running server ${name}`);
+          console.log(`[isRunning] Port match: found running server ${name}`);
           isMatch = true;
         }
 
         // Strategy 4: Server name in command line (fallback - must be more specific)
-        // Use exact session name match to avoid false positives from cluster IDs
         if (
           !isMatch &&
           commandLine.includes(`SessionName=${name}`)
         ) {
-          console.log(`Session name exact match: found running server ${name}`);
+          console.log(`[isRunning] Session name exact match: found running server ${name}`);
           isMatch = true;
         }
 
         // Strategy 5: Server name in command line (broad fallback)
-        // Only use this if the name is long enough to avoid false matches
         if (
           !isMatch &&
           name.length > 10 &&
           commandLine.includes(name)
         ) {
-          console.log(`Name match: found running server ${name}`);
+          console.log(`[isRunning] Name match: found running server ${name}`);
+          isMatch = true;
+        }
+
+        // Strategy 6: Process name match for ArkAscendedServer
+        // If we see any ArkAscendedServer.exe, try to match by server name
+        // in the command line (the session name is always present)
+        if (
+          !isMatch &&
+          (processName === "ArkAscendedServer" || processName === "ArkAscendedServer.exe") &&
+          commandLine.includes(name)
+        ) {
+          console.log(`[isRunning] Ark process name match: found running server ${name}`);
           isMatch = true;
         }
 
@@ -1945,10 +1956,10 @@ export class NativeServerManager extends ServerManager {
         }
       }
 
-      console.log(`No match found for server ${name}`);
+      console.log(`[isRunning] No match found for server ${name}`);
       return false;
     } catch (error) {
-      console.error(`Error checking if server ${name} is running:`, error);
+      console.error(`[isRunning] Error checking if server ${name} is running:`, error);
       return false;
     }
   }
