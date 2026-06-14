@@ -187,21 +187,30 @@ bUseDevAuth=False
   async createServerConfig(serverPath, serverConfig) {
     try {
       const configsPath = path.join(serverPath, "configs");
+      await fs.mkdir(configsPath, { recursive: true });
+
+      // Get final configs for this server (global + server-specific)
+      const finalConfigs = await this.getFinalConfigsForServer(
+        serverConfig.name,
+      );
 
       // Create Game.ini
-      const gameIni = await this.generateGameIni(serverConfig);
+      const gameIni =
+        finalConfigs.gameIni || (await this.generateGameIni(serverConfig));
       await fs.writeFile(path.join(configsPath, "Game.ini"), gameIni);
 
       // Create GameUserSettings.ini
       const gameUserSettings =
-        await this.generateGameUserSettings(serverConfig);
+        finalConfigs.gameUserSettings ||
+        (await this.generateGameUserSettings(serverConfig));
       await fs.writeFile(
         path.join(configsPath, "GameUserSettings.ini"),
         gameUserSettings,
       );
 
       // Create Engine.ini (required for EOS/OnlineSubsystem - needed for server browser visibility)
-      const engineIni = await this.generateEngineIni(serverConfig);
+      const engineIni =
+        finalConfigs.engineIni || (await this.generateEngineIni(serverConfig));
       await fs.writeFile(path.join(configsPath, "Engine.ini"), engineIni);
 
       const gameType = serverConfig.gameType || this.gameType || "ark";

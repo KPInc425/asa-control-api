@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { existsSync } from 'fs';
 import logger from '../../utils/logger.js';
+import { upsertServerConfig } from '../database.js';
 
 /**
  * Server Manager
@@ -61,6 +62,23 @@ export class ServerManager {
       await this.scriptGenerator.createStartScript(serverPath, serverConfig);
       await this.scriptGenerator.createStopScript(serverPath, serverName);
       this.emitProgress?.(`Server scripts created: ${serverName}`);
+
+      // Save to database so NativeServerManager can find it
+      const dbConfig = {
+        name: serverName,
+        gamePort: serverConfig.gamePort || 7777,
+        queryPort: serverConfig.queryPort || 27015,
+        rconPort: serverConfig.rconPort || 32330,
+        maxPlayers: serverConfig.maxPlayers || 70,
+        map: serverConfig.map || "TheIsland",
+        adminPassword: serverConfig.adminPassword || "admin123",
+        serverPassword: serverConfig.serverPassword || "",
+        serverPath: serverPath,
+        created: new Date().toISOString(),
+        gameType: serverConfig.gameType || "ark",
+      };
+      await upsertServerConfig(serverName, JSON.stringify(dbConfig), dbConfig.gameType);
+      this.emitProgress?.(`Server configuration saved to database: ${serverName}`);
 
       logger.info(`Standalone server ${serverName} created successfully`);
       this.emitProgress?.(`Server ${serverName} created successfully`);

@@ -1811,10 +1811,21 @@ export class NativeServerManager extends ServerManager {
                 logger.warn(
                   `[NativeServerManager] Fallback: found standalone server on disk not in DB: ${parsed.name}`,
                 );
+                // Try to get actual status
+                let fallbackStatus = "unknown";
+                try {
+                  const statusObj = await this.getServerStatus(parsed.name);
+                  fallbackStatus = statusObj.status;
+                } catch (e) {
+                  logger.warn(
+                    `Failed to get status for fallback server ${parsed.name}:`,
+                    e.message,
+                  );
+                }
                 servers.push({
                   name: parsed.name,
                   ...parsed,
-                  status: "unknown",
+                  status: fallbackStatus,
                   type: "native",
                   config: parsed,
                   isClusterServer: false,

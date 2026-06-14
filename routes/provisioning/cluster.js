@@ -1279,6 +1279,36 @@ export default async function clusterRoutes(fastify) {
     },
   );
 
+  // Delete individual server
+  fastify.delete(
+    "/api/provisioning/servers/:serverName",
+    {
+      preHandler: requirePermission("write"),
+    },
+    async (request, reply) => {
+      try {
+        const { serverName } = request.params;
+        logger.info(`Deleting standalone server: ${serverName}`);
+
+        const result = await provisioner.deleteServer(serverName);
+        return {
+          success: true,
+          message: `Server "${serverName}" deleted successfully`,
+          data: result,
+        };
+      } catch (error) {
+        logger.error(
+          `Failed to delete server ${request.params.serverName}:`,
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    },
+  );
+
   // Delete cluster
   fastify.delete(
     "/api/provisioning/clusters/:clusterName",
