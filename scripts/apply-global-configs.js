@@ -10,11 +10,12 @@ import { existsSync } from "fs";
 
 const BASE_PATH = "D:\\ARK";
 const CLUSTERS_PATH = path.join(BASE_PATH, "clusters");
+const SERVERS_PATH = path.join(BASE_PATH, "servers");
 const GLOBAL_CONFIGS_PATH = path.join(BASE_PATH, "global-configs", "ark");
 const EXCLUSIONS_PATH = path.join(BASE_PATH, "config-exclusions.json");
 
 async function main() {
-  console.log("=== Applying global configs to all cluster servers ===\n");
+  console.log("=== Applying global configs to all cluster & standalone servers ===\n");
 
   // Read global configs
   let globalGameIni = null;
@@ -60,11 +61,61 @@ async function main() {
     // No exclusions file
   }
 
-  // Iterate clusters
-  const clusters = await fs.readdir(CLUSTERS_PATH);
   let totalApplied = 0;
   let totalSkipped = 0;
 
+  // --- Helper to apply configs to one server ---
+  async function applyToServer(serverName, serverPath, sourceLabel) {
+    if (excludedServers.includes(serverName)) {
+      console.log(`  ⏭  [${sourceLabel}] ${serverName} (excluded)`);
+      totalSkipped++;
+      return;
+    }
+
+    // For standalone servers created by the provisioner, configs live in a "configs/" subfolder.
+    // For cluster servers (and older layouts), they live under ShooterGame/Saved/Config/WindowsServer.
+    // Try both locations.
+    const possibleDirs = [
+      path.join(serverPath, "ShooterGame", "Saved", "Config", "WindowsServer"),
+      path.join(serverPath, "configs"),
+    ];
+
+    let appliedToDir = null;
+    for (const configDir of possibleDirs) {
+      if (existsSync(configDir)) {
+        appliedToDir = configDir;
+        break;
+      }
+    }
+
+    if (!appliedToDir) {
+      console.log(
+        `  ⏭  [${sourceLabel}] ${serverName} (no config dir found — tried: ${possibleDirs.join(", ")})`,
+      );
+      totalSkipped++;
+      return;
+    }
+
+    try {
+      if (globalGameIni) {
+        await fs.writeFile(path.join(appliedToDir, "Game.ini"), globalGameIni);
+      }
+      if (globalGameUserSettings) {
+        await fs.writeFile(
+          path.join(appliedToDir, "GameUserSettings.ini"),
+          globalGameUserSettings,
+        );
+      }
+      console.log(`  ✓ [${sourceLabel}] ${serverName} — applied to ${appliedToDir}`);
+      totalApplied++;
+    } catch (err) {
+      console.log(`  ✗ [${sourceLabel}] ${serverName} — error: ${err.message}`);
+    }
+  }
+
+  // --- Cluster servers ---
+  console.log("\n--- Cluster Servers ---");
+  const clusters = await fs.readdir(CLUSTERS_PATH);
   for (const clusterName of clusters) {
     const clusterPath = path.join(CLUSTERS_PATH, clusterName);
     const stat = await fs.stat(clusterPath).catch(() => null);
@@ -75,42 +126,22 @@ async function main() {
       const serverPath = path.join(clusterPath, serverName);
       const sStat = await fs.stat(serverPath).catch(() => null);
       if (!sStat || !sStat.isDirectory()) continue;
-
-      if (excludedServers.includes(serverName)) {
-        console.log(`  ⏭  ${serverName} (excluded)`);
-        totalSkipped++;
-        continue;
-      }
-
-      const configDir = path.join(
-        serverPath,
-        "ShooterGame",
-        "Saved",
-        "Config",
-        "WindowsServer",
-      );
-      if (!existsSync(configDir)) {
-        console.log(`  ⏭  ${serverName} (config dir not found at ${configDir})`);
-        totalSkipped++;
-        continue;
-      }
-
-      try {
-        if (globalGameIni) {
-          await fs.writeFile(path.join(configDir, "Game.ini"), globalGameIni);
-        }
-        if (globalGameUserSettings) {
-          await fs.writeFile(
-            path.join(configDir, "GameUserSettings.ini"),
-            globalGameUserSettings,
-          );
-        }
-        console.log(`  ✓ ${serverName} — global configs applied`);
-        totalApplied++;
-      } catch (err) {
-        console.log(`  ✗ ${serverName} — error: ${err.message}`);
-      }
+      await applyToServer(serverName, serverPath, `cluster:${clusterName}`);
     }
+  }
+
+  // --- Standalone servers ---
+  console.log("\n--- Standalone Servers ---");
+  if (existsSync(SERVERS_PATH)) {
+    const serverDirs = await fs.readdir(SERVERS_PATH);
+    for (const serverName of serverDirs) {
+      const serverPath = path.join(SERVERS_PATH, serverName);
+      const sStat = await fs.stat(serverPath).catch(() => null);
+      if (!sStat || !sStat.isDirectory()) continue;
+      await applyToServer(serverName, serverPath, "standalone");
+    }
+  } else {
+    console.log("  (no servers directory found)");
   }
 
   console.log(
