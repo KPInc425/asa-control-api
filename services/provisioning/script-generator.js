@@ -85,7 +85,6 @@ export class ScriptGenerator {
 
       logger.info(`Creating start script for server: ${serverConfig.name}`);
 
-      const binariesPath = path.join(serverPath, "binaries");
       const configsPath = path.join(serverPath, "configs");
       const savesPath = path.join(serverPath, "saves");
       const logsPath = path.join(serverPath, "logs");
@@ -123,7 +122,7 @@ export class ScriptGenerator {
 echo Starting ${serverConfig.name}...
 
 REM Start the ASA server with proper parameters
-"${path.join(binariesPath, "ShooterGame", "Binaries", "Win64", "ArkAscendedServer.exe")}" "${serverConfig.map || "TheIsland"}_WP?SessionName=${serverConfig.name}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ""}${customUrlArg}" -Port=${serverConfig.gamePort || 7777} -QueryPort=${serverConfig.queryPort || 27015} -RCONPort=${serverConfig.rconPort || 32330}${modsArg} -servergamelog -NotifyAdminCommandsInChat${useDynamicConfigArg}${battleEyeArg}
+"${path.join(serverPath, "ShooterGame", "Binaries", "Win64", "ArkAscendedServer.exe")}" "${serverConfig.map || "TheIsland"}_WP?SessionName=${serverConfig.name}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ""}${customUrlArg}" -Port=${serverConfig.gamePort || 7777} -QueryPort=${serverConfig.queryPort || 27015} -RCONPort=${serverConfig.rconPort || 32330}${modsArg} -servergamelog -NotifyAdminCommandsInChat${useDynamicConfigArg}${battleEyeArg}
 
 echo Server ${serverConfig.name} has stopped.
 pause`;

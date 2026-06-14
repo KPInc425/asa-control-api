@@ -504,38 +504,27 @@ export class NativeServerManager extends ServerManager {
   setupCrashDetection(name, childProcess) {
     childProcess.on("exit", (code, signal) => {
       logger.info(
-        `Server ${name} process exited with code ${code} and signal ${signal}`,
+        `Server ${name} wrapper process exited with code ${code} and signal ${signal}`,
       );
 
       const processInfo = this.processes.get(name);
       if (processInfo) {
-        processInfo.status = "crashed";
-        processInfo.exitCode = code;
-        processInfo.exitSignal = signal;
-        processInfo.exitTime = new Date();
+        // The start.bat/cmd wrapper has exited, but the actual
+        // ArkAscendedServer.exe may still be running.  Do NOT mark
+        // as crashed — this is the normal lifecycle for a .bat wrapper.
+        // Null out the process ref so isRunning() falls through to
+        // more reliable port/session-name matching strategies.
+        processInfo.process = null;
 
-        // Notify state reconciliation service about the exit
-        // It will determine if this was intentional or a crash
-        stateReconciliation.recordServerStopped(name, {
-          exitCode: code,
-          exitSignal: signal,
-          reason:
-            code === 0 ? "Normal exit" : `Process exited with code ${code}`,
-        });
-
-        // Emit crash event for real-time updates
-        this.eventEmitter.emit("serverCrashed", {
-          name: name,
-          code: code,
-          signal: signal,
-          uptime: processInfo.exitTime - processInfo.startTime,
-        });
+        // Don't call recordServerStopped here — the wrapper exiting
+        // is expected.  The state reconciliation service should only
+        // be notified if we later confirm the Ark process itself is gone.
       }
 
-      // Clean up after a delay to allow for restart attempts
+      // Clean up stale process info after a delay
       setTimeout(() => {
         this.processes.delete(name);
-      }, 60000); // Keep crash info for 1 minute
+      }, 60000);
     });
 
     childProcess.on("error", (error) => {
@@ -2159,13 +2148,13 @@ export class NativeServerManager extends ServerManager {
       // Get shared mods from database
       const sharedModsData = getAllSharedMods();
       const sharedMods = sharedModsData
-        .filter((mod) => mod.enabled === 1)
+        .filter((mod) => mod.enabled === 1 && mod.mod_id)
         .map((mod) => mod.mod_id);
 
       // Get server-specific mods from database
       const serverModsData = getServerMods(serverName);
       const serverMods = serverModsData
-        .filter((mod) => mod.enabled === 1)
+        .filter((mod) => mod.enabled === 1 && mod.mod_id)
         .map((mod) => mod.mod_id);
 
       // Check if server should exclude shared mods

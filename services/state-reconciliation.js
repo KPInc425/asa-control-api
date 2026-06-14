@@ -292,16 +292,33 @@ class StateReconciliationService {
         } else if (this.wasIntentionalStop(serverId)) {
           // Process stopped after intentional stop command
           status = ServerStatus.STOPPED;
+        } else if (state.lastKnownStatus === ServerStatus.FAILED) {
+          // Already in failed state — check if it's time to give up
+          // or if a new probe succeeded.  If the FAILED state is older
+          // than 5 minutes, downgrade to STOPPED so the server can
+          // be recovered gracefully.
+          const failedAge = state.lastStopReason?.timestamp
+            ? Date.now() - new Date(state.lastStopReason.timestamp).getTime()
+            : Infinity;
+          if (failedAge > 5 * 60 * 1000) {
+            // Server has been in FAILED for over 5 min with no process
+            // and no successful probe — recycle to STOPPED.
+            status = ServerStatus.STOPPED;
+            state.lastKnownStatus = ServerStatus.STOPPED;
+            state.transitionState = null;
+            logger.info(
+              `[StateReconciliation] Server ${serverId} FAILED state expired, recycling to STOPPED`,
+            );
+          } else {
+            status = ServerStatus.FAILED;
+            reason = state.lastStopReason?.reason || 'Server crashed unexpectedly';
+          }
         } else if (state.lastKnownStatus === ServerStatus.RUNNING || 
                    state.lastKnownStatus === ServerStatus.STARTING) {
           // Was running/starting but now not - crashed
           status = ServerStatus.FAILED;
           reason = this.determineFailureReason(processData.exitInfo || {});
           this.recordServerStopped(serverId, processData.exitInfo);
-        } else if (state.lastKnownStatus === ServerStatus.FAILED) {
-          // Keep failed status
-          status = ServerStatus.FAILED;
-          reason = state.lastStopReason?.reason || 'Server crashed unexpectedly';
         } else {
           // Default to stopped
           status = ServerStatus.STOPPED;
