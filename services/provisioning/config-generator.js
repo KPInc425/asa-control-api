@@ -224,6 +224,11 @@ bUseDevAuth=False
       const adapter = gameFor(gameType);
       const defaultPorts = adapter.defaultPorts;
 
+      // Merge global dynamic config URL if server doesn't have its own
+      const globalDynamicConfigUrl = await this.getGlobalDynamicConfigUrl();
+      const effectiveDynamicConfigUrl =
+        serverConfig.customDynamicConfigUrl || globalDynamicConfigUrl;
+
       // Create server-config.json
       const serverConfigFile = {
         name: serverConfig.name,
@@ -235,10 +240,10 @@ bUseDevAuth=False
         maxPlayers: serverConfig.maxPlayers || 70,
         adminPassword: serverConfig.adminPassword || "admin123",
         serverPassword: serverConfig.serverPassword || "",
-        rconPassword: serverConfig.adminPassword || "admin123", // RCON password is same as admin password
+        rconPassword: serverConfig.adminPassword || "admin123",
         clusterId: serverConfig.clusterId || "",
         clusterPassword: serverConfig.clusterPassword || "",
-        customDynamicConfigUrl: serverConfig.customDynamicConfigUrl || "",
+        customDynamicConfigUrl: effectiveDynamicConfigUrl,
         disableBattleEye: serverConfig.disableBattleEye || false,
         created: new Date().toISOString(),
         binariesPath: path.join(serverPath, "ShooterGame", "Binaries", "Win64"),
@@ -321,6 +326,11 @@ bUseDevAuth=False
       const adapter = gameFor(gameType);
       const defaultPorts = adapter.defaultPorts;
 
+      // Merge global dynamic config URL if server doesn't have its own
+      const globalDynamicConfigUrl = await this.getGlobalDynamicConfigUrl();
+      const effectiveDynamicConfigUrl =
+        serverConfig.customDynamicConfigUrl || globalDynamicConfigUrl;
+
       // Create server-config.json
       const serverConfigFile = {
         name: serverConfig.name,
@@ -336,7 +346,7 @@ bUseDevAuth=False
         rconPassword: serverConfig.adminPassword || "admin123", // RCON password is same as admin password
         clusterId: serverConfig.clusterId || clusterName,
         clusterPassword: serverConfig.clusterPassword || "",
-        customDynamicConfigUrl: serverConfig.customDynamicConfigUrl || "",
+        customDynamicConfigUrl: effectiveDynamicConfigUrl,
         disableBattleEye: serverConfig.disableBattleEye || false,
         created: new Date().toISOString(),
         binariesPath: binariesPath,
@@ -421,6 +431,24 @@ bUseDevAuth=False
         error,
       );
       return { gameIni: null, gameUserSettings: null };
+    }
+  }
+
+  /**
+   * Get global custom dynamic config URL from global-settings.json
+   */
+  async getGlobalDynamicConfigUrl() {
+    try {
+      const globalSettingsPath = path.join(
+        this.basePath,
+        "global-configs",
+        this.gameType || "ark",
+        "global-settings.json",
+      );
+      const data = JSON.parse(await fs.readFile(globalSettingsPath, "utf8"));
+      return data.customDynamicConfigUrl || "";
+    } catch {
+      return "";
     }
   }
 
