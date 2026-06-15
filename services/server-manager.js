@@ -220,7 +220,8 @@ export class NativeServerManager extends ServerManager {
 
   async start(name) {
     try {
-      // Record start intent for state reconciliation
+      // Record start intent for state reconciliation — do this FIRST
+      // so the reconciliation service knows the server is expected to start
       stateReconciliation.recordIntent(name, IntentType.START, "user");
 
       // Check if server is already running
@@ -2404,6 +2405,28 @@ export class NativeServerManager extends ServerManager {
     try {
       const processInfo = this.processes.get(name);
       const isRunning = await this.isRunning(name);
+
+      // If we have a tracked process that was recently started but the Ark
+      // process hasn't appeared yet (cmd wrapper exited, Ark still loading),
+      // report STARTING instead of letting reconciliation show FAILED.
+      if (!isRunning && processInfo) {
+        const age = Date.now() - processInfo.startTime.getTime();
+        if (age < 45000 && processInfo.status !== "crashed") {
+          // Still within the startup grace window — report starting
+          const sources = {};
+          return {
+            name: name,
+            status: "starting",
+            uptime: Math.floor(age / 1000),
+            pid: processInfo.process?.pid || null,
+            startTime: processInfo.startTime,
+            source: "process",
+            updatedAt: new Date().toISOString(),
+            staleAfter: new Date(Date.now() + 10000).toISOString(),
+            lastSuccessfulProbe: null,
+          };
+        }
+      }
 
       // Gather data sources for reconciliation
       const sources = {
