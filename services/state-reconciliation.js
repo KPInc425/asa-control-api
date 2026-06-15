@@ -305,13 +305,13 @@ class StateReconciliationService {
         } else if (state.lastKnownStatus === ServerStatus.FAILED) {
           // Already in failed state — check if it's time to give up
           // or if a new probe succeeded.  If the FAILED state is older
-          // than 5 minutes, downgrade to STOPPED so the server can
+          // than 2 minutes, downgrade to STOPPED so the server can
           // be recovered gracefully.
           const failedAge = state.lastStopReason?.timestamp
             ? Date.now() - new Date(state.lastStopReason.timestamp).getTime()
             : Infinity;
-          if (failedAge > 5 * 60 * 1000) {
-            // Server has been in FAILED for over 5 min with no process
+          if (failedAge > 2 * 60 * 1000) {
+            // Server has been in FAILED for over 2 min with no process
             // and no successful probe — recycle to STOPPED.
             status = ServerStatus.STOPPED;
             state.lastKnownStatus = ServerStatus.STOPPED;
@@ -329,6 +329,10 @@ class StateReconciliationService {
           status = ServerStatus.FAILED;
           reason = this.determineFailureReason(processData.exitInfo || {});
           this.recordServerStopped(serverId, processData.exitInfo);
+        } else if (state.lastKnownStatus === ServerStatus.UNKNOWN) {
+          // No prior state (e.g. after API restart) — default to STOPPED
+          // so the dashboard doesn't show a stuck FAILED state.
+          status = ServerStatus.STOPPED;
         } else {
           // Default to stopped
           status = ServerStatus.STOPPED;

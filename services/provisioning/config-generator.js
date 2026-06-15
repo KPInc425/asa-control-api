@@ -201,24 +201,26 @@ bUseDevAuth=False
         serverConfig.name,
       );
 
+      // Generate base configs first, then merge global settings on top
+      const baseGameIni = await this.generateGameIni(serverConfig);
+      const baseGameUserSettings = await this.generateGameUserSettings(serverConfig);
+      const baseEngineIni = await this.generateEngineIni(serverConfig);
+
+      // Merge: global settings only override/add game-balance keys
+      const gameIni = this.mergeGlobalSettings(baseGameIni, finalConfigs.gameIni);
+      const gameUserSettings = this.mergeGlobalSettings(baseGameUserSettings, finalConfigs.gameUserSettings);
+
       // Create Game.ini
-      const gameIni =
-        finalConfigs.gameIni || (await this.generateGameIni(serverConfig));
       await fs.writeFile(path.join(configsPath, "Game.ini"), gameIni);
 
       // Create GameUserSettings.ini
-      const gameUserSettings =
-        finalConfigs.gameUserSettings ||
-        (await this.generateGameUserSettings(serverConfig));
       await fs.writeFile(
         path.join(configsPath, "GameUserSettings.ini"),
         gameUserSettings,
       );
 
-      // Create Engine.ini (required for EOS/OnlineSubsystem - needed for server browser visibility)
-      const engineIni =
-        finalConfigs.engineIni || (await this.generateEngineIni(serverConfig));
-      await fs.writeFile(path.join(configsPath, "Engine.ini"), engineIni);
+      // Create Engine.ini — always use generated, never from global configs
+      await fs.writeFile(path.join(configsPath, "Engine.ini"), baseEngineIni);
 
       const gameType = serverConfig.gameType || this.gameType || "ark";
       const adapter = gameFor(gameType);
@@ -303,24 +305,26 @@ bUseDevAuth=False
         serverConfig.name,
       );
 
+      // Generate base configs first, then merge global settings on top
+      const baseGameIni = await this.generateGameIni(serverConfig);
+      const baseGameUserSettings = await this.generateGameUserSettings(serverConfig);
+      const baseEngineIni = await this.generateEngineIni(serverConfig);
+
+      // Merge: global settings only override/add game-balance keys
+      const gameIni = this.mergeGlobalSettings(baseGameIni, finalConfigs.gameIni);
+      const gameUserSettings = this.mergeGlobalSettings(baseGameUserSettings, finalConfigs.gameUserSettings);
+
       // Create Game.ini
-      const gameIni =
-        finalConfigs.gameIni || (await this.generateGameIni(serverConfig));
       await fs.writeFile(path.join(configsPath, "Game.ini"), gameIni);
 
       // Create GameUserSettings.ini
-      const gameUserSettings =
-        finalConfigs.gameUserSettings ||
-        (await this.generateGameUserSettings(serverConfig));
       await fs.writeFile(
         path.join(configsPath, "GameUserSettings.ini"),
         gameUserSettings,
       );
 
-      // Create Engine.ini (required for EOS/OnlineSubsystem - needed for server browser visibility)
-      const engineIni =
-        finalConfigs.engineIni || (await this.generateEngineIni(serverConfig));
-      await fs.writeFile(path.join(configsPath, "Engine.ini"), engineIni);
+      // Create Engine.ini — always use generated, never from global configs
+      await fs.writeFile(path.join(configsPath, "Engine.ini"), baseEngineIni);
 
       const gameType = serverConfig.gameType || this.gameType || "ark";
       const adapter = gameFor(gameType);
@@ -377,6 +381,9 @@ bUseDevAuth=False
 
   /**
    * Get final configs for a server (global + server-specific)
+   * Returns the global INI content, but strips out server-specific
+   * settings (RCON port, admin password, etc.) so they don't
+   * overwrite the values set during cluster/server creation.
    */
   async getFinalConfigsForServer(serverName) {
     try {
@@ -432,6 +439,117 @@ bUseDevAuth=False
       );
       return { gameIni: null, gameUserSettings: null };
     }
+  }
+
+  /**
+   * Apply global config settings on top of base INI content (merge).
+   * Global settings only add/override game-balance lines — they never remove
+   * or replace infrastructure values (RCON, ports, passwords, etc.).
+   *
+   * @param {string} baseIni - The server's generated or existing INI content
+   * @param {string|null} globalIni - The global INI content (may be null)
+   * @returns {string} Merged INI content
+   */
+  mergeGlobalSettings(baseIni, globalIni) {
+    if (!globalIni) return baseIni;
+
+    // Parse global settings into a map of key -> value
+    const globalSettings = new Map();
+    const globalLines = globalIni.split("\n");
+    let currentSection = "";
+    for (const line of globalLines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("[")) {
+        currentSection = trimmed;
+      } else if (trimmed.includes("=") && !trimmed.startsWith(";")) {
+        const eqIdx = trimmed.indexOf("=");
+        const key = trimmed.substring(0, eqIdx).trim();
+        const value = trimmed.substring(eqIdx + 1).trim();
+        // Only keep game-balance keys, skip infrastructure keys
+        if (!this._isInfrastructureKey(key)) {
+          globalSettings.set(`${currentSection}\t${key}`, value);
+        }
+      }
+    }
+
+    if (globalSettings.size === 0) return baseIni;
+
+    // Apply global settings on top of base INI
+    const resultLines = [];
+    let inScalability = false;
+    let inGraphicsSettings = false;
+    for (const line of baseIni.split("\n")) {
+      const trimmed = line.trim();
+
+      // Track sections we want to skip adding globals into
+      if (trimmed.startsWith("[ScalabilityGroups]")) inScalability = true;
+      else if (trimmed.startsWith("[/Script/ShooterGame.ShooterGameUserSettings]")) inGraphicsSettings = true;
+      else if (trimmed.startsWith("[")) {
+        inScalability = false;
+        inGraphicsSettings = false;
+      }
+
+      // For lines that set values, check if there's a global override
+      if (trimmed.includes("=") && !trimmed.startsWith(";") && !trimmed.startsWith("[")) {
+        const eqIdx = trimmed.indexOf("=");
+        const key = trimmed.substring(0, eqIdx).trim();
+        // Find current section from last header
+        const section = this._findSectionForLine(resultLines);
+        const mapKey = `${section}\t${key}`;
+        if (globalSettings.has(mapKey)) {
+          // Override with global value
+          resultLines.push(`${key}=${globalSettings.get(mapKey)}`);
+          globalSettings.delete(mapKey);
+          continue;
+        }
+      }
+
+      resultLines.push(line);
+    }
+
+    // Append any remaining global settings that didn't have a match
+    // (only game-balance settings like DifficultyOffset, XPMultiplier, etc.)
+    let appendedSection = "";
+    for (const [mapKey, value] of globalSettings) {
+      const [section, key] = mapKey.split("\t");
+      if (section !== appendedSection) {
+        resultLines.push(`\n${section}`);
+        appendedSection = section;
+      }
+      resultLines.push(`${key}=${value}`);
+    }
+
+    return resultLines.join("\n");
+  }
+
+  /**
+   * Find the last section header in a list of lines
+   */
+  _findSectionForLine(lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const t = lines[i].trim();
+      if (t.startsWith("[")) return t;
+    }
+    return "[ServerSettings]";
+  }
+
+  /**
+   * Check if a config key is an infrastructure setting that should NOT
+   * come from global configs.
+   */
+  _isInfrastructureKey(key) {
+    const infraKeys = [
+      "RCONPort", "RCONEnabled", "RCONServerGameLogBuffer",
+      "ServerAdminPassword", "AdminPassword", "ServerPassword",
+      "CustomDynamicConfigUrl", "MaxPlayers", "SessionName", "WinLivePlayers",
+      "ServerHardcore", "ServerPVE", "ServerForceNoHUD",
+      "NoTributeDownloads", "PreventDownloadItems", "PreventDownloadDinos",
+      "ActiveEvent", "OverrideOfficialDifficulty", "OverrideStartTime",
+      "StartTimeOverride",
+    ];
+    return infraKeys.some(
+      (k) => key === k || key.toLowerCase() === k.toLowerCase(),
+    );
   }
 
   /**

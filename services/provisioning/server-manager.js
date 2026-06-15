@@ -60,21 +60,25 @@ export class ServerManager {
       await this.scriptGenerator.createStopScript(serverPath, serverName);
       this.emitProgress?.(`Server scripts created: ${serverName}`);
 
-      // Save to database so NativeServerManager can find it
-      const dbConfig = {
-        name: serverName,
-        gamePort: serverConfig.gamePort || 7777,
-        queryPort: serverConfig.queryPort || 27015,
-        rconPort: serverConfig.rconPort || 32330,
-        maxPlayers: serverConfig.maxPlayers || 70,
-        map: serverConfig.map || "TheIsland",
-        adminPassword: serverConfig.adminPassword || "admin123",
-        serverPassword: serverConfig.serverPassword || "",
-        serverPath: serverPath,
-        created: new Date().toISOString(),
-        gameType: serverConfig.gameType || "ark",
-      };
-      await upsertServerConfig(serverName, JSON.stringify(dbConfig), dbConfig.gameType);
+      // Read back the enriched server-config.json (has merged ports, dynamic URL, etc.)
+      // and save THAT to the database instead of a stripped-down copy.
+      let enrichedConfig = { ...serverConfig };
+      try {
+        const configFileContent = await fs.readFile(
+          path.join(serverPath, "server-config.json"),
+          "utf8",
+        );
+        enrichedConfig = JSON.parse(configFileContent);
+      } catch {
+        // Fall back to the original serverConfig if file not found
+        enrichedConfig = { ...serverConfig };
+      }
+
+      await upsertServerConfig(
+        serverName,
+        JSON.stringify(enrichedConfig),
+        enrichedConfig.gameType || serverConfig.gameType || "ark",
+      );
       this.emitProgress?.(`Server configuration saved to database: ${serverName}`);
 
       logger.info(`Standalone server ${serverName} created successfully`);

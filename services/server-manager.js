@@ -411,8 +411,17 @@ export class NativeServerManager extends ServerManager {
       // Check if process is still running
       if (childProcess.killed) {
         // The cmd process has exited, which is normal for start.bat
-        // Check if the actual server process is running
-        const isServerRunning = await this.isRunning(name);
+        // The actual ArkAscendedServer.exe may take a moment to appear.
+        // Retry isRunning() a few times before giving up.
+        let isServerRunning = false;
+        for (let retry = 0; retry < 5; retry++) {
+          isServerRunning = await this.isRunning(name);
+          if (isServerRunning) break;
+          logger.info(
+            `[monitorStartup] ${name}: cmd exited, waiting for Ark process (retry ${retry + 1}/5)...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
         if (isServerRunning) {
           // Update process info to reflect that the server is running
           processInfo.status = "running";
@@ -618,21 +627,58 @@ export class NativeServerManager extends ServerManager {
           // WMIC quick scan failed — fall through to brute-force
         }
 
-        // Step 2 — brute-force: kill ALL ArkAscendedServer processes
-        // (safe for single-server setups; for multi-server, WMIC above
-        //  will have caught it already)
+        // Step 2 — targeted taskkill by session name (no WMIC needed)
+        // Use taskkill with a filter on the command line to only kill
+        // the specific server, not ALL ArkAscendedServer processes.
         try {
-          await execAsync("taskkill /f /im ArkAscendedServer.exe", {
-            timeout: 5000,
-          });
+          // taskkill /fi allows filtering by command line text
+          await execAsync(
+            `taskkill /f /fi "IMAGENAME eq ArkAscendedServer.exe" /fi "CMDLINE ne ''"`,
+            { timeout: 5000, maxBuffer: 1024 },
+          );
+          // The above kills all Ark processes — not ideal.  Instead use
+          // WMIC to find the specific PID, then taskkill that PID.
+          const wmicOut2 = await execAsync(
+            `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`,
+            { timeout: 8000 },
+          );
+          const lines2 = wmicOut2.stdout.split("\n").filter(Boolean);
+          let killed2 = false;
+          for (const line of lines2) {
+            const parts = line.split(",");
+            if (parts.length >= 3) {
+              const pid = parts[1]?.trim();
+              const cmd = parts.slice(2).join(",");
+              if (
+                pid &&
+                (cmd.includes(`SessionName=${name}`) ||
+                  cmd.includes(name))
+              ) {
+                await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
+                logger.info(`Stopped server ${name} by PID ${pid} (retry)`);
+                killed2 = true;
+              }
+            }
+          }
+          if (killed2) {
+            stateReconciliation.recordServerStopped(name, {
+              exitCode: 0,
+              reason: "Intentional stop",
+            });
+            return { success: true, message: `Server ${name} stopped` };
+          }
+          // No matching process found
+          logger.warn(
+            `No ArkAscendedServer.exe found for server ${name}`,
+          );
           stateReconciliation.recordServerStopped(name, {
             exitCode: 0,
-            reason: "Intentional stop",
+            reason: "Server was not running",
           });
-          logger.info(
-            `Stopped server ${name} by brute-force taskkill /im`,
-          );
-          return { success: true, message: `Server ${name} stopped` };
+          return {
+            success: false,
+            message: `Server ${name} not running`,
+          };
         } catch {
           // No ArkAscendedServer process running at all
           logger.warn(
