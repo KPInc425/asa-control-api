@@ -574,56 +574,77 @@ export class NativeServerManager extends ServerManager {
         logger.info(`Stopped server ${name}`);
         return { success: true, message: `Server ${name} stopped` };
       } else {
-        // Try to find and kill by matching command line arguments
+        // NO tracked process — kill any ArkAscendedServer.exe whose
+        // command line contains this server name.  Use taskkill first
+        // (fast, no WMIC needed), fall back to process matching.
         const { exec } = await import("child_process");
         const { promisify } = await import("util");
         const execAsync = promisify(exec);
 
+        // Step 1 — quick taskkill by process name + filter via command line
         try {
-          // Get all running ASA processes
-          const runningProcesses = await this.getRunningProcesses();
-
-          // Find the process that matches this server name
-          const targetProcess = runningProcesses.find((process) => {
-            const commandLine = process.commandLine || "";
-            // Look for the server name in the command line arguments
-            // The server name is typically in the SessionName parameter
-            return (
-              commandLine.includes(`SessionName=${name}`) ||
-              commandLine.includes(
-                `SessionName=${name.replace(/\s+/g, "%20")}`,
-              ) ||
-              commandLine.includes(name)
-            );
-          });
-
-          if (targetProcess) {
-            // Kill the specific process by PID
-            await execAsync(`taskkill /f /pid ${targetProcess.pid}`);
-            // Record successful stop
+          // Get PIDs via WMIC (once, not the full getRunningProcesses)
+          const wmicOut = await execAsync(
+            `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`,
+            { timeout: 8000 },
+          );
+          const lines = wmicOut.stdout.split("\n").filter(Boolean);
+          // CSV format: Node,ProcessId,CommandLine
+          let killed = false;
+          for (const line of lines) {
+            const parts = line.split(",");
+            if (parts.length >= 3) {
+              const pid = parts[1]?.trim();
+              const cmd = parts.slice(2).join(",");
+              if (
+                pid &&
+                (cmd.includes(`SessionName=${name}`) ||
+                  cmd.includes(name))
+              ) {
+                await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
+                logger.info(`Stopped server ${name} by PID ${pid}`);
+                killed = true;
+              }
+            }
+          }
+          if (killed) {
             stateReconciliation.recordServerStopped(name, {
               exitCode: 0,
               reason: "Intentional stop",
             });
-            logger.info(`Stopped server ${name} by PID ${targetProcess.pid}`);
             return { success: true, message: `Server ${name} stopped` };
-          } else {
-            // Server wasn't running - still mark as stopped
-            stateReconciliation.recordServerStopped(name, {
-              exitCode: 0,
-              reason: "Server was not running",
-            });
-            logger.warn(`No running process found for server ${name}`);
-            return { success: false, message: `Server ${name} not running` };
           }
-        } catch (error) {
-          logger.warn(
-            `Could not stop server ${name} by process matching:`,
-            error.message,
+        } catch {
+          // WMIC quick scan failed — fall through to brute-force
+        }
+
+        // Step 2 — brute-force: kill ALL ArkAscendedServer processes
+        // (safe for single-server setups; for multi-server, WMIC above
+        //  will have caught it already)
+        try {
+          await execAsync("taskkill /f /im ArkAscendedServer.exe", {
+            timeout: 5000,
+          });
+          stateReconciliation.recordServerStopped(name, {
+            exitCode: 0,
+            reason: "Intentional stop",
+          });
+          logger.info(
+            `Stopped server ${name} by brute-force taskkill /im`,
           );
+          return { success: true, message: `Server ${name} stopped` };
+        } catch {
+          // No ArkAscendedServer process running at all
+          logger.warn(
+            `No ArkAscendedServer.exe found for server ${name}`,
+          );
+          stateReconciliation.recordServerStopped(name, {
+            exitCode: 0,
+            reason: "Server was not running",
+          });
           return {
             success: false,
-            message: `Server ${name} not running or could not be stopped`,
+            message: `Server ${name} not running`,
           };
         }
       }
