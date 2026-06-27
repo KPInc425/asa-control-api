@@ -671,15 +671,11 @@ export class NativeServerManager extends ServerManager {
               exitCode: 0,
               reason: "Intentional stop",
             });
-<<<<<<< HEAD
             logger.warn(`No running process found for server ${name}`);
             return {
               success: true,
               message: `Server ${name} is already stopped`,
             };
-=======
-            return { success: true, message: `Server ${name} stopped` };
->>>>>>> 81997e2637c0eea78712b210ce8f3702eaa7d6f7
           }
           // No matching process found
           logger.warn(
@@ -2005,26 +2001,17 @@ export class NativeServerManager extends ServerManager {
         }
 
         // Strategy 4: Server name in command line (fallback - must be more specific)
-<<<<<<< HEAD
         // Use exact session name match to avoid false positives from cluster IDs
-        if (!isMatch && commandLine.includes(`SessionName=${name}`)) {
-          console.log(`Session name exact match: found running server ${name}`);
-=======
         if (
           !isMatch &&
           commandLine.includes(`SessionName=${name}`)
         ) {
           console.log(`[isRunning] Session name exact match: found running server ${name}`);
->>>>>>> 81997e2637c0eea78712b210ce8f3702eaa7d6f7
           isMatch = true;
         }
 
         // Strategy 5: Server name in command line (broad fallback)
-<<<<<<< HEAD
         // Only use this if the name is long enough to avoid false matches
-        if (!isMatch && name.length > 10 && commandLine.includes(name)) {
-          console.log(`Name match: found running server ${name}`);
-=======
         if (
           !isMatch &&
           name.length > 10 &&
@@ -2043,7 +2030,6 @@ export class NativeServerManager extends ServerManager {
           commandLine.includes(name)
         ) {
           console.log(`[isRunning] Ark process name match: found running server ${name}`);
->>>>>>> 81997e2637c0eea78712b210ce8f3702eaa7d6f7
           isMatch = true;
         }
 
