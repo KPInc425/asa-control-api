@@ -284,24 +284,55 @@ class StateReconciliationService {
           this.recordSuccessfulProbe(serverId, DataSource.PROCESS);
         }
       } else {
-        // Process not running
-        if (this.isInStoppingTransition(serverId)) {
+        // Process not running — but first check if RCON or query says it IS
+        // (this covers cases where isRunning() fails to match but the server
+        //  is actually alive and responding on the network)
+        if (rconData?.success) {
+          status = ServerStatus.RUNNING;
+          source = DataSource.RCON;
+          this.recordSuccessfulProbe(serverId, DataSource.RCON, rconData);
+        } else if (queryData?.success || queryData?.sessionName) {
+          status = ServerStatus.RUNNING;
+          source = DataSource.QUERY;
+          this.recordSuccessfulProbe(serverId, DataSource.QUERY, queryData);
+        } else if (this.isInStoppingTransition(serverId)) {
           // We were stopping and now stopped
           status = ServerStatus.STOPPED;
           this.recordServerStopped(serverId, processData.exitInfo);
         } else if (this.wasIntentionalStop(serverId)) {
           // Process stopped after intentional stop command
           status = ServerStatus.STOPPED;
+        } else if (state.lastKnownStatus === ServerStatus.FAILED) {
+          // Already in failed state — check if it's time to give up
+          // or if a new probe succeeded.  If the FAILED state is older
+          // than 2 minutes, downgrade to STOPPED so the server can
+          // be recovered gracefully.
+          const failedAge = state.lastStopReason?.timestamp
+            ? Date.now() - new Date(state.lastStopReason.timestamp).getTime()
+            : Infinity;
+          if (failedAge > 2 * 60 * 1000) {
+            // Server has been in FAILED for over 2 min with no process
+            // and no successful probe — recycle to STOPPED.
+            status = ServerStatus.STOPPED;
+            state.lastKnownStatus = ServerStatus.STOPPED;
+            state.transitionState = null;
+            logger.info(
+              `[StateReconciliation] Server ${serverId} FAILED state expired, recycling to STOPPED`,
+            );
+          } else {
+            status = ServerStatus.FAILED;
+            reason = state.lastStopReason?.reason || 'Server crashed unexpectedly';
+          }
         } else if (state.lastKnownStatus === ServerStatus.RUNNING || 
                    state.lastKnownStatus === ServerStatus.STARTING) {
           // Was running/starting but now not - crashed
           status = ServerStatus.FAILED;
           reason = this.determineFailureReason(processData.exitInfo || {});
           this.recordServerStopped(serverId, processData.exitInfo);
-        } else if (state.lastKnownStatus === ServerStatus.FAILED) {
-          // Keep failed status
-          status = ServerStatus.FAILED;
-          reason = state.lastStopReason?.reason || 'Server crashed unexpectedly';
+        } else if (state.lastKnownStatus === ServerStatus.UNKNOWN) {
+          // No prior state (e.g. after API restart) — default to STOPPED
+          // so the dashboard doesn't show a stuck FAILED state.
+          status = ServerStatus.STOPPED;
         } else {
           // Default to stopped
           status = ServerStatus.STOPPED;

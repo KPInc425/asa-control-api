@@ -283,7 +283,7 @@ export class ArkAdapter extends GameAdapter {
       "@NoPromptForPassword 1",
       `force_install_dir "${installDir}"`,
       "login anonymous",
-      `app_update ${this.steamAppId}`,
+      `app_update ${this.steamAppId} validate`,
     ];
     if (branch) {
       lines.push(`-beta ${branch}`);

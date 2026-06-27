@@ -107,7 +107,7 @@ export default async function clusterRoutes(fastify) {
     },
   );
 
-  // Create individual server
+  // Create individual server (async with job progress)
   fastify.post(
     "/api/provisioning/create-server",
     {
@@ -136,61 +136,117 @@ export default async function clusterRoutes(fastify) {
       },
     },
     async (request, reply) => {
-      try {
-        const {
-          name,
-          map = "TheIsland",
-          gamePort = 7777,
-          queryPort = 27015,
-          rconPort = 32330,
-          maxPlayers = 70,
-          adminPassword = "admin123",
-          serverPassword = "",
-          harvestMultiplier = 3.0,
-          xpMultiplier = 3.0,
-          tamingMultiplier = 5.0,
-          disableBattleEye = false,
-          customDynamicConfigUrl = "",
-          gameType = "ark",
-        } = request.body;
+      const io = fastify.io;
+      const {
+        name,
+        map = "TheIsland",
+        gamePort = 7777,
+        queryPort = 27015,
+        rconPort = 32330,
+        maxPlayers = 70,
+        adminPassword = "admin123",
+        serverPassword = "",
+        harvestMultiplier = 3.0,
+        xpMultiplier = 3.0,
+        tamingMultiplier = 5.0,
+        disableBattleEye = false,
+        customDynamicConfigUrl = "",
+        gameType = "ark",
+      } = request.body;
 
-        if (!name) {
-          return reply.status(400).send({
-            success: false,
-            message: "Server name is required",
-          });
-        }
-
-        const serverConfig = {
-          name,
-          map,
-          gamePort,
-          queryPort,
-          rconPort,
-          maxPlayers,
-          adminPassword,
-          serverPassword,
-          harvestMultiplier,
-          xpMultiplier,
-          tamingMultiplier,
-          disableBattleEye,
-          customDynamicConfigUrl,
-          gameType,
-        };
-
-        const result = await provisioner.createServer(serverConfig);
-        return {
-          success: true,
-          message: `Server ${name} created successfully`,
-          data: result,
-        };
-      } catch (error) {
-        logger.error("Failed to create server:", error);
-        return reply.status(500).send({
+      if (!name) {
+        return reply.status(400).send({
           success: false,
-          message: "Failed to create server",
+          message: "Server name is required",
         });
       }
+
+      const serverConfig = {
+        name,
+        map,
+        gamePort,
+        queryPort,
+        rconPort,
+        maxPlayers,
+        adminPassword,
+        serverPassword,
+        harvestMultiplier,
+        xpMultiplier,
+        tamingMultiplier,
+        disableBattleEye,
+        customDynamicConfigUrl,
+        gameType,
+      };
+
+      const job = createJob("create-server", { serverName: name });
+      logger.info(`Created job ${job.id} for creating standalone server ${name}`);
+
+      // Respond immediately with job ID
+      reply.send({ success: true, jobId: job.id, message: `Server "${name}" creation started` });
+
+      // Do the heavy work in the background
+      (async () => {
+        try {
+          addJobProgress(job.id, `Starting server creation for ${name}...`);
+          if (io) {
+            io.emit("job-progress", {
+              jobId: job.id,
+              status: "running",
+              progress: 5,
+              message: `Creating server "${name}"...`,
+              step: "initializing",
+            });
+          }
+
+          // Set up progress callback on the provisioner
+          let stepCount = 0;
+          const totalSteps = 5;
+          provisioner.setProgressCallback((msg) => {
+            stepCount++;
+            const progress = Math.min(
+              Math.round((stepCount / totalSteps) * 100),
+              95,
+            );
+            addJobProgress(job.id, msg);
+            if (io) {
+              io.emit("job-progress", {
+                jobId: job.id,
+                status: "running",
+                progress,
+                message: typeof msg === "string" ? msg : msg.message || JSON.stringify(msg),
+                step: "creating",
+              });
+            }
+          });
+
+          await provisioner.createServer(serverConfig);
+
+          updateJob(job.id, { status: "completed" });
+          if (io) {
+            io.emit("job-progress", {
+              jobId: job.id,
+              status: "completed",
+              progress: 100,
+              message: `Server "${name}" created successfully!`,
+              step: "done",
+            });
+          }
+          logger.info(`Job ${job.id} completed: standalone server ${name} created`);
+        } catch (err) {
+          logger.error(`Job ${job.id} failed: ${err.message}`);
+          updateJob(job.id, { status: "failed", error: err.message });
+          if (io) {
+            io.emit("job-progress", {
+              jobId: job.id,
+              status: "failed",
+              progress: 0,
+              message: `Failed: ${err.message}`,
+              error: err.message,
+              step: "error",
+            });
+          }
+        }
+      })();
     },
   );
 
@@ -1102,6 +1158,167 @@ export default async function clusterRoutes(fastify) {
     },
   );
 
+  // Regenerate INI configs from global settings for all servers (one-time fix)
+  fastify.post(
+    "/api/provisioning/regenerate-global-configs",
+    {
+      preHandler: requirePermission("write"),
+    },
+    async (request, reply) => {
+      try {
+        const clustersPath =
+          process.env.NATIVE_CLUSTERS_PATH ||
+          (config.server &&
+            config.server.native &&
+            config.server.native.clustersPath) ||
+          (config.server &&
+          config.server.native &&
+          config.server.native.basePath
+            ? path.join(config.server.native.basePath, "clusters")
+            : null);
+        if (!clustersPath) {
+          return reply.status(500).send({
+            success: false,
+            message: "clustersPath is not set",
+          });
+        }
+
+        // Read global configs
+        const globalConfigsPath = path.join(
+          clustersPath,
+          "..",
+          "global-configs",
+          "ark",
+        );
+        let globalGameIni = null;
+        let globalGameUserSettings = null;
+        try {
+          globalGameIni = await fs.readFile(
+            path.join(globalConfigsPath, "Game.ini"),
+            "utf8",
+          );
+        } catch {
+          // No global Game.ini
+        }
+        try {
+          globalGameUserSettings = await fs.readFile(
+            path.join(globalConfigsPath, "GameUserSettings.ini"),
+            "utf8",
+          );
+        } catch {
+          // No global GameUserSettings.ini
+        }
+
+        // Read exclusions
+        const exclusionsPath = path.join(
+          clustersPath,
+          "..",
+          "config-exclusions.json",
+        );
+        let excludedServers = [];
+        try {
+          excludedServers = JSON.parse(
+            await fs.readFile(exclusionsPath, "utf8"),
+          ).excludedServers || [];
+        } catch {
+          // No exclusions file
+        }
+
+        const results = [];
+        const clusters = await fs.readdir(clustersPath);
+
+        for (const clusterName of clusters) {
+          const clusterPath = path.join(clustersPath, clusterName);
+          const stat = await fs.stat(clusterPath).catch(() => null);
+          if (!stat || !stat.isDirectory()) continue;
+
+          const serverDirs = await fs.readdir(clusterPath);
+          for (const serverName of serverDirs) {
+            const serverPath = path.join(clusterPath, serverName);
+            const sStat = await fs.stat(serverPath).catch(() => null);
+            if (!sStat || !sStat.isDirectory()) continue;
+
+            if (excludedServers.includes(serverName)) {
+              results.push({
+                serverName,
+                clusterName,
+                skipped: true,
+                message: "Excluded from global configs",
+              });
+              continue;
+            }
+
+            const configDir = path.join(
+              serverPath,
+              "ShooterGame",
+              "Saved",
+              "Config",
+              "WindowsServer",
+            );
+            if (!existsSync(configDir)) {
+              results.push({
+                serverName,
+                clusterName,
+                skipped: true,
+                message: "Config directory not found",
+              });
+              continue;
+            }
+
+            try {
+              let wroteAny = false;
+              if (globalGameIni) {
+                await fs.writeFile(
+                  path.join(configDir, "Game.ini"),
+                  globalGameIni,
+                );
+                wroteAny = true;
+              }
+              if (globalGameUserSettings) {
+                await fs.writeFile(
+                  path.join(configDir, "GameUserSettings.ini"),
+                  globalGameUserSettings,
+                );
+                wroteAny = true;
+              }
+              results.push({
+                serverName,
+                clusterName,
+                success: true,
+                message: wroteAny
+                  ? "Global configs applied"
+                  : "No global configs found to apply",
+              });
+            } catch (error) {
+              logger.error(
+                `Failed to write configs for ${serverName}:`,
+                error,
+              );
+              results.push({
+                serverName,
+                clusterName,
+                success: false,
+                message: error.message,
+              });
+            }
+          }
+        }
+
+        return {
+          success: true,
+          message: "Global config regeneration completed",
+          data: results,
+        };
+      } catch (error) {
+        logger.error("Failed to regenerate global configs:", error);
+        return reply.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    },
+  );
+
   // Update server with config
   fastify.post(
     "/api/provisioning/servers/:serverName/update-with-config",
@@ -1213,6 +1430,36 @@ export default async function clusterRoutes(fastify) {
       } catch (error) {
         logger.error(
           `Failed to update server ${request.params.serverName}:`,
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    },
+  );
+
+  // Delete individual server
+  fastify.delete(
+    "/api/provisioning/servers/:serverName",
+    {
+      preHandler: requirePermission("write"),
+    },
+    async (request, reply) => {
+      try {
+        const { serverName } = request.params;
+        logger.info(`Deleting standalone server: ${serverName}`);
+
+        const result = await provisioner.deleteServer(serverName);
+        return {
+          success: true,
+          message: `Server "${serverName}" deleted successfully`,
+          data: result,
+        };
+      } catch (error) {
+        logger.error(
+          `Failed to delete server ${request.params.serverName}:`,
           error,
         );
         return reply.status(500).send({

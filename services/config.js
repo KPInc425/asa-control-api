@@ -53,7 +53,7 @@ class ConfigService {
       return null;
     }
 
-    // First, check if it's a standalone server
+    // First, check if it's a standalone server (direct path)
     const standalonePath = join(
       currentPath,
       serverName,
@@ -77,8 +77,33 @@ class ConfigService {
         path: standalonePath,
         serverName: serverName,
       };
-    } else {
-      logger.info(`[findServerConfigPath] Standalone path does not exist`);
+    }
+
+    // Second, check if it's a standalone server under the servers/ subdirectory
+    const serversSubPath = join(
+      currentPath,
+      "servers",
+      serverName,
+      "ShooterGame",
+      "Saved",
+      "Config",
+      "WindowsServer",
+    );
+    logger.info(
+      `[findServerConfigPath] Checking servers subdirectory path: ${serversSubPath}`,
+    );
+    logger.info(
+      `[findServerConfigPath] Servers subdirectory path exists: ${existsSync(serversSubPath)}`,
+    );
+    if (existsSync(serversSubPath)) {
+      logger.info(
+        `[findServerConfigPath] Found standalone server in servers/ subdirectory at: ${serversSubPath}`,
+      );
+      return {
+        type: "standalone",
+        path: serversSubPath,
+        serverName: serverName,
+      };
     }
 
     // If not standalone, check if it's a cluster server

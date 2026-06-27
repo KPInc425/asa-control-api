@@ -2371,6 +2371,31 @@ export default async function nativeServerRoutes(fastify, options) {
     },
   );
 
+  // Clear stuck reconciliation state for a server
+  fastify.post(
+    "/api/native-servers/:name/clear-state",
+    {
+      preHandler: [requireWrite],
+    },
+    async (request, reply) => {
+      try {
+        const { name } = request.params;
+        stateReconciliation.clearServerState(name);
+        logger.info(`Cleared reconciliation state for ${name}`);
+        return { success: true, message: `State cleared for ${name}` };
+      } catch (error) {
+        logger.error(
+          `Error clearing state for ${request.params.name}:`,
+          error,
+        );
+        return reply.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    },
+  );
+
   // Get all servers (compatibility endpoint)
   fastify.get(
     "/api/servers",

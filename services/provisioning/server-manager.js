@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { existsSync } from 'fs';
 import logger from '../../utils/logger.js';
+import { upsertServerConfig } from '../database.js';
 
 /**
  * Server Manager
@@ -43,10 +44,6 @@ export class ServerManager {
 
       // Create server directory structure
       await fs.mkdir(serverPath, { recursive: true });
-      await fs.mkdir(path.join(serverPath, 'binaries'), { recursive: true });
-      await fs.mkdir(path.join(serverPath, 'configs'), { recursive: true });
-      await fs.mkdir(path.join(serverPath, 'saves'), { recursive: true });
-      await fs.mkdir(path.join(serverPath, 'logs'), { recursive: true });
 
       this.emitProgress?.(`Server directories created: ${serverName}`);
 
@@ -62,6 +59,27 @@ export class ServerManager {
       await this.scriptGenerator.createStartScript(serverPath, serverConfig);
       await this.scriptGenerator.createStopScript(serverPath, serverName);
       this.emitProgress?.(`Server scripts created: ${serverName}`);
+
+      // Read back the enriched server-config.json (has merged ports, dynamic URL, etc.)
+      // and save THAT to the database instead of a stripped-down copy.
+      let enrichedConfig = { ...serverConfig };
+      try {
+        const configFileContent = await fs.readFile(
+          path.join(serverPath, "server-config.json"),
+          "utf8",
+        );
+        enrichedConfig = JSON.parse(configFileContent);
+      } catch {
+        // Fall back to the original serverConfig if file not found
+        enrichedConfig = { ...serverConfig };
+      }
+
+      await upsertServerConfig(
+        serverName,
+        JSON.stringify(enrichedConfig),
+        enrichedConfig.gameType || serverConfig.gameType || "ark",
+      );
+      this.emitProgress?.(`Server configuration saved to database: ${serverName}`);
 
       logger.info(`Standalone server ${serverName} created successfully`);
       this.emitProgress?.(`Server ${serverName} created successfully`);

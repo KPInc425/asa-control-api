@@ -68,12 +68,8 @@ export class ASABinariesManager {
   async installForServer(serverName) {
     try {
       const serverPath = path.join(this.serversPath, serverName);
-      const binariesPath = path.join(serverPath, "binaries");
 
       logger.info(`Installing ASA binaries for server: ${serverName}`);
-
-      // Create binaries directory
-      await fs.mkdir(binariesPath, { recursive: true });
 
       // Use SteamCMD to install
       const steamCmdExe = this.steamCmdManager.getExecutablePath();
@@ -81,7 +77,7 @@ export class ASABinariesManager {
       // Create installation script
       const scriptPath = path.join(serverPath, "install_asa.txt");
       const adapter = gameFor(this.gameType || "ark");
-      const scriptContent = adapter.buildInstallScript(binariesPath);
+      const scriptContent = adapter.buildInstallScript(serverPath);
 
       await fs.writeFile(scriptPath, scriptContent);
 
@@ -94,7 +90,7 @@ export class ASABinariesManager {
       }
 
       // Verify installation
-      const serverExe = path.join(binariesPath, adapter.binaryExeRelPath);
+      const serverExe = path.join(serverPath, adapter.binaryExeRelPath);
       const exists = await fs
         .access(serverExe)
         .then(() => true)

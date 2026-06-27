@@ -223,7 +223,8 @@ export class NativeServerManager extends ServerManager {
 
   async start(name) {
     try {
-      // Record start intent for state reconciliation
+      // Record start intent for state reconciliation — do this FIRST
+      // so the reconciliation service knows the server is expected to start
       stateReconciliation.recordIntent(name, IntentType.START, "user");
 
       // Check if server is already running
@@ -416,8 +417,17 @@ export class NativeServerManager extends ServerManager {
       // Check if process is still running
       if (childProcess.killed) {
         // The cmd process has exited, which is normal for start.bat
-        // Check if the actual server process is running
-        const isServerRunning = await this.isRunning(name);
+        // The actual ArkAscendedServer.exe may take a moment to appear.
+        // Retry isRunning() a few times before giving up.
+        let isServerRunning = false;
+        for (let retry = 0; retry < 5; retry++) {
+          isServerRunning = await this.isRunning(name);
+          if (isServerRunning) break;
+          logger.info(
+            `[monitorStartup] ${name}: cmd exited, waiting for Ark process (retry ${retry + 1}/5)...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
         if (isServerRunning) {
           // Update process info to reflect that the server is running
           processInfo.status = "running";
@@ -509,38 +519,27 @@ export class NativeServerManager extends ServerManager {
   setupCrashDetection(name, childProcess) {
     childProcess.on("exit", (code, signal) => {
       logger.info(
-        `Server ${name} process exited with code ${code} and signal ${signal}`,
+        `Server ${name} wrapper process exited with code ${code} and signal ${signal}`,
       );
 
       const processInfo = this.processes.get(name);
       if (processInfo) {
-        processInfo.status = "crashed";
-        processInfo.exitCode = code;
-        processInfo.exitSignal = signal;
-        processInfo.exitTime = new Date();
+        // The start.bat/cmd wrapper has exited, but the actual
+        // ArkAscendedServer.exe may still be running.  Do NOT mark
+        // as crashed — this is the normal lifecycle for a .bat wrapper.
+        // Null out the process ref so isRunning() falls through to
+        // more reliable port/session-name matching strategies.
+        processInfo.process = null;
 
-        // Notify state reconciliation service about the exit
-        // It will determine if this was intentional or a crash
-        stateReconciliation.recordServerStopped(name, {
-          exitCode: code,
-          exitSignal: signal,
-          reason:
-            code === 0 ? "Normal exit" : `Process exited with code ${code}`,
-        });
-
-        // Emit crash event for real-time updates
-        this.eventEmitter.emit("serverCrashed", {
-          name: name,
-          code: code,
-          signal: signal,
-          uptime: processInfo.exitTime - processInfo.startTime,
-        });
+        // Don't call recordServerStopped here — the wrapper exiting
+        // is expected.  The state reconciliation service should only
+        // be notified if we later confirm the Ark process itself is gone.
       }
 
-      // Clean up after a delay to allow for restart attempts
+      // Clean up stale process info after a delay
       setTimeout(() => {
         this.processes.delete(name);
-      }, 60000); // Keep crash info for 1 minute
+      }, 60000);
     });
 
     childProcess.on("error", (error) => {
@@ -590,59 +589,122 @@ export class NativeServerManager extends ServerManager {
         logger.info(`Stopped server ${name}`);
         return { success: true, message: `Server ${name} stopped` };
       } else {
-        // Try to find and kill by matching command line arguments
+        // NO tracked process — kill any ArkAscendedServer.exe whose
+        // command line contains this server name.  Use taskkill first
+        // (fast, no WMIC needed), fall back to process matching.
         const { exec } = await import("child_process");
         const { promisify } = await import("util");
         const execAsync = promisify(exec);
 
+        // Step 1 — quick taskkill by process name + filter via command line
         try {
-          // Get all running ASA processes
-          const runningProcesses = await this.getRunningProcesses();
-
-          // Find the process that matches this server name
-          const targetProcess = runningProcesses.find((process) => {
-            const commandLine = process.commandLine || "";
-            // Look for the server name in the command line arguments
-            // The server name is typically in the SessionName parameter
-            return (
-              commandLine.includes(`SessionName=${name}`) ||
-              commandLine.includes(
-                `SessionName=${name.replace(/\s+/g, "%20")}`,
-              ) ||
-              commandLine.includes(name)
-            );
-          });
-
-          if (targetProcess) {
-            // Kill the specific process by PID
-            await execAsync(`taskkill /f /pid ${targetProcess.pid}`);
-            // Record successful stop
+          // Get PIDs via WMIC (once, not the full getRunningProcesses)
+          const wmicOut = await execAsync(
+            `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`,
+            { timeout: 8000 },
+          );
+          const lines = wmicOut.stdout.split("\n").filter(Boolean);
+          // CSV format: Node,ProcessId,CommandLine
+          let killed = false;
+          for (const line of lines) {
+            const parts = line.split(",");
+            if (parts.length >= 3) {
+              const pid = parts[1]?.trim();
+              const cmd = parts.slice(2).join(",");
+              if (
+                pid &&
+                (cmd.includes(`SessionName=${name}`) ||
+                  cmd.includes(name))
+              ) {
+                await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
+                logger.info(`Stopped server ${name} by PID ${pid}`);
+                killed = true;
+              }
+            }
+          }
+          if (killed) {
             stateReconciliation.recordServerStopped(name, {
               exitCode: 0,
               reason: "Intentional stop",
             });
-            logger.info(`Stopped server ${name} by PID ${targetProcess.pid}`);
             return { success: true, message: `Server ${name} stopped` };
-          } else {
-            // Server wasn't running - still mark as stopped
+          }
+        } catch {
+          // WMIC quick scan failed — fall through to brute-force
+        }
+
+        // Step 2 — targeted taskkill by session name (no WMIC needed)
+        // Use taskkill with a filter on the command line to only kill
+        // the specific server, not ALL ArkAscendedServer processes.
+        try {
+          // taskkill /fi allows filtering by command line text
+          await execAsync(
+            `taskkill /f /fi "IMAGENAME eq ArkAscendedServer.exe" /fi "CMDLINE ne ''"`,
+            { timeout: 5000, maxBuffer: 1024 },
+          );
+          // The above kills all Ark processes — not ideal.  Instead use
+          // WMIC to find the specific PID, then taskkill that PID.
+          const wmicOut2 = await execAsync(
+            `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`,
+            { timeout: 8000 },
+          );
+          const lines2 = wmicOut2.stdout.split("\n").filter(Boolean);
+          let killed2 = false;
+          for (const line of lines2) {
+            const parts = line.split(",");
+            if (parts.length >= 3) {
+              const pid = parts[1]?.trim();
+              const cmd = parts.slice(2).join(",");
+              if (
+                pid &&
+                (cmd.includes(`SessionName=${name}`) ||
+                  cmd.includes(name))
+              ) {
+                await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
+                logger.info(`Stopped server ${name} by PID ${pid} (retry)`);
+                killed2 = true;
+              }
+            }
+          }
+          if (killed2) {
             stateReconciliation.recordServerStopped(name, {
               exitCode: 0,
-              reason: "Server was not running",
+              reason: "Intentional stop",
             });
+<<<<<<< HEAD
             logger.warn(`No running process found for server ${name}`);
             return {
               success: true,
               message: `Server ${name} is already stopped`,
             };
+=======
+            return { success: true, message: `Server ${name} stopped` };
+>>>>>>> 81997e2637c0eea78712b210ce8f3702eaa7d6f7
           }
-        } catch (error) {
+          // No matching process found
           logger.warn(
-            `Could not stop server ${name} by process matching:`,
-            error.message,
+            `No ArkAscendedServer.exe found for server ${name}`,
           );
+          stateReconciliation.recordServerStopped(name, {
+            exitCode: 0,
+            reason: "Server was not running",
+          });
           return {
             success: false,
-            message: `Server ${name} not running or could not be stopped`,
+            message: `Server ${name} not running`,
+          };
+        } catch {
+          // No ArkAscendedServer process running at all
+          logger.warn(
+            `No ArkAscendedServer.exe found for server ${name}`,
+          );
+          stateReconciliation.recordServerStopped(name, {
+            exitCode: 0,
+            reason: "Server was not running",
+          });
+          return {
+            success: false,
+            message: `Server ${name} not running`,
           };
         }
       }
@@ -1833,10 +1895,21 @@ export class NativeServerManager extends ServerManager {
                 logger.warn(
                   `[NativeServerManager] Fallback: found standalone server on disk not in DB: ${parsed.name}`,
                 );
+                // Try to get actual status
+                let fallbackStatus = "unknown";
+                try {
+                  const statusObj = await this.getServerStatus(parsed.name);
+                  fallbackStatus = statusObj.status;
+                } catch (e) {
+                  logger.warn(
+                    `Failed to get status for fallback server ${parsed.name}:`,
+                    e.message,
+                  );
+                }
                 servers.push({
                   name: parsed.name,
                   ...parsed,
-                  status: "unknown",
+                  status: fallbackStatus,
                   type: "native",
                   config: parsed,
                   isClusterServer: false,
@@ -1888,6 +1961,7 @@ export class NativeServerManager extends ServerManager {
       }
 
       const processes = await this.getRunningProcesses();
+      console.log(`[isRunning] Checking ${name}, found ${processes.length} running processes`);
 
       for (const process of processes) {
         const commandLine = process.commandLine || "";
@@ -1905,7 +1979,7 @@ export class NativeServerManager extends ServerManager {
           commandLine.includes(serverPorts.map) &&
           commandLine.includes(`SessionName=${serverPorts.sessionName}`)
         ) {
-          console.log(`Strict match: found running server ${name}`);
+          console.log(`[isRunning] Strict match: found running server ${name}`);
           isMatch = true;
         }
 
@@ -1915,7 +1989,7 @@ export class NativeServerManager extends ServerManager {
           serverPorts &&
           commandLine.includes(`SessionName=${serverPorts.sessionName}`)
         ) {
-          console.log(`Session name match: found running server ${name}`);
+          console.log(`[isRunning] Session name match: found running server ${name}`);
           isMatch = true;
         }
 
@@ -1926,21 +2000,50 @@ export class NativeServerManager extends ServerManager {
           commandLine.includes(`Port=${serverPorts.gamePort}`) &&
           commandLine.includes(`QueryPort=${serverPorts.queryPort}`)
         ) {
-          console.log(`Port match: found running server ${name}`);
+          console.log(`[isRunning] Port match: found running server ${name}`);
           isMatch = true;
         }
 
         // Strategy 4: Server name in command line (fallback - must be more specific)
+<<<<<<< HEAD
         // Use exact session name match to avoid false positives from cluster IDs
         if (!isMatch && commandLine.includes(`SessionName=${name}`)) {
           console.log(`Session name exact match: found running server ${name}`);
+=======
+        if (
+          !isMatch &&
+          commandLine.includes(`SessionName=${name}`)
+        ) {
+          console.log(`[isRunning] Session name exact match: found running server ${name}`);
+>>>>>>> 81997e2637c0eea78712b210ce8f3702eaa7d6f7
           isMatch = true;
         }
 
         // Strategy 5: Server name in command line (broad fallback)
+<<<<<<< HEAD
         // Only use this if the name is long enough to avoid false matches
         if (!isMatch && name.length > 10 && commandLine.includes(name)) {
           console.log(`Name match: found running server ${name}`);
+=======
+        if (
+          !isMatch &&
+          name.length > 10 &&
+          commandLine.includes(name)
+        ) {
+          console.log(`[isRunning] Name match: found running server ${name}`);
+          isMatch = true;
+        }
+
+        // Strategy 6: Process name match for ArkAscendedServer
+        // If we see any ArkAscendedServer.exe, try to match by server name
+        // in the command line (the session name is always present)
+        if (
+          !isMatch &&
+          (processName === "ArkAscendedServer" || processName === "ArkAscendedServer.exe") &&
+          commandLine.includes(name)
+        ) {
+          console.log(`[isRunning] Ark process name match: found running server ${name}`);
+>>>>>>> 81997e2637c0eea78712b210ce8f3702eaa7d6f7
           isMatch = true;
         }
 
@@ -1949,10 +2052,10 @@ export class NativeServerManager extends ServerManager {
         }
       }
 
-      console.log(`No match found for server ${name}`);
+      console.log(`[isRunning] No match found for server ${name}`);
       return false;
     } catch (error) {
-      console.error(`Error checking if server ${name} is running:`, error);
+      console.error(`[isRunning] Error checking if server ${name} is running:`, error);
       return false;
     }
   }
@@ -2163,13 +2266,13 @@ export class NativeServerManager extends ServerManager {
       // Get shared mods from database
       const sharedModsData = getAllSharedMods();
       const sharedMods = sharedModsData
-        .filter((mod) => mod.enabled === 1)
+        .filter((mod) => mod.enabled === 1 && mod.mod_id)
         .map((mod) => mod.mod_id);
 
       // Get server-specific mods from database
       const serverModsData = getServerMods(serverName);
       const serverMods = serverModsData
-        .filter((mod) => mod.enabled === 1)
+        .filter((mod) => mod.enabled === 1 && mod.mod_id)
         .map((mod) => mod.mod_id);
 
       // Check if server should exclude shared mods
@@ -2330,6 +2433,28 @@ export class NativeServerManager extends ServerManager {
     try {
       const processInfo = this.processes.get(name);
       const isRunning = await this.isRunning(name);
+
+      // If we have a tracked process that was recently started but the Ark
+      // process hasn't appeared yet (cmd wrapper exited, Ark still loading),
+      // report STARTING instead of letting reconciliation show FAILED.
+      if (!isRunning && processInfo) {
+        const age = Date.now() - processInfo.startTime.getTime();
+        if (age < 45000 && processInfo.status !== "crashed") {
+          // Still within the startup grace window — report starting
+          const sources = {};
+          return {
+            name: name,
+            status: "starting",
+            uptime: Math.floor(age / 1000),
+            pid: processInfo.process?.pid || null,
+            startTime: processInfo.startTime,
+            source: "process",
+            updatedAt: new Date().toISOString(),
+            staleAfter: new Date(Date.now() + 10000).toISOString(),
+            lastSuccessfulProbe: null,
+          };
+        }
+      }
 
       // Gather data sources for reconciliation
       const sources = {
