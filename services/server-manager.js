@@ -216,6 +216,9 @@ export class NativeServerManager extends ServerManager {
 
     // Set up EventEmitter for crash detection
     this.eventEmitter = new EventEmitter();
+
+    // Initialize PowerShell helper for process management
+    this.powershellHelper = new PowerShellHelper();
   }
 
   async start(name) {
@@ -302,7 +305,9 @@ export class NativeServerManager extends ServerManager {
           rconPort: serverInfo.rconPort,
           serverName: name,
         }).catch((fwErr) => {
-          logger.warn(`Firewall rule creation skipped (non-admin): ${fwErr.message}`);
+          logger.warn(
+            `Firewall rule creation skipped (non-admin): ${fwErr.message}`,
+          );
         });
       } catch {
         // firewall module unavailable — non-critical
@@ -625,7 +630,10 @@ export class NativeServerManager extends ServerManager {
               reason: "Server was not running",
             });
             logger.warn(`No running process found for server ${name}`);
-            return { success: false, message: `Server ${name} not running` };
+            return {
+              success: true,
+              message: `Server ${name} is already stopped`,
+            };
           }
         } catch (error) {
           logger.warn(
@@ -1027,10 +1035,12 @@ export class NativeServerManager extends ServerManager {
       const logFiles = [];
       // Resolve game-specific log directories via the game adapter
       const dbRow = getServerConfig(name);
-      const adapter = gameFor(dbRow?.game_type || 'ark');
+      const adapter = gameFor(dbRow?.game_type || "ark");
       const logSubDirs = adapter.getLogSubDirectories();
       const logPatterns = adapter.getLogFilePatterns();
-      const possibleLogDirs = logSubDirs.map(sub => path.join(serverPath, sub));
+      const possibleLogDirs = logSubDirs.map((sub) =>
+        path.join(serverPath, sub),
+      );
 
       for (const logDir of possibleLogDirs) {
         try {
@@ -1039,7 +1049,8 @@ export class NativeServerManager extends ServerManager {
             const lowerName = file.toLowerCase();
             if (
               file.endsWith(".log") ||
-              (logPatterns.length > 0 && logPatterns.some(p => lowerName.includes(p)))
+              (logPatterns.length > 0 &&
+                logPatterns.some((p) => lowerName.includes(p)))
             ) {
               const filePath = path.join(logDir, file);
               const stat = await fs.stat(filePath);
@@ -1921,21 +1932,14 @@ export class NativeServerManager extends ServerManager {
 
         // Strategy 4: Server name in command line (fallback - must be more specific)
         // Use exact session name match to avoid false positives from cluster IDs
-        if (
-          !isMatch &&
-          commandLine.includes(`SessionName=${name}`)
-        ) {
+        if (!isMatch && commandLine.includes(`SessionName=${name}`)) {
           console.log(`Session name exact match: found running server ${name}`);
           isMatch = true;
         }
 
         // Strategy 5: Server name in command line (broad fallback)
         // Only use this if the name is long enough to avoid false matches
-        if (
-          !isMatch &&
-          name.length > 10 &&
-          commandLine.includes(name)
-        ) {
+        if (!isMatch && name.length > 10 && commandLine.includes(name)) {
           console.log(`Name match: found running server ${name}`);
           isMatch = true;
         }
