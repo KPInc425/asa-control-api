@@ -1,0 +1,1355 @@
+import { spawn } from "child_process";
+import { promises as fs, existsSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { EventEmitter } from "events";
+import config from "../config/index.js";
+import logger from "../utils/logger.js";
+import PowerShellHelper from "./powershell-helper.js";
+import {
+  upsertServerConfig,
+  getServerConfig,
+  getAllServerConfigs,
+  getAllSharedMods,
+  getServerMods,
+  getServerSettings,
+} from "./database.js";
+import { gameFor, gameRegistry } from "../games/index.js";
+import {
+  ServerStatus,
+  DataSource,
+  normalizeStatus,
+  createServerLiveData,
+} from "../utils/statusContract.js";
+import { stateReconciliation, IntentType } from "./state-reconciliation.js";
+import { ServerManager } from "./server-manager-base.js";
+import { ServerStats } from "./server-stats.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * Native Windows Server Manager
+ */
+export class NativeServerManager extends ServerManager {
+  constructor() {
+    super();
+    const rawBasePath =
+      config.server.native.basePath ||
+      process.env.NATIVE_BASE_PATH ||
+      "C:\\ARK";
+    this.basePath = path.normalize(rawBasePath);
+    this.serversPath = path.join(this.basePath, "servers");
+    this.clustersPath = path.join(this.basePath, "clusters");
+    this.processes = new Map();
+    this.eventEmitter = new EventEmitter();
+    this.powershellHelper = new PowerShellHelper();
+  }
+
+  async start(name) {
+    try {
+      stateReconciliation.recordIntent(name, IntentType.START, "user");
+
+      const isCurrentlyRunning = await this.isRunning(name);
+      if (isCurrentlyRunning) {
+        logger.info(
+          `Server ${name} is already running. Stopping existing instance to prevent duplicates...`,
+        );
+        await this.stop(name);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      logger.info(
+        `Regenerating start.bat for server ${name} with latest configuration...`,
+      );
+      try {
+        await this.regenerateServerStartScript(name);
+        logger.info(`Successfully regenerated start.bat for server ${name}`);
+      } catch (regenerateError) {
+        logger.warn(
+          `Failed to regenerate start.bat for server ${name}:`,
+          regenerateError.message,
+        );
+      }
+
+      const serverInfo = await this.getClusterServerInfo(name);
+      if (!serverInfo) {
+        throw new Error(`Server configuration not found: ${name}`);
+      }
+
+      logger.info(`Server info for ${name}:`, {
+        name: serverInfo.name,
+        gamePort: serverInfo.gamePort,
+        port: serverInfo.port,
+        queryPort: serverInfo.queryPort,
+        rconPort: serverInfo.rconPort,
+        serverPath: serverInfo.serverPath,
+      });
+
+      if (!serverInfo.serverPath || !existsSync(serverInfo.serverPath)) {
+        throw new Error(`Server path does not exist: ${serverInfo.serverPath}`);
+      }
+
+      const startBatPath = path.join(serverInfo.serverPath, "start.bat");
+      if (!existsSync(startBatPath)) {
+        throw new Error(`Start.bat file not found: ${startBatPath}`);
+      }
+
+      logger.info(`Using start.bat file: ${startBatPath}`);
+      logger.info(`Working directory: ${serverInfo.serverPath}`);
+
+      const childProcess = spawn("cmd", ["/c", "start.bat"], {
+        cwd: serverInfo.serverPath,
+        detached: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      logger.info(`Process spawned with PID: ${childProcess.pid}`);
+
+      try {
+        const { allowArkServerPorts } = await import("../utils/firewall.js");
+        allowArkServerPorts({
+          gamePort: serverInfo.gamePort,
+          queryPort: serverInfo.queryPort,
+          rconPort: serverInfo.rconPort,
+          serverName: name,
+        }).catch((fwErr) => {
+          logger.warn(
+            `Firewall rule creation skipped (non-admin): ${fwErr.message}`,
+          );
+        });
+      } catch {
+        // firewall module unavailable — non-critical
+      }
+
+      if (!this.processes) {
+        this.processes = new Map();
+      }
+
+      const processInfo = {
+        process: childProcess,
+        startTime: new Date(),
+        command: `cmd /c start.bat`,
+        name: name,
+        serverInfo: serverInfo,
+        startupOutput: "",
+        startupErrors: "",
+        status: "starting",
+      };
+
+      this.processes.set(name, processInfo);
+
+      childProcess.stdout.on("data", (data) => {
+        const output = data.toString();
+        processInfo.startupOutput += output;
+        logger.info(`[${name}] STDOUT: ${output.trim()}`);
+      });
+
+      childProcess.stderr.on("data", (data) => {
+        const error = data.toString();
+        processInfo.startupErrors += error;
+        logger.error(`[${name}] STDERR: ${error.trim()}`);
+      });
+
+      childProcess.on("error", (error) => {
+        logger.error(`[${name}] Process error event:`, error.message);
+        processInfo.status = "error";
+        processInfo.error = error.message;
+        processInfo.errorTime = new Date();
+      });
+
+      childProcess.on("exit", (code, signal) => {
+        logger.info(
+          `[${name}] Process exit event - Code: ${code}, Signal: ${signal}`,
+        );
+        processInfo.status = "exited";
+        processInfo.exitCode = code;
+        processInfo.exitSignal = signal;
+        processInfo.exitTime = new Date();
+      });
+
+      childProcess.on("close", (code, signal) => {
+        logger.info(
+          `[${name}] Process close event - Code: ${code}, Signal: ${signal}`,
+        );
+        processInfo.status = "closed";
+        processInfo.closeCode = code;
+        processInfo.closeSignal = signal;
+        processInfo.closeTime = new Date();
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const startupResult = await this.monitorStartup(
+        name,
+        childProcess,
+        serverInfo,
+        processInfo,
+      );
+
+      if (!startupResult.success) {
+        this.processes.delete(name);
+        throw new Error(startupResult.message);
+      }
+
+      this.setupCrashDetection(name, childProcess);
+
+      logger.info(
+        `Server ${name} started successfully with PID: ${childProcess.pid}`,
+      );
+      return {
+        success: true,
+        message: `Server ${name} started successfully`,
+        pid: childProcess.pid,
+        startupTime: Date.now() - processInfo.startTime.getTime(),
+      };
+    } catch (error) {
+      logger.error(`Failed to start server ${name}:`, error);
+      throw error;
+    }
+  }
+
+  async monitorStartup(name, childProcess, serverInfo, processInfo) {
+    const maxStartupTime = 30000;
+    const checkInterval = 2000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxStartupTime) {
+      if (childProcess.killed) {
+        let isServerRunning = false;
+        for (let retry = 0; retry < 5; retry++) {
+          isServerRunning = await this.isRunning(name);
+          if (isServerRunning) break;
+          logger.info(
+            `[monitorStartup] ${name}: cmd exited, waiting for Ark process (retry ${retry + 1}/5)...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+        if (isServerRunning) {
+          processInfo.status = "running";
+          processInfo.process = null;
+          return {
+            success: true,
+            message: "Server started successfully",
+          };
+        } else {
+          return {
+            success: false,
+            message: `Server process crashed during startup. Errors: ${processInfo.startupErrors || "Unknown error"}`,
+          };
+        }
+      }
+
+      if (
+        processInfo.startupErrors.includes("Fatal error") ||
+        processInfo.startupErrors.includes("Failed to start") ||
+        processInfo.startupErrors.includes("Port already in use") ||
+        processInfo.startupErrors.includes("Access denied")
+      ) {
+        return {
+          success: false,
+          message: `Server startup failed: ${processInfo.startupErrors}`,
+        };
+      }
+
+      if (
+        processInfo.startupOutput.includes("Server started") ||
+        processInfo.startupOutput.includes("Listening on port") ||
+        processInfo.startupOutput.includes("Server is ready") ||
+        processInfo.startupOutput.includes("Game server started")
+      ) {
+        processInfo.status = "running";
+        return {
+          success: true,
+          message: "Server started successfully",
+        };
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+    }
+
+    const isServerRunning = await this.isRunning(name);
+    if (isServerRunning) {
+      processInfo.status = "running";
+      processInfo.process = null;
+      return {
+        success: true,
+        message: "Server appears to be running (process active)",
+      };
+    }
+
+    const runningProcesses = await this.getRunningProcesses();
+    const serverProcess = runningProcesses.find((process) => {
+      const commandLine = process.commandLine || "";
+      return (
+        commandLine.includes(`SessionName=${name}`) ||
+        commandLine.includes(`SessionName=${name.replace(/\s+/g, "%20")}`) ||
+        commandLine.includes(name)
+      );
+    });
+
+    if (serverProcess) {
+      processInfo.status = "running";
+      processInfo.process = null;
+      return {
+        success: true,
+        message: "Server process detected (startup may still be in progress)",
+      };
+    }
+
+    return {
+      success: false,
+      message: `Server startup timed out after ${maxStartupTime / 1000} seconds. Server may be stuck.`,
+    };
+  }
+
+  setupCrashDetection(name, childProcess) {
+    childProcess.on("exit", (code, signal) => {
+      logger.info(
+        `Server ${name} wrapper process exited with code ${code} and signal ${signal}`,
+      );
+
+      const processInfo = this.processes.get(name);
+      if (processInfo) {
+        processInfo.process = null;
+      }
+
+      setTimeout(() => {
+        this.processes.delete(name);
+      }, 60000);
+    });
+
+    childProcess.on("error", (error) => {
+      logger.error(`Server ${name} process error:`, error.message);
+
+      const processInfo = this.processes.get(name);
+      if (processInfo) {
+        processInfo.status = "error";
+        processInfo.error = error.message;
+        processInfo.errorTime = new Date();
+
+        stateReconciliation.recordServerStopped(name, {
+          exitCode: -1,
+          reason: `Process error: ${error.message}`,
+        });
+      }
+    });
+  }
+
+  async stop(name) {
+    try {
+      stateReconciliation.recordIntent(name, IntentType.STOP, "user");
+
+      logger.info(`Stopping native server: ${name}`);
+
+      const processInfo = this.processes.get(name);
+      if (processInfo && processInfo.process) {
+        processInfo.process.kill("SIGTERM");
+
+        setTimeout(() => {
+          if (processInfo.process && !processInfo.process.killed) {
+            processInfo.process.kill("SIGKILL");
+          }
+        }, 5000);
+
+        stateReconciliation.recordServerStopped(name, {
+          exitCode: 0,
+          reason: "Intentional stop",
+        });
+
+        this.processes.delete(name);
+        logger.info(`Stopped server ${name}`);
+        return { success: true, message: `Server ${name} stopped` };
+      } else {
+        const { exec } = await import("child_process");
+        const { promisify } = await import("util");
+        const execAsync = promisify(exec);
+
+        try {
+          const wmicOut = await execAsync(
+            `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`,
+            { timeout: 8000 },
+          );
+          const lines = wmicOut.stdout.split("\n").filter(Boolean);
+          let killed = false;
+          for (const line of lines) {
+            const parts = line.split(",");
+            if (parts.length >= 3) {
+              const pid = parts[1]?.trim();
+              const cmd = parts.slice(2).join(",");
+              if (
+                pid &&
+                (cmd.includes(`SessionName=${name}`) ||
+                  cmd.includes(name))
+              ) {
+                await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
+                logger.info(`Stopped server ${name} by PID ${pid}`);
+                killed = true;
+              }
+            }
+          }
+          if (killed) {
+            stateReconciliation.recordServerStopped(name, {
+              exitCode: 0,
+              reason: "Intentional stop",
+            });
+            return { success: true, message: `Server ${name} stopped` };
+          }
+        } catch {
+          // WMIC quick scan failed — fall through
+        }
+
+        try {
+          await execAsync(
+            `taskkill /f /fi "IMAGENAME eq ArkAscendedServer.exe" /fi "CMDLINE ne ''"`,
+            { timeout: 5000, maxBuffer: 1024 },
+          );
+          const wmicOut2 = await execAsync(
+            `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`,
+            { timeout: 8000 },
+          );
+          const lines2 = wmicOut2.stdout.split("\n").filter(Boolean);
+          let killed2 = false;
+          for (const line of lines2) {
+            const parts = line.split(",");
+            if (parts.length >= 3) {
+              const pid = parts[1]?.trim();
+              const cmd = parts.slice(2).join(",");
+              if (
+                pid &&
+                (cmd.includes(`SessionName=${name}`) ||
+                  cmd.includes(name))
+              ) {
+                await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
+                logger.info(`Stopped server ${name} by PID ${pid} (retry)`);
+                killed2 = true;
+              }
+            }
+          }
+          if (killed2) {
+            stateReconciliation.recordServerStopped(name, {
+              exitCode: 0,
+              reason: "Intentional stop",
+            });
+            logger.warn(`No running process found for server ${name}`);
+            return {
+              success: true,
+              message: `Server ${name} is already stopped`,
+            };
+          }
+          logger.warn(
+            `No ArkAscendedServer.exe found for server ${name}`,
+          );
+          stateReconciliation.recordServerStopped(name, {
+            exitCode: 0,
+            reason: "Server was not running",
+          });
+          return {
+            success: false,
+            message: `Server ${name} not running`,
+          };
+        } catch {
+          logger.warn(
+            `No ArkAscendedServer.exe found for server ${name}`,
+          );
+          stateReconciliation.recordServerStopped(name, {
+            exitCode: 0,
+            reason: "Server was not running",
+          });
+          return {
+            success: false,
+            message: `Server ${name} not running`,
+          };
+        }
+      }
+    } catch (error) {
+      logger.error(`Failed to stop server ${name}:`, error);
+      throw error;
+    }
+  }
+
+  async restart(name) {
+    try {
+      stateReconciliation.recordIntent(name, IntentType.RESTART, "user");
+      await this.stop(name);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      return await this.start(name);
+    } catch (error) {
+      logger.error(`Failed to restart native server ${name}:`, error);
+      throw error;
+    }
+  }
+
+  getServerConfigFromDatabase(name) {
+    try {
+      const dbConfig = getServerConfig(name);
+      if (dbConfig) {
+        return JSON.parse(dbConfig.config_data);
+      }
+      return null;
+    } catch (error) {
+      logger.warn(`Failed to get database config for ${name}:`, error.message);
+      return null;
+    }
+  }
+
+  getClusterIdFromConfig(serverConfig) {
+    if (!serverConfig) return null;
+    return (
+      serverConfig.clusterId ||
+      serverConfig.clusterName ||
+      (serverConfig.config &&
+        (serverConfig.config.clusterId || serverConfig.config.clusterName)) ||
+      null
+    );
+  }
+
+  async getClusterServers(clusterName) {
+    const clustersPath =
+      this.clustersPath ||
+      config.server.native.clustersPath ||
+      path.join(this.basePath, "clusters");
+    const dbConfigs = getAllServerConfigs();
+    const dbServers = dbConfigs
+      .map((configRow) => {
+        try {
+          const serverConfig = JSON.parse(configRow.config_data);
+          const resolvedClusterName = this.getClusterIdFromConfig(serverConfig);
+          if (resolvedClusterName !== clusterName) return null;
+          return {
+            name: configRow.name,
+            ...serverConfig,
+            clusterName: resolvedClusterName,
+            clusterId: resolvedClusterName,
+            isClusterServer: true,
+            serverPath:
+              serverConfig.serverPath ||
+              path.join(clustersPath, resolvedClusterName, configRow.name),
+          };
+        } catch (error) {
+          logger.warn(
+            `Failed to parse database config for cluster lookup: ${configRow.name}`,
+            error.message,
+          );
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    if (dbServers.length > 0) return dbServers;
+
+    const clusterConfigPath = path.join(clustersPath, clusterName, "cluster.json");
+    try {
+      const clusterConfigContent = await fs.readFile(clusterConfigPath, "utf8");
+      const clusterConfig = JSON.parse(clusterConfigContent);
+      if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+        return clusterConfig.servers.map((server) => ({
+          ...server,
+          name: server.name,
+          clusterName,
+          clusterId: server.clusterId || clusterName,
+          isClusterServer: true,
+          serverPath:
+            server.serverPath ||
+            path.join(clustersPath, clusterName, server.name),
+        }));
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        logger.warn(
+          `Error reading legacy cluster config for ${clusterName}:`,
+          error.message,
+        );
+      }
+    }
+
+    const clusterPath = path.join(clustersPath, clusterName);
+    if (!existsSync(clusterPath)) return [];
+
+    const { parseStartBat } = await import("../utils/parse-start-bat.js");
+    const serverDirs = await fs.readdir(clusterPath);
+    const servers = [];
+
+    for (const serverDir of serverDirs) {
+      const serverPath = path.join(clusterPath, serverDir);
+      if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+      const startBatPath = path.join(serverPath, "start.bat");
+      if (!existsSync(startBatPath)) continue;
+      try {
+        const parsed = await parseStartBat(startBatPath);
+        servers.push({
+          name: parsed.name || serverDir,
+          ...parsed,
+          clusterName,
+          clusterId: parsed.clusterId || clusterName,
+          isClusterServer: true,
+          serverPath,
+        });
+      } catch (error) {
+        logger.warn(
+          `[NativeServerManager] Failed to parse start.bat for cluster ${clusterName} server ${serverDir}: ${error.message}`,
+        );
+      }
+    }
+    return servers;
+  }
+
+  async findServerOnDisk(name) {
+    const clustersPath =
+      this.clustersPath ||
+      config.server.native.clustersPath ||
+      path.join(this.basePath, "clusters");
+    const serversPath = this.serversPath || path.join(this.basePath, "servers");
+    const { parseStartBat } = await import("../utils/parse-start-bat.js");
+
+    if (this.clustersPath && existsSync(this.clustersPath)) {
+      const clusterDirs = await fs.readdir(clustersPath);
+      for (const clusterName of clusterDirs) {
+        const clusterPath = path.join(clustersPath, clusterName);
+        if (!existsSync(clusterPath) || !(await fs.stat(clusterPath)).isDirectory()) continue;
+        const serverDirs = await fs.readdir(clusterPath);
+        for (const serverDir of serverDirs) {
+          const serverPath = path.join(clusterPath, serverDir);
+          if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+          const startBatPath = path.join(serverPath, "start.bat");
+          if (!existsSync(startBatPath)) continue;
+          try {
+            const parsed = await parseStartBat(startBatPath);
+            if (parsed.name === name || serverDir === name) {
+              return { name: parsed.name || name, ...parsed, clusterName, clusterId: parsed.clusterId || clusterName, isClusterServer: true, serverPath };
+            }
+          } catch (error) {
+            logger.warn(`[NativeServerManager] Failed to parse start.bat while resolving ${name}: ${error.message}`);
+          }
+        }
+      }
+    }
+
+    if (serversPath && existsSync(serversPath)) {
+      const serverDirs = await fs.readdir(serversPath);
+      for (const serverDir of serverDirs) {
+        const serverPath = path.join(serversPath, serverDir);
+        if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+        const startBatPath = path.join(serverPath, "start.bat");
+        if (!existsSync(startBatPath)) continue;
+        try {
+          const parsed = await parseStartBat(startBatPath);
+          if (parsed.name === name || serverDir === name) {
+            return { name: parsed.name || name, ...parsed, isClusterServer: false, clusterName: null, clusterId: null, serverPath };
+          }
+        } catch (error) {
+          logger.warn(`[NativeServerManager] Failed to parse standalone start.bat while resolving ${name}: ${error.message}`);
+        }
+      }
+    }
+    return null;
+  }
+
+  async getClusterServerInfo(name) {
+    try {
+      const dbConfig = this.getServerConfigFromDatabase(name);
+      if (dbConfig) {
+        logger.info(`Found server ${name} in database`);
+        const clusterId = this.getClusterIdFromConfig(dbConfig);
+        if (clusterId) {
+          const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, "clusters");
+          dbConfig.serverPath = path.join(clustersPath, clusterId, name);
+        } else if (!dbConfig.serverPath) {
+          dbConfig.serverPath = path.join(this.serversPath || path.join(this.basePath, "servers"), name);
+        }
+        return dbConfig;
+      }
+
+      logger.info(`Server ${name} not found in database, checking disk-based configs...`);
+      const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, "clusters");
+      const clusterDirs = await fs.readdir(clustersPath);
+
+      for (const clusterDir of clusterDirs) {
+        try {
+          const clusterConfigPath = path.join(clustersPath, clusterDir, "cluster.json");
+          const clusterConfigContent = await fs.readFile(clusterConfigPath, "utf8");
+          const clusterConfig = JSON.parse(clusterConfigContent);
+          if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+            const server = clusterConfig.servers.find((s) => s.name === name);
+            if (server) {
+              logger.info(`Found server ${name} in disk-based config for cluster ${clusterDir}`);
+              return { ...server, clusterName: clusterDir, clusterId: server.clusterId || clusterDir, isClusterServer: true, serverPath: server.serverPath || path.join(clustersPath, clusterDir, name) };
+            }
+          }
+        } catch (error) {
+          logger.warn(`Error reading cluster ${clusterDir}:`, error && (error.stack || error.message || error));
+          if (error.code === "ENOENT") continue;
+        }
+      }
+
+      const fallbackServer = await this.findServerOnDisk(name);
+      if (fallbackServer) {
+        logger.info(`Found server ${name} by scanning start.bat files on disk`);
+        return fallbackServer;
+      }
+
+      logger.warn(`Server ${name} not found in database or disk-based configs`);
+      return null;
+    } catch (error) {
+      logger.error(`Failed to get cluster server info for ${name}:`, error);
+      return null;
+    }
+  }
+
+  async listLogFiles(name) {
+    try {
+      let serverInfo = null;
+      try { serverInfo = await this.getClusterServerInfo(name); } catch (error) {
+        logger.warn(`Could not get cluster server info for ${name}:`, error.message);
+      }
+
+      let serverPath = null;
+      if (serverInfo && serverInfo.serverPath) {
+        serverPath = serverInfo.serverPath;
+      } else {
+        const clusterId = serverInfo?.clusterId || serverInfo?.clusterName;
+        if (clusterId) {
+          const clustersPath = config.server.native.clustersPath || path.join(this.basePath, "clusters");
+          serverPath = path.join(clustersPath, clusterId, name);
+        } else {
+          serverPath = path.join(process.env.NATIVE_BASE_PATH || "C:\\ARK", "servers", name);
+        }
+      }
+
+      const logFiles = [];
+      const dbRow = getServerConfig(name);
+      const adapter = gameFor(dbRow?.game_type || "ark");
+      const logSubDirs = adapter.getLogSubDirectories();
+      const logPatterns = adapter.getLogFilePatterns();
+      const possibleLogDirs = logSubDirs.map((sub) => path.join(serverPath, sub));
+
+      for (const logDir of possibleLogDirs) {
+        try {
+          const files = await fs.readdir(logDir);
+          for (const file of files) {
+            const lowerName = file.toLowerCase();
+            if (file.endsWith(".log") || (logPatterns.length > 0 && logPatterns.some((p) => lowerName.includes(p)))) {
+              const filePath = path.join(logDir, file);
+              const stat = await fs.stat(filePath);
+              logFiles.push({ name: file, path: filePath, size: stat.size, modified: stat.mtime.toISOString() });
+            }
+          }
+        } catch { continue; }
+      }
+
+      return logFiles.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+    } catch (error) {
+      logger.error(`Failed to list log files for ${name}:`, error);
+      throw error;
+    }
+  }
+
+  async getClusterServerStartBat(name) {
+    try {
+      const serverInfo = await this.getClusterServerInfo(name);
+      if (!serverInfo) throw new Error(`Server ${name} not found`);
+
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH ||
+        (config.server && config.server.native && config.server.native.clustersPath) ||
+        (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, "clusters") : null);
+      if (!clustersPath) throw new Error("Missing clustersPath in configuration.");
+
+      const clusterDirs = await fs.readdir(clustersPath);
+      let clusterName = null;
+
+      for (const clusterDir of clusterDirs) {
+        try {
+          const clusterConfigPath = path.join(clustersPath, clusterDir, "cluster.json");
+          const clusterConfigContent = await fs.readFile(clusterConfigPath, "utf8");
+          const clusterConfig = JSON.parse(clusterConfigContent);
+          if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+            const server = clusterConfig.servers.find((s) => s.name === name);
+            if (server) { clusterName = clusterDir; break; }
+          }
+        } catch (error) { logger.warn(`Error reading cluster ${clusterDir}:`, error.message); }
+      }
+
+      if (!clusterName) {
+        const { parseStartBat } = await import("../utils/parse-start-bat.js");
+        if (clustersPath && existsSync(clustersPath)) {
+          const clusterDirs = await fs.readdir(clustersPath);
+          for (const cName of clusterDirs) {
+            const clusterPath = path.join(clustersPath, cName);
+            if (!existsSync(clusterPath) || !(await fs.stat(clusterPath)).isDirectory()) continue;
+            const serverDirs = await fs.readdir(clusterPath);
+            for (const sDir of serverDirs) {
+              const serverPath = path.join(clusterPath, sDir);
+              if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+              const startBatPath = path.join(serverPath, "start.bat");
+              if (existsSync(startBatPath)) {
+                try {
+                  const parsed = await parseStartBat(startBatPath);
+                  if (parsed.name === name) { clusterName = cName; break; }
+                } catch (e) { logger.warn(`[getClusterServerStartBat] Failed to parse start.bat for fallback server in cluster ${cName}: ${e.message}`); }
+              }
+            }
+            if (clusterName) break;
+          }
+        }
+        if (!clusterName && this.serversPath && existsSync(this.serversPath)) {
+          const serverDirs = await fs.readdir(this.serversPath);
+          for (const sDir of serverDirs) {
+            const serverPath = path.join(this.serversPath, sDir);
+            if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+            const startBatPath = path.join(serverPath, "start.bat");
+            if (existsSync(startBatPath)) {
+              try {
+                const parsed = await parseStartBat(startBatPath);
+                if (parsed.name === name) {
+                  const content = await fs.readFile(startBatPath, "utf8");
+                  return { success: true, content, path: startBatPath };
+                }
+              } catch (e) { logger.warn(`[getClusterServerStartBat] Failed to parse start.bat for fallback standalone server: ${e.message}`); }
+            }
+          }
+        }
+      }
+
+      if (!clusterName) throw new Error(`Server ${name} not found in any cluster, DB, or on disk`);
+
+      const startBatPath = path.join(clustersPath, clusterName, name, "start.bat");
+      try { await fs.access(startBatPath); } catch { throw new Error(`Start.bat file not found: ${startBatPath}`); }
+      const content = await fs.readFile(startBatPath, "utf8");
+      return { success: true, content, path: startBatPath };
+    } catch (error) {
+      logger.error(`Failed to get start.bat for ${name}:`, error);
+      throw error;
+    }
+  }
+
+  async updateClusterServerStartBat(name, content) {
+    try {
+      const serverInfo = await this.getClusterServerInfo(name);
+      if (!serverInfo) throw new Error(`Server ${name} not found`);
+
+      const clustersPath = process.env.NATIVE_CLUSTERS_PATH ||
+        (config.server && config.server.native && config.server.native.clustersPath) ||
+        (config.server && config.server.native && config.server.native.basePath ? path.join(config.server.native.basePath, "clusters") : null);
+      if (!clustersPath) throw new Error("Missing clustersPath in configuration.");
+
+      const clusterDirs = await fs.readdir(clustersPath);
+      let clusterName = null;
+
+      for (const clusterDir of clusterDirs) {
+        try {
+          const clusterConfigPath = path.join(clustersPath, clusterDir, "cluster.json");
+          const clusterConfigContent = await fs.readFile(clusterConfigPath, "utf8");
+          const clusterConfig = JSON.parse(clusterConfigContent);
+          if (clusterConfig.servers && Array.isArray(clusterConfig.servers)) {
+            const server = clusterConfig.servers.find((s) => s.name === name);
+            if (server) { clusterName = clusterDir; break; }
+          }
+        } catch (error) { logger.warn(`Error reading cluster ${clusterDir}:`, error.message); }
+      }
+
+      if (!clusterName) {
+        const { parseStartBat } = await import("../utils/parse-start-bat.js");
+        if (clustersPath && existsSync(clustersPath)) {
+          const clusterDirs = await fs.readdir(clustersPath);
+          for (const cName of clusterDirs) {
+            const clusterPath = path.join(clustersPath, cName);
+            if (!existsSync(clusterPath) || !(await fs.stat(clusterPath)).isDirectory()) continue;
+            const serverDirs = await fs.readdir(clusterPath);
+            for (const sDir of serverDirs) {
+              const serverPath = path.join(clusterPath, sDir);
+              if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+              const startBatPath = path.join(serverPath, "start.bat");
+              if (existsSync(startBatPath)) {
+                try {
+                  const parsed = await parseStartBat(startBatPath);
+                  if (parsed.name === name) { clusterName = cName; break; }
+                } catch (e) { logger.warn(`[updateClusterServerStartBat] Failed to parse start.bat for fallback server in cluster ${cName}: ${e.message}`); }
+              }
+            }
+            if (clusterName) break;
+          }
+        }
+        if (!clusterName && this.serversPath && existsSync(this.serversPath)) {
+          const serverDirs = await fs.readdir(this.serversPath);
+          for (const sDir of serverDirs) {
+            const serverPath = path.join(this.serversPath, sDir);
+            if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+            const startBatPath = path.join(serverPath, "start.bat");
+            if (existsSync(startBatPath)) {
+              try {
+                const parsed = await parseStartBat(startBatPath);
+                if (parsed.name === name) {
+                  await fs.writeFile(startBatPath, content);
+                  return { success: true, message: `Start.bat updated for ${name}`, path: startBatPath };
+                }
+              } catch (e) { logger.warn(`[updateClusterServerStartBat] Failed to parse start.bat for fallback standalone server: ${e.message}`); }
+            }
+          }
+        }
+      }
+
+      if (!clusterName) throw new Error(`Server ${name} not found in any cluster, DB, or on disk`);
+
+      const startBatPath = path.join(clustersPath, clusterName, name, "start.bat");
+      try { await fs.access(startBatPath); } catch { throw new Error(`Start.bat file not found: ${startBatPath}`); }
+      await fs.writeFile(startBatPath, content);
+      return { success: true, message: `Start.bat updated for ${name}`, path: startBatPath };
+    } catch (error) {
+      logger.error(`Failed to update start.bat for ${name}:`, error);
+      throw error;
+    }
+  }
+
+  async getStats(name) {
+    try {
+      const processInfo = this.processes.get(name);
+      if (processInfo) {
+        try {
+          const stats = await this.powershellHelper.getProcessInfo(processInfo.processId);
+          if (stats.success) {
+            const process = stats.process;
+            const uptime = Math.floor((Date.now() - new Date(process.StartTime).getTime()) / 1000);
+            const memoryMB = Math.round(process.WorkingSet / (1024 * 1024));
+            return new ServerStats(name, process.Responding ? "running" : "stopped", 0, memoryMB, uptime, process.Id);
+          }
+        } catch (powershellError) {
+          logger.error(`PowerShell stats check failed for ${name}:`, powershellError);
+        }
+        const uptime = Math.floor((Date.now() - processInfo.startTime) / 1000);
+        return new ServerStats(name, "running", 0, 0, uptime, processInfo.processId);
+      }
+
+      try {
+        const serverConfig = getServerConfig(name);
+        const adapter = gameFor(serverConfig?.game_type || "ark");
+        for (const procName of adapter.processNames) {
+          const procResult = await this.powershellHelper.getProcessesByName(procName);
+          if (procResult.success && procResult.processes && procResult.processes.length > 0) {
+            const process = procResult.processes[0];
+            const uptime = Math.floor((Date.now() - new Date(process.StartTime).getTime()) / 1000);
+            const memoryMB = Math.round(process.WorkingSet / (1024 * 1024));
+            return new ServerStats(name, "running", 0, memoryMB, uptime, process.Id);
+          }
+        }
+      } catch (powershellError) {
+        logger.error(`PowerShell process search failed for ${name}:`, powershellError);
+      }
+
+      return new ServerStats(name, "stopped", 0, 0, 0, null);
+    } catch (error) {
+      logger.error(`Failed to get native server stats for ${name}:`, error);
+      return new ServerStats(name, "unknown", 0, 0, 0, null);
+    }
+  }
+
+  async getLogs(name, options = {}) {
+    try {
+      let serverInfo = null;
+      try { serverInfo = await this.getClusterServerInfo(name); } catch (error) {
+        logger.warn(`Could not get cluster server info for ${name}:`, error.message);
+      }
+
+      let serverPath = null;
+      if (serverInfo && serverInfo.serverPath) {
+        serverPath = serverInfo.serverPath;
+      } else {
+        const clusterId = serverInfo?.clusterId || serverInfo?.clusterName;
+        if (clusterId) {
+          const clustersPath = config.server.native.clustersPath || path.join(this.basePath, "clusters");
+          serverPath = path.join(clustersPath, clusterId, name);
+        } else {
+          serverPath = path.join(process.env.NATIVE_BASE_PATH || "C:\\ARK", "servers", name);
+        }
+      }
+
+      const possibleLogPaths = [
+        path.join(serverPath, "ShooterGame", "Saved", "Logs", "ShooterGame.log"),
+        path.join(serverPath, "ShooterGame", "Saved", "Logs", "ShooterGame_*.log"),
+        path.join(serverPath, "ShooterGame", "Saved", "Logs", "WindowsServer.log"),
+        path.join(serverPath, "ShooterGame", "Saved", "Logs", "WindowsServer_*.log"),
+        path.join(serverPath, "logs", `${name}.log`),
+        path.join(serverPath, "ShooterGame.log"),
+        path.join(serverPath, "ShooterGame", "Saved", "Logs", "*.log"),
+        path.join(serverPath, "Saved", "Logs", "ShooterGame.log"),
+        path.join(serverPath, "Saved", "Logs", "*.log"),
+      ];
+
+      let logContent = "";
+      let foundLog = false;
+
+      for (const logPath of possibleLogPaths) {
+        try {
+          if (logPath.includes("*")) {
+            const logDir = path.dirname(logPath);
+            const logFiles = await fs.readdir(logDir);
+            let matchingFiles = [];
+            if (logPath.includes("ShooterGame_*.log")) {
+              matchingFiles = logFiles.filter((file) => file.startsWith("ShooterGame") && file.endsWith(".log"));
+            } else if (logPath.includes("WindowsServer_*.log")) {
+              matchingFiles = logFiles.filter((file) => file.startsWith("WindowsServer") && file.endsWith(".log"));
+            } else if (logPath.includes("*.log")) {
+              matchingFiles = logFiles.filter((file) => file.endsWith(".log"));
+            } else {
+              matchingFiles = logFiles.filter((file) => file.startsWith("ShooterGame") || file.startsWith("WindowsServer"));
+            }
+            if (matchingFiles.length > 0) {
+              const logFilesWithStats = await Promise.all(matchingFiles.map(async (file) => {
+                const fullPath = path.join(logDir, file);
+                try { const stat = await fs.stat(fullPath); return { file, fullPath, mtime: stat.mtime }; }
+                catch { return { file, fullPath, mtime: new Date(0) }; }
+              }));
+              const latestLogFile = logFilesWithStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())[0];
+              logContent = await fs.readFile(latestLogFile.fullPath, "utf8");
+              foundLog = true;
+              break;
+            }
+          } else {
+            logContent = await fs.readFile(logPath, "utf8");
+            foundLog = true;
+            break;
+          }
+        } catch { continue; }
+      }
+
+      if (!foundLog) {
+        const processInfo = this.processes.get(name);
+        if (processInfo && processInfo.process && !processInfo.process.killed) {
+          return `Server ${name} is running but no log files found in:\n${possibleLogPaths.join("\n")}`;
+        } else {
+          throw new Error(`No log files found for server ${name} and server is not running`);
+        }
+      }
+      return logContent;
+    } catch (error) {
+      logger.error(`Failed to get native server logs for ${name}:`, error);
+      throw error;
+    }
+  }
+
+  async listServers() {
+    try {
+      const dbConfigs = getAllServerConfigs();
+      const clusterMap = {};
+      function getClusterId(config) {
+        return config.clusterId || config.clusterName ||
+          (config.config && (config.config.clusterId || config.config.clusterName)) || null;
+      }
+      for (const config of dbConfigs) {
+        try {
+          const serverConfig = JSON.parse(config.config_data);
+          const clusterId = getClusterId(serverConfig);
+          if (clusterId) clusterMap[config.name] = clusterId;
+        } catch (e) { logger.warn(`Failed to parse config for cluster mapping: ${config.name}`, e.message); }
+      }
+
+      const servers = await Promise.all(
+        dbConfigs.map(async (config) => {
+          try {
+            const serverConfig = JSON.parse(config.config_data);
+            let status = "unknown";
+            try { const statusObj = await this.getServerStatus(config.name); status = statusObj.status; }
+            catch (e) { logger.warn(`Failed to get status for ${config.name}:`, e.message); }
+            const clusterName = getClusterId(serverConfig);
+            return { name: config.name, ...serverConfig, status, type: "native", config: serverConfig, isClusterServer: !!clusterName, clusterName, serverPath: serverConfig.serverPath || "", created: serverConfig.created || "" };
+          } catch (error) {
+            logger.warn(`Failed to parse database config for ${config.name}:`, error.message);
+            return null;
+          }
+        }),
+      );
+
+      const foundNames = new Set(dbConfigs.map((cfg) => { try { return JSON.parse(cfg.config_data).name; } catch { return null; } }).filter(Boolean));
+      const { parseStartBat } = await import("../utils/parse-start-bat.js");
+
+      if (this.clustersPath && existsSync(this.clustersPath)) {
+        const clusterDirs = await fs.readdir(this.clustersPath);
+        for (const clusterName of clusterDirs) {
+          const clusterPath = path.join(this.clustersPath, clusterName);
+          if (!existsSync(clusterPath) || !(await fs.stat(clusterPath)).isDirectory()) continue;
+          const serverDirs = await fs.readdir(clusterPath);
+          for (const serverDir of serverDirs) {
+            const serverPath = path.join(clusterPath, serverDir);
+            if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+            const startBatPath = path.join(serverPath, "start.bat");
+            if (existsSync(startBatPath)) {
+              try {
+                const parsed = await parseStartBat(startBatPath);
+                if (!foundNames.has(parsed.name)) {
+                  servers.push({ name: parsed.name, ...parsed, status: "unknown", type: "native", config: parsed, isClusterServer: true, clusterName, serverPath, created: "", fallback: true });
+                  foundNames.add(parsed.name);
+                }
+              } catch (e) { logger.warn(`[NativeServerManager] Failed to parse start.bat for fallback server in cluster ${clusterName}: ${e.message}`); }
+            }
+          }
+        }
+      }
+
+      if (this.serversPath && existsSync(this.serversPath)) {
+        const serverDirs = await fs.readdir(this.serversPath);
+        for (const serverDir of serverDirs) {
+          const serverPath = path.join(this.serversPath, serverDir);
+          if (!existsSync(serverPath) || !(await fs.stat(serverPath)).isDirectory()) continue;
+          const startBatPath = path.join(serverPath, "start.bat");
+          if (existsSync(startBatPath)) {
+            try {
+              const parsed = await parseStartBat(startBatPath);
+              if (!foundNames.has(parsed.name)) {
+                let fallbackStatus = "unknown";
+                try { const statusObj = await this.getServerStatus(parsed.name); fallbackStatus = statusObj.status; }
+                catch (e) { logger.warn(`Failed to get status for fallback server ${parsed.name}:`, e.message); }
+                servers.push({ name: parsed.name, ...parsed, status: fallbackStatus, type: "native", config: parsed, isClusterServer: false, clusterName: null, serverPath, created: "", fallback: true });
+                foundNames.add(parsed.name);
+              }
+            } catch (e) { logger.warn(`[NativeServerManager] Failed to parse start.bat for fallback standalone server: ${e.message}`); }
+          }
+        }
+      }
+      return servers.filter(Boolean);
+    } catch (error) {
+      logger.error("Failed to list servers:", error);
+      throw error;
+    }
+  }
+
+  async isRunning(name) {
+    try {
+      if (!this.processes) this.processes = new Map();
+      const processInfo = this.processes.get(name);
+      if (processInfo && processInfo.process) return !processInfo.process.killed;
+
+      let serverPorts = null;
+      let serverInfo = null;
+      try {
+        serverInfo = await this.getClusterServerInfo(name);
+        if (serverInfo) {
+          serverPorts = { gamePort: serverInfo.gamePort, queryPort: serverInfo.queryPort, rconPort: serverInfo.rconPort, externalPort: serverInfo.port, map: serverInfo.map, sessionName: serverInfo.name };
+        }
+      } catch (error) { console.warn(`Failed to get server info for ${name}:`, error.message); }
+
+      const processes = await this.getRunningProcesses();
+      for (const process of processes) {
+        const commandLine = process.commandLine || "";
+        const processName = process.name || "";
+        let isMatch = false;
+
+        if (serverPorts && commandLine.includes(`Port=${serverPorts.gamePort}`) && commandLine.includes(`QueryPort=${serverPorts.queryPort}`) && commandLine.includes(`RCONPort=${serverPorts.rconPort}`) && commandLine.includes(serverPorts.map) && commandLine.includes(`SessionName=${serverPorts.sessionName}`)) isMatch = true;
+        if (!isMatch && serverPorts && commandLine.includes(`SessionName=${serverPorts.sessionName}`)) isMatch = true;
+        if (!isMatch && serverPorts && commandLine.includes(`Port=${serverPorts.gamePort}`) && commandLine.includes(`QueryPort=${serverPorts.queryPort}`)) isMatch = true;
+        if (!isMatch && commandLine.includes(`SessionName=${name}`)) isMatch = true;
+        if (!isMatch && name.length > 10 && commandLine.includes(name)) isMatch = true;
+        if (!isMatch && (processName === "ArkAscendedServer" || processName === "ArkAscendedServer.exe") && commandLine.includes(name)) isMatch = true;
+
+        if (isMatch) return true;
+      }
+      return false;
+    } catch (error) {
+      console.error(`[isRunning] Error checking if server ${name} is running:`, error);
+      return false;
+    }
+  }
+
+  async addServerConfig(name, config) {
+    await upsertServerConfig(name, JSON.stringify(config));
+    logger.info(`Server configuration saved to database: ${name}`);
+  }
+
+  buildServerArgs(serverCfg) {
+    const args = [
+      (serverCfg.mapName || "TheIsland") + "_WP",
+      "?listen",
+      `?Port=${serverCfg.gamePort || 7777}`,
+      `?QueryPort=${serverCfg.queryPort || 27015}`,
+      `?RCONPort=${serverCfg.rconPort || 32330}`,
+      `?ServerName="${serverCfg.serverName || "ASA Server"}"`,
+      `?MaxPlayers=${serverCfg.maxPlayers || 70}`,
+      `?ServerPassword="${serverCfg.serverPassword || ""}"`,
+      `?AdminPassword="${serverCfg.adminPassword || "admin123"}"`,
+    ];
+    if (serverCfg.mods && serverCfg.mods.length > 0) args.push(`?Mods=${serverCfg.mods.join(",")}`);
+    if (serverCfg.disableBattleEye) args.push("-NoBattleEye");
+    const dynamicConfigUrl = serverCfg.dynamicConfigUrl || (serverCfg.asa && serverCfg.asa.dynamicConfigUrl) || config.asa.dynamicConfigUrl;
+    if (dynamicConfigUrl) args.push(`-DynamicConfigURL=${dynamicConfigUrl}`);
+    const customDynamicConfigUrl = serverCfg.customDynamicConfigUrl || (serverCfg.asa && serverCfg.asa.customDynamicConfigUrl) || config.asa.customDynamicConfigUrl;
+    if (customDynamicConfigUrl) args.push(`?CustomDynamicConfigUrl="${customDynamicConfigUrl}"`);
+    if (serverCfg.additionalArgs) args.push(...serverCfg.additionalArgs.split(" "));
+    return args;
+  }
+
+  buildServerArgsFromCluster(server) {
+    const args = [];
+    args.push((server.map || "TheIsland") + "_WP");
+    args.push("?listen");
+    args.push(`?Port=${server.gamePort || 7777}`);
+    args.push(`?QueryPort=${server.queryPort || 27015}`);
+    args.push(`?RCONPort=${server.rconPort || 32330}`);
+    args.push(`?MaxPlayers=${server.maxPlayers || 70}`);
+    if (server.adminPassword) args.push(`?ServerAdminPassword=${server.adminPassword}`);
+    if (server.serverPassword) args.push(`?ServerPassword=${server.serverPassword}`);
+    if (server.clusterId) args.push(`?ClusterId=${server.clusterId}`);
+    if (server.clusterPassword) args.push(`?ClusterPassword=${server.clusterPassword}`);
+    const clusterDataPath = path.join(path.dirname(server.serverPath || ""), "clusterdata").replace(/\\/g, "/");
+    args.push(`?ClusterDirOverride=${clusterDataPath}`);
+    const dynamicConfigUrl = server.dynamicConfigUrl || config.asa.dynamicConfigUrl;
+    if (dynamicConfigUrl) args.push(`-DynamicConfigURL=${dynamicConfigUrl}`);
+    const customDynamicConfigUrl = server.customDynamicConfigUrl || config.asa.customDynamicConfigUrl;
+    if (customDynamicConfigUrl) args.push(`?CustomDynamicConfigUrl="${customDynamicConfigUrl}"`);
+    return args;
+  }
+
+  async startCluster(clusterName) {
+    const clusterServers = await this.getClusterServers(clusterName);
+    if (clusterServers.length === 0) throw new Error(`No servers found in cluster: ${clusterName}`);
+    const results = [];
+    for (const server of clusterServers) {
+      try { const result = await this.start(server.name); results.push({ name: server.name, success: true, result }); }
+      catch (err) { results.push({ name: server.name, success: false, error: err.message }); }
+    }
+    return { success: true, message: `Cluster ${clusterName} start attempted.`, results };
+  }
+
+  async regenerateServerStartScript(serverName) {
+    try {
+      const dbServerConfig = this.getServerConfigFromDatabase(serverName);
+      const resolvedServerConfig = dbServerConfig || (await this.getClusterServerInfo(serverName));
+      if (!resolvedServerConfig) throw new Error(`Server ${serverName} not found in database or any cluster`);
+      const clusterId = this.getClusterIdFromConfig(resolvedServerConfig);
+      if (!clusterId) throw new Error(`Server ${serverName} is not associated with a cluster`);
+      const finalMods = await this.getFinalModListForServer(serverName);
+      const cleanMods = finalMods.filter((modId) => modId !== null && modId !== undefined && modId !== "");
+      const excludeSharedMods = dbServerConfig?.excludeSharedMods === true || resolvedServerConfig.excludeSharedMods === true;
+      const clustersPath = this.clustersPath || config.server.native.clustersPath || path.join(this.basePath, "clusters");
+      const serverPath = resolvedServerConfig.serverPath || path.join(clustersPath, clusterId, serverName);
+      const serverConfig = { ...resolvedServerConfig, mods: cleanMods, excludeSharedMods, clusterId, clusterName: clusterId, serverPath };
+      const { ServerProvisioner } = await import("./server-provisioner.js");
+      const provisioner = new ServerProvisioner();
+      await provisioner.createStartScriptInCluster(clusterId, serverPath, serverConfig);
+      return;
+    } catch (error) {
+      logger.error(`Failed to regenerate start script for ${serverName}:`, error);
+      throw error;
+    }
+  }
+
+  async getFinalModListForServer(serverName) {
+    try {
+      const sharedModsData = getAllSharedMods();
+      const sharedMods = sharedModsData.filter((mod) => mod.enabled === 1 && mod.mod_id).map((mod) => mod.mod_id);
+      const serverModsData = getServerMods(serverName);
+      const serverMods = serverModsData.filter((mod) => mod.enabled === 1 && mod.mod_id).map((mod) => mod.mod_id);
+      let excludeSharedMods = false;
+      const serverSettings = getServerSettings(serverName);
+      if (serverSettings) excludeSharedMods = serverSettings.excludeSharedMods === 1;
+      if (!excludeSharedMods) {
+        const isClubArkServer = serverName.toLowerCase().includes("club") || serverName.toLowerCase().includes("bobs");
+        excludeSharedMods = isClubArkServer;
+      }
+      if (excludeSharedMods) return serverMods;
+      const allMods = [...sharedMods, ...serverMods];
+      return [...new Set(allMods)];
+    } catch (error) {
+      logger.error(`Failed to get final mod list for ${serverName}:`, error);
+      return [];
+    }
+  }
+
+  async stopCluster(clusterName) {
+    const clusterServers = await this.getClusterServers(clusterName);
+    if (clusterServers.length === 0) throw new Error(`No servers found in cluster: ${clusterName}`);
+    const results = [];
+    for (const server of clusterServers) {
+      try { const result = await this.stop(server.name); results.push({ name: server.name, success: true, result }); }
+      catch (err) { results.push({ name: server.name, success: false, error: err.message }); }
+    }
+    return { success: true, message: `Cluster ${clusterName} stop attempted.`, results };
+  }
+
+  async restartCluster(clusterName) {
+    await this.stopCluster(clusterName);
+    await this.startCluster(clusterName);
+    return { success: true, message: `Cluster ${clusterName} restart commands prepared.` };
+  }
+
+  async getRunningProcesses() {
+    const processes = [];
+    try {
+      const { exec } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(exec);
+      const processNames = [];
+      for (const adapter of gameRegistry.all) {
+        for (const pn of adapter.processNames) {
+          if (!processNames.includes(pn)) processNames.push(pn);
+        }
+      }
+      for (const processName of processNames) {
+        try {
+          const command = `tasklist /FI "IMAGENAME eq ${processName}" /NH /FO CSV`;
+          const output = await execAsync(command);
+          const lines = output.stdout.split("\n");
+          for (const line of lines) {
+            if (line.includes(processName)) {
+              const fields = line.split('","');
+              if (fields.length >= 2) {
+                const procName = fields[0].replace(/"/g, "");
+                const pid = fields[1].replace(/"/g, "");
+                if (procName === processName && pid) {
+                  try {
+                    const wmicCommand = `wmic process where "ProcessId=${pid}" get CommandLine /format:list`;
+                    const wmicOutput = await execAsync(wmicCommand);
+                    const commandLineMatch = wmicOutput.stdout.match(/CommandLine=(.+)/);
+                    const commandLine = commandLineMatch ? commandLineMatch[1].trim() : "";
+                    if (commandLine) processes.push({ id: parseInt(pid, 10), name: processName, commandLine, pid: parseInt(pid, 10) });
+                  } catch (wmicError) { console.warn(`Failed to get command line for PID ${pid}:`, wmicError.message); }
+                }
+              }
+            }
+          }
+        } catch (error) { console.log(`No ${processName} processes found`); }
+      }
+    } catch (error) { console.error("Failed to get running processes:", error); }
+    return processes;
+  }
+
+  async getServerStatus(name) {
+    try {
+      const processInfo = this.processes.get(name);
+      const isRunning = await this.isRunning(name);
+
+      if (!isRunning && processInfo) {
+        const age = Date.now() - processInfo.startTime.getTime();
+        if (age < 45000 && processInfo.status !== "crashed") {
+          return { name, status: "starting", uptime: Math.floor(age / 1000), pid: processInfo.process?.pid || null, startTime: processInfo.startTime, source: "process", updatedAt: new Date().toISOString(), staleAfter: new Date(Date.now() + 10000).toISOString(), lastSuccessfulProbe: null };
+        }
+      }
+
+      const sources = {
+        process: {
+          running: isRunning,
+          exitInfo: processInfo?.status === "crashed" ? { exitCode: processInfo.exitCode, exitSignal: processInfo.exitSignal, reason: processInfo.error } : undefined,
+          stats: processInfo ? { uptime: Math.floor((Date.now() - processInfo.startTime.getTime()) / 1000), cpu: processInfo.cpu, memory: processInfo.memory } : undefined,
+        },
+      };
+
+      if (isRunning) {
+        try {
+          const serverInfo = await this.getClusterServerInfo(name);
+          if (serverInfo && serverInfo.rconPort) {
+            const rconService = (await import("./rcon.js")).default;
+            const rconOptions = { host: "127.0.0.1", port: serverInfo.rconPort, password: serverInfo.adminPassword || serverInfo.config?.adminPassword || "admin123", timeout: 5000 };
+            try { const response = await rconService.sendCommand(rconOptions, "gettime"); sources.rcon = { success: true, response }; }
+            catch (rconError) { sources.rcon = { success: false, timeout: rconError.message.includes("timeout") }; }
+          }
+        } catch (rconSetupError) { /* RCON not available */ }
+      }
+
+      const reconciledData = stateReconciliation.reconcileStatus(name, sources);
+      const response = { name, status: reconciledData.status, uptime: reconciledData.performance?.uptime || 0, pid: processInfo?.process?.pid || null, startTime: processInfo?.startTime, source: reconciledData.source, updatedAt: reconciledData.updatedAt, staleAfter: reconciledData.staleAfter, lastSuccessfulProbe: reconciledData.lastSuccessfulProbe, crashInfo: reconciledData.crashInfo || null, startupErrors: processInfo?.startupErrors || null };
+      if (reconciledData.transition) response.transition = reconciledData.transition;
+      if (reconciledData.reason) response.reason = reconciledData.reason;
+      return response;
+    } catch (error) {
+      logger.error(`Failed to get server status for ${name}:`, error);
+      return { name, status: "unknown", uptime: 0, pid: null, source: DataSource.CACHED, crashInfo: null, error: error.message, reason: `Status check failed: ${error.message}` };
+    }
+  }
+}

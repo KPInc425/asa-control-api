@@ -1,4 +1,6 @@
-/**
+import os
+
+content = r"""/**
  * Auto-Update Service for ARK Server Admin Suite
  *
  * Facade that composes sub-modules for scheduling, checking, warning,
@@ -132,3 +134,9 @@ export class AutoUpdateService extends EventEmitter {
 }
 
 export default AutoUpdateService;
+"""
+
+p = 'd:/r/asa-control-api/services/auto-update-service.js'
+with open(p, 'w') as f:
+    f.write(content)
+print(f'Written {len(content)} bytes')

@@ -1,33 +1,15 @@
 /**
  * Notifications Module Index
- * 
+ *
  * Centralized notification system for ARK Server Admin Suite
  * Re-exports all notification adapters and services
  */
 
-// Re-export everything from adapters
-export {
-  // Default service instance
-  default,
-  notificationService,
-  
-  // Individual adapter functions
-  notifyInGame,
-  notifyDiscord,
-  notifySocket,
-  notifyAll,
-  
-  // Template utilities
-  DEFAULT_TEMPLATES,
-  EMBED_COLORS,
-  processTemplate,
-  getTemplate,
-  formatForARK,
-  
-  // Channel configuration
-  getServerChannelSettings,
-  mergeChannelSettings,
-  
-  // Service class
-  NotificationService
-} from './adapters.js';
+export { DEFAULT_TEMPLATES, EMBED_COLORS, TYPE_TO_SEVERITY } from './templates.js';
+export { processTemplate, getTemplate, formatForARK } from './template-processor.js';
+export { getServerChannelSettings, mergeChannelSettings } from './channel-config.js';
+export { notifyInGame } from './adapters/ingame.js';
+export { notifyDiscord } from './adapters/discord.js';
+export { notifySocket } from './adapters/socket.js';
+export { notifyAll } from './orchestrator.js';
+export { NotificationService } from './notification-service.js';
