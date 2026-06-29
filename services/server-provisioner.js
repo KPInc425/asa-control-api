@@ -1,3 +1,7 @@
+/**
+ * Server Provisioning Service (Refactored)
+ * Thin facade that delegates to focused modules.
+ */
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -16,11 +20,22 @@ import { ScriptGenerator } from "./provisioning/script-generator.js";
 import { ClusterManager } from "./provisioning/cluster-manager.js";
 import { ServerManager } from "./provisioning/server-manager.js";
 
+// Module imports
+import { SteamCmdModule } from "./server-provisioner/steamcmd-module.js";
+import { ASABinariesModule } from "./server-provisioner/asa-binaries-module.js";
+import { ConfigModule } from "./server-provisioner/config-module.js";
+import { ScriptModule } from "./server-provisioner/script-module.js";
+import { ServerModule } from "./server-provisioner/server-module.js";
+import { ClusterModule } from "./server-provisioner/cluster-module.js";
+import { SystemInfoModule } from "./server-provisioner/system-info-module.js";
+import { UpdateModule } from "./server-provisioner/update-module.js";
+import { UtilsModule } from "./server-provisioner/utils-module.js";
+
 const execAsync = promisify(exec);
 
 /**
  * Server Provisioning Service (Refactored)
- * Main orchestrator that delegates to specialized managers
+ * Main orchestrator that delegates to specialized modules
  */
 export class ServerProvisioner {
   constructor(gameType = "ark") {
@@ -115,93 +130,45 @@ export class ServerProvisioner {
       checkedAt: 0,
     };
 
+    // Initialize modules
+    this._steamcmd = new SteamCmdModule(this);
+    this._asaBinaries = new ASABinariesModule(this);
+    this._config = new ConfigModule(this);
+    this._script = new ScriptModule(this);
+    this._server = new ServerModule(this);
+    this._cluster = new ClusterModule(this);
+    this._systemInfo = new SystemInfoModule(this);
+    this._update = new UpdateModule(this);
+    this._utils = new UtilsModule(this);
+
     logger.info(`ServerProvisioner initialized successfully`);
     logger.info(`Servers path: ${this.serversPath}`);
     logger.info(`Clusters path: ${this.clustersPath}`);
     logger.info(`SteamCMD path: ${this.steamCmdPath}`);
   }
 
-  /**
-   * Execute command in foreground mode with real-time output
-   */
+  // ========================================
+  // UTILITY DELEGATIONS
+  // ========================================
+
   async execForeground(command, options = {}) {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const { execSync } = await import("child_process");
-
-        logger.info(`Executing command in foreground: ${command}`);
-        console.log(`\n=== Executing: ${command} ===\n`);
-
-        execSync(command, {
-          stdio: "inherit",
-          ...options,
-        });
-
-        console.log(`\n=== Command completed successfully ===\n`);
-        logger.info("Foreground command completed successfully");
-        resolve({ success: true });
-      } catch (error) {
-        console.log(`\n=== Command failed ===\n`);
-        logger.error("Foreground command failed:", error);
-        reject(error);
-      }
-    });
+    return await this._utils.execForeground(command, options);
   }
 
-  /**
-   * Create necessary directories
-   */
   async createDirectories() {
-    try {
-      await fs.mkdir(this.basePath, { recursive: true });
-      await fs.mkdir(this.serversPath, { recursive: true });
-      await fs.mkdir(this.clustersPath, { recursive: true });
-      await fs.mkdir(path.join(this.basePath, "steamcmd"), { recursive: true });
-      await fs.mkdir(path.join(this.basePath, "backups"), { recursive: true });
-      await fs.mkdir(path.join(this.basePath, "backups", "servers"), {
-        recursive: true,
-      });
-      await fs.mkdir(path.join(this.basePath, "backups", "clusters"), {
-        recursive: true,
-      });
-      logger.info("All directories created successfully");
-    } catch (error) {
-      logger.error("Failed to create directories:", error);
-      throw error;
-    }
+    return await this._utils.createDirectories();
   }
 
-  /**
-   * Initialize the provisioner
-   */
   async initialize() {
-    try {
-      logger.info("Initializing ServerProvisioner...");
-
-      // Create necessary directories
-      await this.createDirectories();
-
-      // Ensure SteamCMD is available
-      await this.ensureSteamCmd();
-
-      logger.info("ServerProvisioner initialized successfully");
-      return { success: true, message: "ServerProvisioner initialized" };
-    } catch (error) {
-      logger.error("Failed to initialize ServerProvisioner:", error);
-      throw error;
-    }
+    return await this._utils.initialize();
   }
 
-  /**
-   * Set progress callback for real-time feedback
-   */
   setProgressCallback(cb) {
-    this.emitProgress = cb;
-    // Pass progress callback to all managers
-    this.asaBinariesManager?.setProgressCallback(cb);
-    this.scriptGenerator?.setProgressCallback(cb);
-    this.clusterManager?.setProgressCallback(cb);
-    this.serverManager?.setProgressCallback(cb);
+    this._utils.setProgressCallback(cb);
+  }
+
+  async downloadFile(url, destination) {
+    return await this._utils.downloadFile(url, destination);
   }
 
   // ========================================
@@ -209,23 +176,23 @@ export class ServerProvisioner {
   // ========================================
 
   async checkSteamCmdAvailability() {
-    return await this.steamCmdManager.checkAvailability();
+    return await this._steamcmd.checkSteamCmdAvailability();
   }
 
   async isSteamCmdInstalled() {
-    return await this.steamCmdManager.isInstalled();
+    return await this._steamcmd.isSteamCmdInstalled();
   }
 
   async installSteamCmd(foreground = false) {
-    return await this.steamCmdManager.install(foreground);
+    return await this._steamcmd.installSteamCmd(foreground);
   }
 
   async findExistingSteamCmd() {
-    return await this.steamCmdManager.findExisting();
+    return await this._steamcmd.findExistingSteamCmd();
   }
 
   async ensureSteamCmd() {
-    return await this.steamCmdManager.ensure();
+    return await this._steamcmd.ensureSteamCmd();
   }
 
   // ========================================
@@ -233,30 +200,23 @@ export class ServerProvisioner {
   // ========================================
 
   async checkASABinariesAvailability() {
-    return (await this.asaBinariesManager.checkAvailability)
-      ? await this.asaBinariesManager.checkAvailability()
-      : await this.systemInfo.checkASABinariesInstalled();
+    return await this._asaBinaries.checkASABinariesAvailability();
   }
 
   async installASABinaries(foreground = false) {
-    // Legacy method - for compatibility, install for first server if any exist
-    const servers = await this.listServers();
-    if (servers.length > 0) {
-      return await this.asaBinariesManager.installForServer(servers[0].name);
-    }
-    throw new Error("No servers found. Create a server first.");
+    return await this._asaBinaries.installASABinaries(foreground);
   }
 
   async ensureASABinaries() {
-    return await this.installASABinaries();
+    return await this._asaBinaries.ensureASABinaries();
   }
 
   async updateASABinaries() {
-    return await this.asaBinariesManager.updateAll();
+    return await this._asaBinaries.updateASABinaries();
   }
 
   async installASABinariesForServer(serverName) {
-    return await this.asaBinariesManager.installForServer(serverName);
+    return await this._asaBinaries.installASABinariesForServer(serverName);
   }
 
   async installASABinariesForServerInCluster(
@@ -264,7 +224,7 @@ export class ServerProvisioner {
     serverName,
     foreground = false,
   ) {
-    return await this.asaBinariesManager.installForServerInCluster(
+    return await this._asaBinaries.installASABinariesForServerInCluster(
       clusterName,
       serverName,
       foreground,
@@ -272,11 +232,11 @@ export class ServerProvisioner {
   }
 
   async updateServerBinaries(serverName) {
-    return await this.asaBinariesManager.updateForServer(serverName);
+    return await this._update.updateServerBinaries(serverName);
   }
 
   async updateAllServerBinaries() {
-    return await this.asaBinariesManager.updateAll();
+    return await this._asaBinaries.updateAllServerBinaries();
   }
 
   // ========================================
@@ -284,14 +244,11 @@ export class ServerProvisioner {
   // ========================================
 
   async createServerConfig(serverPath, serverConfig) {
-    return await this.configGenerator.createServerConfig(
-      serverPath,
-      serverConfig,
-    );
+    return await this._config.createServerConfig(serverPath, serverConfig);
   }
 
   async createServerConfigInCluster(clusterName, serverPath, serverConfig) {
-    return await this.configGenerator.createServerConfigInCluster(
+    return await this._config.createServerConfigInCluster(
       clusterName,
       serverPath,
       serverConfig,
@@ -299,11 +256,11 @@ export class ServerProvisioner {
   }
 
   async getFinalConfigsForServer(serverName) {
-    return await this.configGenerator.getFinalConfigsForServer(serverName);
+    return await this._config.getFinalConfigsForServer(serverName);
   }
 
   async updateServerSettings(serverName, newSettings, options = {}) {
-    return await this.configGenerator.updateServerSettings(
+    return await this._config.updateServerSettings(
       serverName,
       newSettings,
       options,
@@ -315,18 +272,15 @@ export class ServerProvisioner {
   // ========================================
 
   async createStartScript(serverPath, serverConfig) {
-    return await this.scriptGenerator.createStartScript(
-      serverPath,
-      serverConfig,
-    );
+    return await this._script.createStartScript(serverPath, serverConfig);
   }
 
   async createStopScript(serverPath, serverName) {
-    return await this.scriptGenerator.createStopScript(serverPath, serverName);
+    return await this._script.createStopScript(serverPath, serverName);
   }
 
   async createStartScriptInCluster(clusterName, serverPath, serverConfig) {
-    return await this.scriptGenerator.createStartScriptInCluster(
+    return await this._script.createStartScriptInCluster(
       clusterName,
       serverPath,
       serverConfig,
@@ -334,7 +288,7 @@ export class ServerProvisioner {
   }
 
   async createStopScriptInCluster(clusterName, serverPath, serverName) {
-    return await this.scriptGenerator.createStopScriptInCluster(
+    return await this._script.createStopScriptInCluster(
       clusterName,
       serverPath,
       serverName,
@@ -342,11 +296,11 @@ export class ServerProvisioner {
   }
 
   async regenerateServerStartScript(serverName) {
-    return await this.scriptGenerator.regenerateServerStartScript(serverName);
+    return await this._script.regenerateServerStartScript(serverName);
   }
 
   async regenerateAllClusterStartScripts() {
-    return await this.scriptGenerator.regenerateAllClusterStartScripts();
+    return await this._script.regenerateAllClusterStartScripts();
   }
 
   // ========================================
@@ -354,31 +308,27 @@ export class ServerProvisioner {
   // ========================================
 
   async createServer(serverConfig) {
-    return await this.serverManager.createServer(serverConfig);
+    return await this._server.createServer(serverConfig);
   }
 
   async listServers() {
-    return await this.serverManager.listServers();
+    return await this._server.listServers();
   }
 
   async deleteServer(serverName) {
-    return await this.serverManager.deleteServer(serverName);
+    return await this._server.deleteServer(serverName);
   }
 
   async backupServer(serverName, options = {}) {
-    return await this.serverManager.backupServer(serverName, options);
+    return await this._server.backupServer(serverName, options);
   }
 
   async restoreServer(serverName, sourcePath, options = {}) {
-    return await this.serverManager.restoreServer(
-      serverName,
-      sourcePath,
-      options,
-    );
+    return await this._server.restoreServer(serverName, sourcePath, options);
   }
 
   async listServerBackups() {
-    return await this.serverManager.listServerBackups();
+    return await this._server.listServerBackups();
   }
 
   // ========================================
@@ -386,38 +336,35 @@ export class ServerProvisioner {
   // ========================================
 
   async createCluster(clusterConfig, foreground = false) {
-    return await this.clusterManager.createCluster(clusterConfig, foreground);
+    return await this._cluster.createCluster(clusterConfig, foreground);
   }
 
   async listClusters() {
-    return await this.clusterManager.listClusters();
+    return await this._cluster.listClusters();
   }
 
   async deleteCluster(clusterName, options = {}) {
-    return await this.clusterManager.deleteCluster(clusterName, options);
+    return await this._cluster.deleteCluster(clusterName, options);
   }
 
   async startCluster(clusterName) {
-    return await this.clusterManager.startCluster(clusterName);
+    return await this._cluster.startCluster(clusterName);
   }
 
   async backupCluster(clusterName, customDestination = null) {
-    return await this.clusterManager.backupCluster(
-      clusterName,
-      customDestination,
-    );
+    return await this._cluster.backupCluster(clusterName, customDestination);
   }
 
   async restoreCluster(clusterName, sourcePath) {
-    return await this.clusterManager.restoreCluster(clusterName, sourcePath);
+    return await this._cluster.restoreCluster(clusterName, sourcePath);
   }
 
   async validateClusterConfig(config) {
-    return await this.clusterManager.validateClusterConfig(config);
+    return await this._cluster.validateClusterConfig(config);
   }
 
   async listClusterBackups(clusterName) {
-    return await this.clusterManager.listClusterBackups(clusterName);
+    return await this._cluster.listClusterBackups(clusterName);
   }
 
   // ========================================
@@ -425,346 +372,42 @@ export class ServerProvisioner {
   // ========================================
 
   async getSystemInfo() {
-    return await this.systemInfo.getSystemInfo();
+    return await this._systemInfo.getSystemInfo();
   }
 
   formatBytes(bytes, decimals = 2) {
-    return this.systemInfo.formatBytes(bytes, decimals);
+    return this._systemInfo.formatBytes(bytes, decimals);
   }
 
   // ========================================
-  // UPDATE CONFIGURATION METHODS
+  // UPDATE CONFIGURATION DELEGATIONS
   // ========================================
 
-  /**
-   * Get server update configuration
-   */
   async getServerUpdateConfig(serverName) {
-    try {
-      // Try to get from database first
-      const { getServerUpdateConfig } = await import("../services/database.js");
-      const dbConfig = getServerUpdateConfig(serverName);
-
-      if (dbConfig) {
-        return {
-          serverName,
-          clusterName: dbConfig.cluster_name,
-          updateOnStart: dbConfig.update_on_start === 1,
-          lastUpdate: dbConfig.last_update,
-          updateEnabled: dbConfig.update_enabled === 1,
-          autoUpdate: dbConfig.auto_update === 1,
-          updateInterval: dbConfig.update_interval || 24,
-          updateSchedule: dbConfig.update_schedule,
-        };
-      }
-
-      // Default configuration if not found in database
-      return {
-        serverName,
-        clusterName: null,
-        updateOnStart: true, // Default to true
-        lastUpdate: null,
-        updateEnabled: true, // Default to true
-        autoUpdate: false, // Default to false
-        updateInterval: 24, // Default to 24 hours
-        updateSchedule: null,
-      };
-    } catch (error) {
-      logger.error(
-        `Error getting update config for server ${serverName}:`,
-        error,
-      );
-      // Return default configuration on error
-      return {
-        serverName,
-        clusterName: null,
-        updateOnStart: true,
-        lastUpdate: null,
-        updateEnabled: true,
-        autoUpdate: false,
-        updateInterval: 24,
-        updateSchedule: null,
-      };
-    }
+    return await this._update.getServerUpdateConfig(serverName);
   }
 
-  /**
-   * Update server update configuration
-   */
   async updateServerUpdateConfig(serverName, config) {
-    try {
-      const { upsertServerUpdateConfig } =
-        await import("../services/database.js");
-
-      const updateData = {
-        serverName,
-        clusterName: config.clusterName || null,
-        updateOnStart: config.updateOnStart ? 1 : 0,
-        updateEnabled: config.updateEnabled ? 1 : 0,
-        autoUpdate: config.autoUpdate ? 1 : 0,
-        updateInterval: config.updateInterval || 24,
-        updateSchedule: config.updateSchedule || null,
-      };
-
-      upsertServerUpdateConfig(updateData);
-      logger.info(`Update configuration saved for server ${serverName}`);
-
-      return {
-        success: true,
-        message: "Update configuration saved successfully",
-      };
-    } catch (error) {
-      logger.error(
-        `Error updating configuration for server ${serverName}:`,
-        error,
-      );
-      throw error;
-    }
+    return await this._update.updateServerUpdateConfig(serverName, config);
   }
 
-  /**
-   * Check if server needs update
-   */
   async checkServerUpdateStatus(serverName) {
-    try {
-      const config = await this.getServerUpdateConfig(serverName);
-
-      if (!config.updateEnabled) {
-        return {
-          needsUpdate: false,
-          reason: "Updates disabled",
-          lastUpdate: config.lastUpdate,
-        };
-      }
-
-      const latestBuildId = await this.getLatestAsaBuildId();
-      const localBuildId = await this.getInstalledAsaBuildId(serverName);
-
-      if (latestBuildId && localBuildId && latestBuildId !== localBuildId) {
-        return {
-          needsUpdate: true,
-          reason: `Steam build ${latestBuildId} is newer than installed build ${localBuildId}`,
-          lastUpdate: config.lastUpdate,
-          currentBuildId: localBuildId,
-          latestBuildId,
-          updateInterval: config.updateInterval,
-          updateOnStart: config.updateOnStart,
-          updateEnabled: config.updateEnabled,
-        };
-      }
-
-      // Fallback when build IDs are unavailable: use the configured update cadence.
-      if (config.autoUpdate && config.lastUpdate) {
-        const lastUpdate = new Date(config.lastUpdate);
-        const now = new Date();
-        const hoursSinceUpdate =
-          (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
-
-        if (hoursSinceUpdate >= config.updateInterval) {
-          return {
-            needsUpdate: true,
-            reason: `Auto-update due (${Math.floor(hoursSinceUpdate)}h since last update)`,
-            lastUpdate: config.lastUpdate,
-            currentBuildId: localBuildId,
-            latestBuildId,
-            updateInterval: config.updateInterval,
-            updateOnStart: config.updateOnStart,
-            updateEnabled: config.updateEnabled,
-          };
-        }
-      }
-
-      return {
-        needsUpdate: false,
-        reason:
-          latestBuildId && localBuildId
-            ? `Installed build ${localBuildId} matches Steam build ${latestBuildId}`
-            : "Up to date",
-        lastUpdate: config.lastUpdate,
-        currentBuildId: localBuildId,
-        latestBuildId,
-        updateInterval: config.updateInterval,
-        updateOnStart: config.updateOnStart,
-        updateEnabled: config.updateEnabled,
-      };
-    } catch (error) {
-      logger.error(
-        `Error checking update status for server ${serverName}:`,
-        error,
-      );
-      return {
-        needsUpdate: false,
-        reason: "Error checking update status",
-        lastUpdate: null,
-        error: error.message,
-      };
-    }
+    return await this._update.checkServerUpdateStatus(serverName);
   }
 
   async getLatestAsaBuildId() {
-    const cacheTtlMs = 5 * 60 * 1000;
-    if (
-      this.latestBuildCache.buildId &&
-      Date.now() - this.latestBuildCache.checkedAt < cacheTtlMs
-    ) {
-      return this.latestBuildCache.buildId;
-    }
-
-    try {
-      const steamCmdExe = this.steamCmdManager.getExecutablePath();
-      const command = `"${steamCmdExe}" +login anonymous +app_info_update 1 +app_info_print 2430930 +quit`;
-      const { stdout } = await execAsync(command, {
-        timeout: 120000,
-        windowsHide: true,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      const buildId = this.extractBuildId(stdout);
-
-      if (buildId) {
-        this.latestBuildCache = {
-          buildId,
-          checkedAt: Date.now(),
-        };
-      }
-
-      return buildId;
-    } catch (error) {
-      logger.warn(
-        `Failed to fetch latest Steam build ID for ASA: ${error.message}`,
-      );
-      return this.latestBuildCache.buildId;
-    }
+    return await this._update.getLatestAsaBuildId();
   }
 
   async getInstalledAsaBuildId(serverName) {
-    try {
-      const serverPath = await this.getServerInstallPath(serverName);
-      if (!serverPath) {
-        return null;
-      }
-
-      const manifestCandidates = [
-        path.join(serverPath, "steamapps", "appmanifest_2430930.acf"),
-        path.join(serverPath, "appmanifest_2430930.acf"),
-      ];
-
-      for (const candidate of manifestCandidates) {
-        if (existsSync(candidate)) {
-          const contents = await fs.readFile(candidate, "utf8");
-          const buildId = this.extractBuildId(contents);
-          if (buildId) {
-            return buildId;
-          }
-        }
-      }
-
-      return null;
-    } catch (error) {
-      logger.warn(
-        `Failed to read installed build ID for ${serverName}: ${error.message}`,
-      );
-      return null;
-    }
+    return await this._update.getInstalledAsaBuildId(serverName);
   }
 
   extractBuildId(rawText) {
-    if (!rawText) {
-      return null;
-    }
-
-    const matches = [...rawText.matchAll(/"buildid"\s+"(\d+)"/g)];
-    if (matches.length === 0) {
-      return null;
-    }
-
-    return matches[matches.length - 1][1];
+    return this._update.extractBuildId(rawText);
   }
 
   async getServerInstallPath(serverName) {
-    const standaloneServers = await this.listServers();
-    const standalone = standaloneServers.find(
-      (server) => server.name === serverName,
-    );
-    if (standalone?.path) {
-      return standalone.path;
-    }
-
-    const clusters = await this.listClusters();
-    for (const cluster of clusters) {
-      const clusterServer = cluster?.servers?.find(
-        (server) => server.name === serverName,
-      );
-      if (clusterServer?.serverPath) {
-        return clusterServer.serverPath;
-      }
-      if (clusterServer) {
-        return path.join(this.clustersPath, cluster.name, serverName);
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Update server binaries and mark last update time
-   */
-  async updateServerBinaries(serverName, force = false) {
-    try {
-      logger.info(
-        `Starting binary update for server ${serverName}${force ? " (forced)" : ""}`,
-      );
-
-      // Update the binaries
-      await this.asaBinariesManager.updateForServer(serverName);
-
-      // Update the last update time in database
-      const { updateServerLastUpdate } =
-        await import("../services/database.js");
-      updateServerLastUpdate(serverName);
-
-      logger.info(`Binary update completed for server ${serverName}`);
-      return { success: true, message: "Server binaries updated successfully" };
-    } catch (error) {
-      logger.error(`Error updating binaries for server ${serverName}:`, error);
-      throw error;
-    }
-  }
-
-  // ========================================
-  // UTILITY METHODS
-  // ========================================
-
-  /**
-   * Download file from URL
-   */
-  async downloadFile(url, destination) {
-    return new Promise((resolve, reject) => {
-      const file = createWriteStream(destination);
-      https
-        .get(url, (response) => {
-          if (response.statusCode !== 200) {
-            file.close();
-            fs.unlink(destination).catch(() => {}); // Clean up on error
-            reject(
-              new Error(`Failed to get '${url}' (${response.statusCode})`),
-            );
-            return;
-          }
-          response.pipe(file);
-          file.on("finish", () => {
-            file.close(resolve);
-          });
-          file.on("error", (err) => {
-            file.close();
-            fs.unlink(destination).catch(() => {}); // Clean up on error
-            reject(err);
-          });
-        })
-        .on("error", (err) => {
-          file.close();
-          fs.unlink(destination).catch(() => {}); // Clean up on error
-          reject(err);
-        });
-    });
+    return await this._update.getServerInstallPath(serverName);
   }
 }

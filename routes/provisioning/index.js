@@ -1,5 +1,5 @@
 // Main router for provisioning endpoints
-import clusterRoutes from './cluster.js';
+import clusterRoutes from './cluster/index.js';
 import installRoutes from './install.js';
 import globalConfigRoutes from './global-config.js';
 import modRoutes from './mods.js';
