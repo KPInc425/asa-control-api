@@ -1,13 +1,13 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
-import logger from "../../utils/logger.js";
+import logger from "../../../utils/logger.js";
 import {
   upsertServerConfig,
   upsertSharedMod,
   upsertServerMod,
   upsertServerSettings,
-} from "../database.js";
+} from "../../database.js";
 
 /**
  * Cluster creation and server addition operations

@@ -1,9 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
-import logger from "../utils/logger.js";
-import { upsertServerConfig } from "./database.js";
-import { gameFor } from "../games/index.js";
+import logger from "../../utils/logger.js";
+import { upsertServerConfig } from "../database.js";
+import { gameFor } from "../../games/index.js";
 import { IniGenerators } from "./config-generator/ini-generators.js";
 import { ConfigWriter } from "./config-generator/config-writer.js";
 import { GlobalConfigManager } from "./config-generator/global-config-manager.js";

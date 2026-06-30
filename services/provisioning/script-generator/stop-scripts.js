@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
-import logger from "../../utils/logger.js";
-import { gameFor, gameRegistry } from "../../games/index.js";
+import logger from "../../../utils/logger.js";
+import { gameFor, gameRegistry } from "../../../games/index.js";
 
 /**
  * Stop script creation (standalone and cluster)

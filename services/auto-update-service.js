@@ -46,7 +46,7 @@ export class AutoUpdateService extends EventEmitter {
     return this._provisionersByGame.get(gameType);
   }
 
-  _gameTypeFor(serverName) {
+  async _gameTypeFor(serverName) {
     try {
       const { getServerUpdateConfig } = await import("./database.js");
       const cfg = getServerUpdateConfig(serverName);

@@ -1,5 +1,5 @@
-import DiscordService from '../discord.js';
-import logger from '../../utils/logger.js';
+import DiscordService from '../../discord.js';
+import logger from '../../../utils/logger.js';
 import { EMBED_COLORS, TYPE_TO_SEVERITY } from '../templates.js';
 
 function mapTypeToDiscordType(type) {

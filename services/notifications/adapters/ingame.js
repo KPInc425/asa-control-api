@@ -1,5 +1,5 @@
-import rconService from '../rcon.js';
-import logger from '../../utils/logger.js';
+import rconService from '../../rcon.js';
+import logger from '../../../utils/logger.js';
 import { formatForARK } from '../template-processor.js';
 
 /**

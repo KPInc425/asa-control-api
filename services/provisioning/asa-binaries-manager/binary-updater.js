@@ -3,8 +3,8 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
-import logger from "../../utils/logger.js";
-import { gameFor } from "../../games/index.js";
+import logger from "../../../utils/logger.js";
+import { gameFor } from "../../../games/index.js";
 
 const execAsync = promisify(exec);
 

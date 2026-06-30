@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 import { createWriteStream } from "fs";
 import https from "https";
-import logger from "../utils/logger.js";
+import logger from "../../utils/logger.js";
 
 const execAsync = promisify(exec);
 

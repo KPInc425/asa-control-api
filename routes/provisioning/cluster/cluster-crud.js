@@ -1,14 +1,14 @@
 import path from "path";
 import fs from "fs/promises";
-import { requirePermission } from "../../middleware/auth.js";
-import logger from "../../utils/logger.js";
-import { ServerProvisioner } from "../../services/server-provisioner.js";
-import { createServerManager } from "../../services/server-manager.js";
+import { requirePermission } from "../../../middleware/auth.js";
+import logger from "../../../utils/logger.js";
+import { ServerProvisioner } from "../../../services/server-provisioner.js";
+import { createServerManager } from "../../../services/server-manager.js";
 import {
   createJob,
   updateJob,
   addJobProgress,
-} from "../../services/job-manager.js";
+} from "../../../services/job-manager.js";
 
 export default async function clusterCrudRoutes(fastify) {
   const provisioner = new ServerProvisioner();

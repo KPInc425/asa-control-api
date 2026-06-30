@@ -1,7 +1,7 @@
-import { requirePermission } from "../../middleware/auth.js";
-import logger from "../../utils/logger.js";
-import config from "../../config/index.js";
-import { ServerProvisioner } from "../../services/server-provisioner.js";
+import { requirePermission } from "../../../middleware/auth.js";
+import logger from "../../../utils/logger.js";
+import config from "../../../config/index.js";
+import { ServerProvisioner } from "../../../services/server-provisioner.js";
 
 export default async function debugRoutes(fastify) {
   const provisioner = new ServerProvisioner();

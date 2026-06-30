@@ -1,11 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
-import logger from "../../utils/logger.js";
+import logger from "../../../utils/logger.js";
 import {
   getAllServerConfigs,
   deleteServerConfig,
-} from "../database.js";
+} from "../../database.js";
 
 /**
  * Cluster deletion operations

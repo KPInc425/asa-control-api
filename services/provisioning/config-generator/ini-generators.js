@@ -1,4 +1,4 @@
-import { gameFor } from "../../games/index.js";
+import { gameFor } from "../../../games/index.js";
 
 /**
  * INI file content generators

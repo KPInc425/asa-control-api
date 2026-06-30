@@ -1,9 +1,9 @@
 import logger from '../../utils/logger.js';
-import { getServerChannelSettings, mergeChannelSettings } from '../channel-config.js';
-import { getTemplate, processTemplate } from '../template-processor.js';
-import { notifyInGame } from './ingame.js';
-import { notifyDiscord } from './discord.js';
-import { notifySocket } from './socket.js';
+import { getServerChannelSettings, mergeChannelSettings } from './channel-config.js';
+import { getTemplate, processTemplate } from './template-processor.js';
+import { notifyInGame } from './adapters/ingame.js';
+import { notifyDiscord } from './adapters/discord.js';
+import { notifySocket } from './adapters/socket.js';
 
 /**
  * Send notification to all enabled channels

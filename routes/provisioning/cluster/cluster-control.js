@@ -1,6 +1,6 @@
-import { requirePermission } from "../../middleware/auth.js";
-import logger from "../../utils/logger.js";
-import { createServerManager } from "../../services/server-manager.js";
+import { requirePermission } from "../../../middleware/auth.js";
+import logger from "../../../utils/logger.js";
+import { createServerManager } from "../../../services/server-manager.js";
 
 export default async function clusterControlRoutes(fastify) {
   // Start cluster

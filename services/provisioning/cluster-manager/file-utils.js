@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import logger from "../../utils/logger.js";
+import logger from "../../../utils/logger.js";
 
 /**
  * File system utility operations (shared across cluster modules)

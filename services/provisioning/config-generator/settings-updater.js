@@ -1,8 +1,8 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
-import logger from "../../utils/logger.js";
-import { upsertServerConfig } from "../database.js";
+import logger from "../../../utils/logger.js";
+import { upsertServerConfig } from "../../database.js";
 
 /**
  * Server settings update operations

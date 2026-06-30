@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
-import logger from "../utils/logger.js";
+import logger from "../../utils/logger.js";
 import {
   upsertServerConfig,
   getAllServerConfigs,
@@ -9,7 +9,7 @@ import {
   upsertSharedMod,
   upsertServerMod,
   upsertServerSettings,
-} from "./database.js";
+} from "../database.js";
 import { ClusterOperations } from "./cluster-manager/cluster-operations.js";
 import { ClusterListing } from "./cluster-manager/cluster-listing.js";
 import { ClusterDeletion } from "./cluster-manager/cluster-deletion.js";

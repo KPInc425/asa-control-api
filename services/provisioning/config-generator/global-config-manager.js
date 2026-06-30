@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import logger from "../../utils/logger.js";
+import logger from "../../../utils/logger.js";
 
 /**
  * Global config management (merge, fetch, exclusions)

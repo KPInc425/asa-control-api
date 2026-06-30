@@ -1,10 +1,10 @@
 import path from "path";
 import fs from "fs/promises";
 import { existsSync } from "fs";
-import { requirePermission } from "../../middleware/auth.js";
-import logger from "../../utils/logger.js";
-import config from "../../config/index.js";
-import { ServerProvisioner } from "../../services/server-provisioner.js";
+import { requirePermission } from "../../../middleware/auth.js";
+import logger from "../../../utils/logger.js";
+import config from "../../../config/index.js";
+import { ServerProvisioner } from "../../../services/server-provisioner.js";
 
 export default async function configRoutes(fastify) {
   const provisioner = new ServerProvisioner();

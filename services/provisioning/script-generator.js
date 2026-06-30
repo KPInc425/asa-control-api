@@ -1,9 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
-import logger from "../utils/logger.js";
-import config from "../config/index.js";
-import { gameFor, gameRegistry } from "../games/index.js";
+import logger from "../../utils/logger.js";
+import config from "../../config/index.js";
+import { gameFor, gameRegistry } from "../../games/index.js";
 import { StartScripts } from "./script-generator/start-scripts.js";
 import { StopScripts } from "./script-generator/stop-scripts.js";
 import { ScriptRegenerator } from "./script-generator/script-regenerator.js";

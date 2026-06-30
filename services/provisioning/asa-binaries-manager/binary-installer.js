@@ -2,8 +2,8 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
-import logger from "../../utils/logger.js";
-import { gameFor } from "../../games/index.js";
+import logger from "../../../utils/logger.js";
+import { gameFor } from "../../../games/index.js";
 
 const execAsync = promisify(exec);
 
