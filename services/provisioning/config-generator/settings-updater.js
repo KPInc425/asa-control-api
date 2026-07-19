@@ -13,6 +13,43 @@ export class SettingsUpdater {
   }
 
   /**
+   * Regenerate INI config files on disk for a server.
+   * Writes GameUserSettings.ini, Game.ini, and Engine.ini into
+   * ShooterGame/Saved/Config/WindowsServer/.
+   */
+  async _regenerateIniFiles(serverPath, serverConfig) {
+    try {
+      const configsPath = path.join(
+        serverPath,
+        "ShooterGame",
+        "Saved",
+        "Config",
+        "WindowsServer",
+      );
+      await fs.mkdir(configsPath, { recursive: true });
+
+      const finalConfigs = await this.parent.getFinalConfigsForServer(
+        serverConfig.name,
+      );
+
+      const baseGameIni = await this.parent.generateGameIni(serverConfig);
+      const baseGameUserSettings = await this.parent.generateGameUserSettings(serverConfig);
+      const baseEngineIni = await this.parent.generateEngineIni(serverConfig);
+
+      const gameIni = this.parent.mergeGlobalSettings(baseGameIni, finalConfigs.gameIni);
+      const gameUserSettings = this.parent.mergeGlobalSettings(baseGameUserSettings, finalConfigs.gameUserSettings);
+
+      await fs.writeFile(path.join(configsPath, "Game.ini"), gameIni);
+      await fs.writeFile(path.join(configsPath, "GameUserSettings.ini"), gameUserSettings);
+      await fs.writeFile(path.join(configsPath, "Engine.ini"), baseEngineIni);
+
+      logger.info(`INI files regenerated for ${serverConfig.name} at ${configsPath}`);
+    } catch (error) {
+      logger.error(`Failed to regenerate INI files for ${serverConfig.name}:`, error);
+    }
+  }
+
+  /**
    * Update server settings and regenerate configs if needed
    */
   async updateServerSettings(serverName, newSettings, options = {}) {
@@ -41,6 +78,13 @@ export class SettingsUpdater {
         logger.info(
           `Standalone server configuration updated for ${serverName}`,
         );
+
+        // Regenerate INI files on disk so Port/QueryPort/etc take effect
+        if (regenerateConfigs) {
+          const serverDir = path.dirname(standaloneServerPath);
+          await this._regenerateIniFiles(serverDir, updatedConfig);
+        }
+
         return {
           success: true,
           message: `Server settings updated for ${serverName}`,
@@ -68,6 +112,12 @@ export class SettingsUpdater {
           logger.info(
             `Cluster server configuration updated for ${serverName} in cluster ${clusterName}`,
           );
+
+          // Regenerate INI files on disk
+          if (regenerateConfigs) {
+            const serverDir = path.dirname(clusterServerPath);
+            await this._regenerateIniFiles(serverDir, updatedConfig);
+          }
 
           // PATCH: Also update the cluster.json
           const clusterJsonPath = path.join(

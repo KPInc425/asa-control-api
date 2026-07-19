@@ -17,8 +17,20 @@ export class IniGenerators {
       const files = await adapter.generateConfigFiles(serverConfig);
       return files["GameUserSettings.ini"] || "";
     }
-    const settings = `[ServerSettings]
+    const settings = `[/script/engine.gamesession]
+MaxPlayers=${serverConfig.maxPlayers || 70}
+Port=${serverConfig.gamePort || 7777}
+QueryPort=${serverConfig.queryPort || 27015}
+
+[SessionSettings]
 SessionName=${serverConfig.name || "ASA Server"}
+
+[/script/shootergame.shootergamemode]
+ServerAdminPassword=${serverConfig.adminPassword || "admin123"}
+ServerPassword=${serverConfig.serverPassword || ""}
+${serverConfig.disableBattleEye ? "bUseBattlEye=False" : ""}
+
+[ServerSettings]
 RCONEnabled=True
 RCONPort=${serverConfig.rconPort || 32330}
 AdminPassword=${serverConfig.adminPassword || "admin123"}
