@@ -14,6 +14,19 @@ export class ServerScriptManager {
 
   async getClusterServerStartBat(name) {
     try {
+      // Standalone servers (and any server whose path is recorded in the DB)
+      // are resolved from their stored config first. Without this the lookup
+      // only walked <base>/clusters/* and <base>/servers/*, so a server that
+      // lives anywhere else reported "not found in any cluster, DB, or on disk".
+      const dbCfg = this.manager.getServerConfigFromDatabase(name);
+      if (dbCfg && dbCfg.serverPath) {
+        const bat = path.join(dbCfg.serverPath, "start.bat");
+        if (existsSync(bat)) {
+          const content = await fs.readFile(bat, "utf8");
+          return { success: true, content, path: bat };
+        }
+      }
+
       const serverInfo = await this.manager.getClusterServerInfo(name);
       if (!serverInfo) throw new Error(`Server ${name} not found`);
 

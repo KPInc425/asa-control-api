@@ -34,7 +34,7 @@ export class StartScripts {
         const savesPath = path.join(serverPath, "saves");
         const logsPath = path.join(serverPath, "logs");
 
-        const { NativeServerManager } = await import("../server-manager.js");
+        const { NativeServerManager } = await import("../../server-manager.js");
         const serverManager = new NativeServerManager();
         const finalMods = await serverManager.getFinalModListForServer(
           serverConfig.name,
@@ -82,7 +82,7 @@ export class StartScripts {
       const savesPath = path.join(serverPath, "ShooterGame", "Saved", "SaveGames");
       const logsPath = path.join(serverPath, "ShooterGame", "Saved", "Logs");
 
-      const { NativeServerManager } = await import("../server-manager.js");
+      const { NativeServerManager } = await import("../../server-manager.js");
       const serverManager = new NativeServerManager();
       const finalMods = await serverManager.getFinalModListForServer(
         serverConfig.name,
@@ -134,7 +134,7 @@ export class StartScripts {
         const savesPath = path.join(serverPath, "saves");
         const logsPath = path.join(serverPath, "logs");
 
-        const { NativeServerManager } = await import("../server-manager.js");
+        const { NativeServerManager } = await import("../../server-manager.js");
         const serverManager = new NativeServerManager();
         const finalMods =
           await serverManager.getFinalModListForServer(serverName);
