@@ -226,60 +226,49 @@ export class ServerLifecycle {
       const { promisify } = await import("util");
       const execAsync = promisify(exec);
 
+      // No tracked handle (the API was restarted since the server was spawned, or
+      // the server was started by hand). Find it through the shared process scan.
+      // The previous code parsed `wmic ... /format:csv` with the wrong column
+      // order (WMIC emits Node,CommandLine,Name,ProcessId), so it never matched a
+      // single process: stop() answered "not running" and the real server was
+      // orphaned, then the next start() could not bind the ports.
+      let running = [];
       try {
-        const wmicOut = await execAsync(
-          `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`, { timeout: 8000 }
-        );
-        const lines = wmicOut.stdout.split("\n").filter(Boolean);
-        let killed = false;
-        for (const line of lines) {
-          const parts = line.split(",");
-          if (parts.length >= 3) {
-            const pid = parts[1]?.trim();
-            const cmd = parts.slice(2).join(",");
-            if (pid && (cmd.includes(`SessionName=${name}`) || cmd.includes(name))) {
-              await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
-              logger.info(`Stopped server ${name} by PID ${pid}`);
-              killed = true;
-            }
-          }
-        }
-        if (killed) {
-          stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: "Intentional stop" });
-          return { success: true, message: `Server ${name} stopped` };
-        }
-      } catch { /* WMIC quick scan failed — fall through */ }
+        running = await this.manager.getRunningProcesses();
+      } catch (error) {
+        logger.warn(`Process scan failed while stopping ${name}:`, error.message);
+      }
 
-      try {
-        await execAsync(`taskkill /f /fi "IMAGENAME eq ArkAscendedServer.exe" /fi "CMDLINE ne ''"`, { timeout: 5000, maxBuffer: 1024 });
-        const wmicOut2 = await execAsync(
-          `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine /format:csv`, { timeout: 8000 }
-        );
-        const lines2 = wmicOut2.stdout.split("\n").filter(Boolean);
-        let killed2 = false;
-        for (const line of lines2) {
-          const parts = line.split(",");
-          if (parts.length >= 3) {
-            const pid = parts[1]?.trim();
-            const cmd = parts.slice(2).join(",");
-            if (pid && (cmd.includes(`SessionName=${name}`) || cmd.includes(name))) {
-              await execAsync(`taskkill /f /pid ${pid}`, { timeout: 5000 });
-              killed2 = true;
-            }
-          }
-        }
-        if (killed2) {
-          stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: "Intentional stop" });
-          return { success: true, message: `Server ${name} stopped` };
-        }
-        logger.warn(`No ArkAscendedServer.exe found for server ${name}`);
-        stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: "Server was not running" });
-        return { success: false, message: `Server ${name} not running` };
-      } catch {
+      const targets = running.filter((entry) => {
+        const cmd = entry.commandLine || "";
+        return cmd.includes(`SessionName=${name}`) || (name.length > 6 && cmd.includes(name));
+      });
+
+      if (targets.length === 0) {
         logger.warn(`No ArkAscendedServer.exe found for server ${name}`);
         stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: "Server was not running" });
         return { success: false, message: `Server ${name} not running` };
       }
+
+      let killed = 0;
+      for (const entry of targets) {
+        try {
+          await execAsync(`taskkill /f /t /pid ${entry.pid}`, { timeout: 10000 });
+          killed += 1;
+          logger.info(`Stopped server ${name} by PID ${entry.pid}`);
+        } catch (error) {
+          logger.warn(`taskkill failed for PID ${entry.pid}:`, error.message);
+        }
+      }
+
+      if (killed > 0) {
+        this.manager.processes.delete(name);
+        stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: "Intentional stop" });
+        return { success: true, message: `Server ${name} stopped` };
+      }
+
+      stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: "Server was not running" });
+      return { success: false, message: `Server ${name} not running` };
     } catch (error) {
       logger.error(`Failed to stop server ${name}:`, error);
       throw error;
