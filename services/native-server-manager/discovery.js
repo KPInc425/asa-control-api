@@ -3,7 +3,7 @@ import path from "path";
 import config from "../../config/index.js";
 import logger from "../../utils/logger.js";
 import { getAllServerConfigs, getServerConfig } from "../database.js";
-import { gameFor } from "../../games/index.js";
+import { gameFor, gameRegistry } from "../../games/index.js";
 
 /**
  * Server discovery: listing, finding, running detection
@@ -305,27 +305,52 @@ export class ServerDiscovery {
       const { promisify } = await import("util");
       const execAsync = promisify(exec);
 
-      const { stdout } = await execAsync(
-        `wmic process where "name='ArkAscendedServer.exe'" get ProcessId,CommandLine,Name /format:csv`,
-        { timeout: 10000 }
-      );
+      // PowerShell CIM, not WMIC /format:csv.
+      // The old WMIC parse assumed the CSV column order was
+      // (Name,ProcessId,CommandLine); WMIC actually emits (Node,CommandLine,Name,ProcessId),
+      // so every commandLine came back as "ArkAscendedServer.exe,1234" and no
+      // process ever matched a server. isRunning() was therefore always false for
+      // any server the API had not itself spawned: status read "stopped"/"failed"
+      // and every RCON call was refused with "server is not running", even while
+      // the server was plainly up and listening.
+      const psCommand =
+        "Get-CimInstance Win32_Process -Filter \"name='%PROCNAME%'\" | Select-Object Name,ProcessId,CommandLine | ConvertTo-Json -Compress";
 
-      const lines = stdout.trim().split("\n").filter(Boolean);
+      const targets = new Set(["ArkAscendedServer.exe"]);
+      for (const adapter of gameRegistry.all) {
+        for (const name of adapter.processNames || []) targets.add(name);
+      }
+
       const processes = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(",");
-        if (parts.length >= 3) {
+      for (const target of targets) {
+        const cmd = `powershell -NoProfile -NonInteractive -Command "${psCommand.replace("%PROCNAME%", target)}"`;
+        let stdout = "";
+        try {
+          ({ stdout } = await execAsync(cmd, { timeout: 15000, windowsHide: true }));
+        } catch (error) {
+          logger.warn(`Process scan failed for ${target}:`, error.message);
+          continue;
+        }
+        const text = (stdout || "").trim();
+        if (!text) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          continue;
+        }
+        for (const entry of Array.isArray(parsed) ? parsed : [parsed]) {
+          if (!entry) continue;
           processes.push({
-            name: parts[0]?.trim() || "ArkAscendedServer.exe",
-            pid: parts[1]?.trim(),
-            commandLine: parts.slice(2).join(","),
+            name: entry.Name || target,
+            pid: String(entry.ProcessId ?? ""),
+            commandLine: entry.CommandLine || "",
           });
         }
       }
       return processes;
     } catch (error) {
-      logger.warn("Failed to get running processes via WMIC:", error.message);
+      logger.warn("Failed to enumerate running server processes:", error.message);
       return [];
     }
   }
