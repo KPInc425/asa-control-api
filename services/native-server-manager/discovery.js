@@ -313,8 +313,10 @@ export class ServerDiscovery {
       // any server the API had not itself spawned: status read "stopped"/"failed"
       // and every RCON call was refused with "server is not running", even while
       // the server was plainly up and listening.
+      // Single quotes only inside the -Command text: a nested \" is eaten by the
+      // command-line parser before PowerShell sees it and yields "Invalid query".
       const psCommand =
-        "Get-CimInstance Win32_Process -Filter \"name='%PROCNAME%'\" | Select-Object Name,ProcessId,CommandLine | ConvertTo-Json -Compress";
+        "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq '%PROCNAME%' } | Select-Object Name,ProcessId,CommandLine | ConvertTo-Json -Compress";
 
       const targets = new Set(["ArkAscendedServer.exe"]);
       for (const adapter of gameRegistry.all) {
