@@ -225,6 +225,12 @@ export class ServerDiscovery {
             if (existsSync(startBatPath)) {
               try {
                 const parsed = await parseStartBat(startBatPath);
+                // A start.bat the parser cannot name must not become a ghost
+                // "undefined" entry in the server list.
+                if (!parsed.name) {
+                  logger.warn(`[NativeServerManager] start.bat at ${startBatPath} did not yield a server name; skipping`);
+                  continue;
+                }
                 if (!foundNames.has(parsed.name)) {
                   servers.push({ name: parsed.name, ...parsed, status: "unknown", type: "native", config: parsed, isClusterServer: true, clusterName, serverPath, created: "", fallback: true });
                   foundNames.add(parsed.name);
@@ -244,6 +250,10 @@ export class ServerDiscovery {
           if (existsSync(startBatPath)) {
             try {
               const parsed = await parseStartBat(startBatPath);
+              if (!parsed.name) {
+                logger.warn(`[NativeServerManager] start.bat at ${startBatPath} did not yield a server name; skipping`);
+                continue;
+              }
               if (!foundNames.has(parsed.name)) {
                 let fallbackStatus = "unknown";
                 try { const statusObj = await this.manager.getServerStatus(parsed.name); fallbackStatus = statusObj.status; }

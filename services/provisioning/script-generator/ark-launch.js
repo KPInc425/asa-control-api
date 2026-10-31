@@ -66,7 +66,11 @@ export function buildArkUrl(cfg = {}) {
 
   const dynamicUrl = cfg.customDynamicConfigUrl || cfg.dynamicConfigUrl || "";
   if (dynamicUrl && String(dynamicUrl).trim() !== "") {
-    parts.push(`customdynamicconfigurl="${dynamicUrl}"`);
+    // No inner quotes: a nested double quote terminates the URL token for the
+    // command-line and for utils/parse-start-bat.js, which then loses every
+    // option after it (SessionName especially). A URL has no spaces, so it does
+    // not need quoting.
+    parts.push(`customdynamicconfigurl=${dynamicUrl}`);
   }
 
   // SessionName goes last on purpose: it is the only value that can contain
