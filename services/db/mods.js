@@ -104,8 +104,12 @@ function upsertServerMod(
  * @param {string} serverName
  */
 function getServerMods(serverName) {
+  // Mod order is meaningful: at least one ASA mod states it must be first in
+  // "-mods=" for its music to work, and the UI shows the list in this order.
+  // ORDER BY created_at DESC made the order arbitrary whenever rows were
+  // inserted in the same second, so order is ascending with id as the tiebreak.
   const stmt = db.prepare(
-    "SELECT * FROM server_mods WHERE server_name = ? ORDER BY created_at DESC",
+    "SELECT * FROM server_mods WHERE server_name = ? ORDER BY created_at ASC, id ASC",
   );
   return stmt.all(serverName);
 }
