@@ -51,7 +51,6 @@ export function buildArkUrl(cfg = {}) {
   const parts = [
     map,
     "listen",
-    `SessionName=${cfg.sessionName || cfg.name || "ASA Server"}`,
     `Port=${cfg.gamePort || 7777}`,
     `QueryPort=${cfg.queryPort || 27015}`,
     `RCONPort=${cfg.rconPort || 32330}`,
@@ -70,6 +69,10 @@ export function buildArkUrl(cfg = {}) {
     parts.push(`customdynamicconfigurl="${dynamicUrl}"`);
   }
 
+  // SessionName goes last on purpose: it is the only value that can contain
+  // spaces, so it must never sit in front of an option that matters.
+  parts.push(`SessionName=${cfg.sessionName || cfg.name || "ASA Server"}`);
+
   return parts.join("?");
 }
 
@@ -80,7 +83,19 @@ export function buildArkUrl(cfg = {}) {
  * @param {object} [opts] { clusterDataPath, clusterId }
  */
 export function buildArkFlags(cfg = {}, mods = [], opts = {}) {
-  const flags = ["-server", "-log", "-servergamelog", "-NotifyAdminCommandsInChat"];
+  // VERIFIED on ASA build 26334129 (2026-10-31): "?Port="/"?QueryPort=" in the
+  // map URL are accepted but NOT applied - the server still binds the defaults
+  // 7777/27015. The "-Port="/"-QueryPort=" command-line flags are what actually
+  // bind. "?RCONPort=" in the URL does work, so it is kept in both places.
+  const flags = [
+    "-server",
+    "-log",
+    "-servergamelog",
+    "-NotifyAdminCommandsInChat",
+    `-Port=${cfg.gamePort || 7777}`,
+    `-QueryPort=${cfg.queryPort || 27015}`,
+    `-RCONPort=${cfg.rconPort || 32330}`,
+  ];
 
   if (Array.isArray(mods) && mods.length > 0) {
     flags.push(`-mods=${mods.join(",")}`);
