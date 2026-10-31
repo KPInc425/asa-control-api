@@ -173,17 +173,32 @@ export class ServerScriptManager {
       const dbServerConfig = this.manager.getServerConfigFromDatabase(serverName);
       const resolvedServerConfig = dbServerConfig || (await this.manager.getClusterServerInfo(serverName));
       if (!resolvedServerConfig) throw new Error(`Server ${serverName} not found in database or any cluster`);
+      // A standalone server (no clusterId) is legitimate - it used to throw here,
+      // which is why start() silently kept a stale start.bat for every server
+      // that is not part of a cluster.
       const clusterId = this.manager.getClusterIdFromConfig(resolvedServerConfig);
-      if (!clusterId) throw new Error(`Server ${serverName} is not associated with a cluster`);
       const finalMods = await this.getFinalModListForServer(serverName);
       const cleanMods = finalMods.filter((modId) => modId !== null && modId !== undefined && modId !== "");
       const excludeSharedMods = dbServerConfig?.excludeSharedMods === true || resolvedServerConfig.excludeSharedMods === true;
       const clustersPath = this.manager.clustersPath || config.server.native.clustersPath || path.join(this.manager.basePath, "clusters");
-      const serverPath = resolvedServerConfig.serverPath || path.join(clustersPath, clusterId, serverName);
-      const serverConfig = { ...resolvedServerConfig, mods: cleanMods, excludeSharedMods, clusterId, clusterName: clusterId, serverPath };
+      const serversPath = this.manager.serversPath || path.join(this.manager.basePath, "servers");
+      const serverPath =
+        resolvedServerConfig.serverPath ||
+        (clusterId ? path.join(clustersPath, clusterId, serverName) : path.join(serversPath, serverName));
+      const serverConfig = {
+        ...resolvedServerConfig,
+        mods: cleanMods,
+        excludeSharedMods,
+        serverPath,
+        ...(clusterId ? { clusterId, clusterName: clusterId } : {}),
+      };
       const { ServerProvisioner } = await import("../server-provisioner.js");
       const provisioner = new ServerProvisioner();
-      await provisioner.createStartScriptInCluster(clusterId, serverPath, serverConfig);
+      if (clusterId) {
+        await provisioner.createStartScriptInCluster(clusterId, serverPath, serverConfig);
+      } else {
+        await provisioner.createStartScript(serverPath, serverConfig);
+      }
     } catch (error) {
       logger.error(`Failed to regenerate start script for ${serverName}:`, error);
       throw error;
@@ -192,11 +207,26 @@ export class ServerScriptManager {
 
   async getFinalModListForServer(serverName) {
     try {
-      const sharedModsData = getAllSharedMods();
-      const sharedMods = sharedModsData.filter((mod) => mod.enabled === 1 && mod.mod_id).map((mod) => mod.mod_id);
       const serverModsData = getServerMods(serverName);
-      const serverMods = serverModsData.filter((mod) => mod.enabled === 1 && mod.mod_id).map((mod) => mod.mod_id);
-      return [...sharedMods, ...serverMods];
+      const serverMods = serverModsData
+        .filter((mod) => mod.enabled === 1 && mod.mod_id)
+        .map((mod) => mod.mod_id);
+
+      // excludeSharedMods is per server and MUST be honoured here: this list is
+      // what lands in the regenerated "-mods=" flag. Ignoring it silently added
+      // every enabled shared mod to servers that had opted out, which changes
+      // the mod set of a live world.
+      const dbServerConfig = this.manager.getServerConfigFromDatabase(serverName);
+      const excludeSharedMods = dbServerConfig?.excludeSharedMods === true;
+
+      if (excludeSharedMods) return [...new Set(serverMods)];
+
+      const sharedModsData = getAllSharedMods();
+      const sharedMods = sharedModsData
+        .filter((mod) => mod.enabled === 1 && mod.mod_id)
+        .map((mod) => mod.mod_id);
+
+      return [...new Set([...sharedMods, ...serverMods])];
     } catch (error) {
       logger.warn(`Failed to get mod list for ${serverName}:`, error.message);
       return [];
