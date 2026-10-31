@@ -3,6 +3,7 @@ import path from "path";
 import logger from "../../../utils/logger.js";
 import config from "../../../config/index.js";
 import { gameFor, gameRegistry } from "../../../games/index.js";
+import { buildArkStartBat } from "./ark-launch.js";
 
 /**
  * Start script creation (standalone and cluster)
@@ -94,25 +95,11 @@ export class StartScripts {
 
       const battleEyeArg = serverConfig.disableBattleEye ? " -NoBattleEye" : "";
 
-      const customUrl = serverConfig.customDynamicConfigUrl || "";
-      const customUrlArg = customUrl
-        ? `?customdynamicconfigurl=\"${customUrl}\"`
-        : "";
-
-      const useDynamicConfigArg =
-        serverConfig.customDynamicConfigUrl &&
-        serverConfig.customDynamicConfigUrl.trim() !== ""
-          ? " -UseDynamicConfig"
-          : "";
-
-      const startScript = `@echo off
-echo Starting ${serverConfig.name}...
-
-REM Start the ASA server with proper parameters
-"${path.join(serverPath, "ShooterGame", "Binaries", "Win64", "ArkAscendedServer.exe")}" "${serverConfig.map || "TheIsland"}_WP?SessionName=${serverConfig.name}?RCONEnabled=True?WinLivePlayers=${serverConfig.maxPlayers || 70}${serverConfig.serverPassword ? `?ServerPassword=${serverConfig.serverPassword}` : ""}${customUrlArg}" -Port=${serverConfig.gamePort || 7777} -QueryPort=${serverConfig.queryPort || 27015} -RCONPort=${serverConfig.rconPort || 32330}${modsArg} -servergamelog -NotifyAdminCommandsInChat${useDynamicConfigArg}${battleEyeArg}
-
-echo Server ${serverConfig.name} has stopped.
-pause`;
+      const startScript = buildArkStartBat({
+        exePath: path.join(serverPath, "ShooterGame", "Binaries", "Win64", "ArkAscendedServer.exe"),
+        cfg: serverConfig,
+        mods: finalMods || [],
+      });
 
       await fs.writeFile(path.join(serverPath, "start.bat"), startScript);
       logger.info(`Start script created for server: ${serverConfig.name}`);
@@ -231,54 +218,15 @@ pause`;
 
       await fs.mkdir(clusterDataPath, { recursive: true });
 
-      const customUrl = serverConfig.customDynamicConfigUrl || "";
-      const customUrlArg = customUrl
-        ? `?customdynamicconfigurl=\"${customUrl}\"`
-        : "";
-
-      const { NativeServerManager } = await import("../server-manager.js");
-      const serverManager = new NativeServerManager();
-      const finalMods =
-        await serverManager.getFinalModListForServer(serverName);
-
-      const modsArg =
-        finalMods && finalMods.length > 0
-          ? ` -mods=${finalMods.join(",")}`
-          : "";
-
-      const battleEyeArg = serverConfig.disableBattleEye ? " -NoBattleEye" : "";
-
-      let queryParams = [
-        `SessionName=${serverName}`,
-        `RCONEnabled=True`,
-        `WinLivePlayers=${serverConfig.maxPlayers}`,
-      ];
-
-      if (serverConfig.password || serverConfig.serverPassword) {
-        queryParams.push(
-          `ServerPassword=${serverConfig.password || serverConfig.serverPassword}`,
-        );
-      }
-
-      if (customUrl) {
-        queryParams.push(`customdynamicconfigurl=\"${customUrl}\"`);
-      }
-      const queryString = queryParams.join("?");
-
-      const useDynamicConfigArg =
-        serverConfig.customDynamicConfigUrl &&
-        serverConfig.customDynamicConfigUrl.trim() !== ""
-          ? " -UseDynamicConfig"
-          : "";
-
-      const startScript = `@echo off
-echo Starting ${serverName}...
-
-REM Start the ASA server with proper parameters
-      "${path.join(binariesPath, "ArkAscendedServer.exe")}" "${serverConfig.map}_WP?${queryString}" -Port=${serverConfig.gamePort} -QueryPort=${serverConfig.queryPort} -RCONPort=${serverConfig.rconPort}${modsArg} -servergamelog -NotifyAdminCommandsInChat${useDynamicConfigArg} -ClusterDirOverride=${clusterDataPath.replace(/\\/g, "\\\\")} -NoTransferFromFiltering -clusterid=${serverConfig.clusterId || clusterName}${battleEyeArg}
-
-echo Server ${serverName} has stopped.
-pause`;
+      const startScript = buildArkStartBat({
+        exePath: path.join(binariesPath, "ArkAscendedServer.exe"),
+        cfg: { ...serverConfig, name: serverName },
+        mods: finalMods || [],
+        cluster: {
+          clusterId: serverConfig.clusterId || clusterName,
+          clusterDataPath: clusterDataPath.replace(/\\/g, "/"),
+        },
+      });
 
       const startScriptPath = path.join(serverPath, "start.bat");
       await fs.writeFile(startScriptPath, startScript);
