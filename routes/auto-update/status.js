@@ -10,7 +10,17 @@ export default async function statusRoutes(fastify, options) {
     { preHandler: [requireRead] },
     async (request, reply) => {
       try {
-        const statuses = autoUpdateService.getAllStatuses();
+        // getAllStatuses() returns an object keyed by server name, not an array.
+        // The `.map` below threw "statuses.map is not a function" on every poll,
+        // which the servers page hit every few seconds.
+        const rawStatuses = autoUpdateService.getAllStatuses();
+        const statuses = Array.isArray(rawStatuses)
+          ? rawStatuses
+          : Object.entries(rawStatuses || {}).map(([serverName, entry]) => ({
+              serverName,
+              ...entry,
+              updatedAt: entry?.updatedAt || entry?.lastCheck || null,
+            }));
         const serversWithNextCheck = statuses.map((status) => {
           let nextCheck = null;
           if (status.config?.enabled && status.updatedAt) {
