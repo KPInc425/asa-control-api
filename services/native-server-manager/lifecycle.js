@@ -205,6 +205,69 @@ export class ServerLifecycle {
     });
   }
 
+  /**
+   * Ask a running server to write its world to disk before we kill the process.
+   *
+   * ASA autosaves every AutoSavePeriodMinutes (15 by default), so a hard kill can
+   * roll the world back by up to that much: players reappear where they were at
+   * the last save, not where they were standing. `saveworld` over RCON forces the
+   * write and answers "World Saved", which takes well under a second in practice.
+   *
+   * Best effort by design. A server that is already hung may not answer, and in
+   * that case stopping it matters more than the save, so the caller proceeds and
+   * the failure is logged loudly.
+   *
+   * @param {string} name
+   * @param {{ attempts?: number, waitMs?: number }} [options]
+   * @returns {Promise<boolean>} true when the save was confirmed
+   */
+  async saveWorldBeforeStop(name, { attempts = 2, waitMs = 2000 } = {}) {
+    let serverConfig = null;
+    try {
+      serverConfig = this.manager.getServerConfigFromDatabase(name);
+      if (!serverConfig) serverConfig = await this.manager.getClusterServerInfo(name);
+    } catch (error) {
+      logger.warn(`[${name}] could not read config for the pre-stop save: ${error.message}`);
+    }
+
+    const rconPort = serverConfig?.rconPort;
+    if (!rconPort) {
+      logger.warn(`[${name}] no RCON port configured, cannot force a save before stopping`);
+      return false;
+    }
+    const password =
+      serverConfig?.adminPassword || serverConfig?.rconPassword || "admin123";
+
+    let rconService;
+    try {
+      rconService = (await import("../rcon.js")).default;
+    } catch (error) {
+      logger.warn(`[${name}] RCON service unavailable for the pre-stop save: ${error.message}`);
+      return false;
+    }
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const response = await rconService.sendCommand(
+          { host: "127.0.0.1", port: rconPort, password },
+          "saveworld",
+        );
+        const text = String(response ?? "").trim();
+        if (/world saved/i.test(text)) {
+          logger.info(`[${name}] world saved before stop (attempt ${attempt})`);
+          return true;
+        }
+        logger.warn(
+          `[${name}] saveworld attempt ${attempt} answered: ${text.slice(0, 120) || "(no reply)"}`,
+        );
+      } catch (error) {
+        logger.warn(`[${name}] saveworld attempt ${attempt} failed: ${error.message}`);
+      }
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    return false;
+  }
+
   async stop(name) {
     try {
       stateReconciliation.recordIntent(name, IntentType.STOP, "user");
@@ -212,6 +275,10 @@ export class ServerLifecycle {
 
       const processInfo = this.manager.processes.get(name);
       if (processInfo && processInfo.process) {
+        // A kill loses whatever has not been written since the last autosave
+        // (AutoSavePeriodMinutes, 15 by default), which is how a player can come
+        // back to an older position after a restart. Ask the game to save first.
+        await this.saveWorldBeforeStop(name);
         processInfo.process.kill("SIGTERM");
         setTimeout(() => {
           if (processInfo.process && !processInfo.process.killed) processInfo.process.kill("SIGKILL");
@@ -248,6 +315,14 @@ export class ServerLifecycle {
         logger.warn(`No ArkAscendedServer.exe found for server ${name}`);
         stateReconciliation.recordServerStopped(name, { exitCode: 0, reason: "Server was not running" });
         return { success: false, message: `Server ${name} not running` };
+      }
+
+      // Save before the kill. Best effort: if RCON is unreachable (a hung server,
+      // wrong password) we still stop, but say so in the log rather than
+      // pretending the world is safe.
+      const saved = await this.saveWorldBeforeStop(name);
+      if (!saved) {
+        logger.warn(`[${name}] stopping WITHOUT a confirmed world save`);
       }
 
       let killed = 0;
