@@ -75,6 +75,7 @@ export {
   getAllServerMods,
   upsertServerSettings,
   getServerSettings,
+  setModNames,
 } from "./mods.js";
 
 export {
