@@ -131,4 +131,10 @@ export class AutoUpdateService extends EventEmitter {
   }
 }
 
-export default AutoUpdateService;
+// Default export is a SHARED INSTANCE, not the class.
+// Six route modules (status, actions, config, history, scheduler, native control)
+// import the default and call methods on it. While the default was the class they
+// all threw "autoUpdateService.getAllStatuses is not a function", which the UI
+// polled every few seconds and rendered as failing widgets.
+const autoUpdateService = new AutoUpdateService();
+export default autoUpdateService;

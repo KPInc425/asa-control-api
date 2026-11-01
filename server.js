@@ -28,7 +28,7 @@ import provisioningRoutes from "./routes/provisioning/index.js";
 import gamesRoutes from "./routes/games.js";
 import { gameRegistry } from "./games/index.js";
 import { startChatPolling } from "./services/chat-poller.js";
-import AutoUpdateService from "./services/auto-update-service.js";
+import autoUpdateService from "./services/auto-update-service.js";
 import { NotificationService } from "./services/notifications/adapters.js";
 
 // Create Fastify instance
@@ -859,8 +859,7 @@ const start = async () => {
       // Make notification service available globally
       global.notificationService = notificationService;
 
-      // Initialize auto-update service (the default export is the class, not an instance)
-      const autoUpdateService = new AutoUpdateService();
+      // Initialize the shared auto-update service instance
       await autoUpdateService.initialize();
 
       // Wire auto-update events to socket.io broadcasts
