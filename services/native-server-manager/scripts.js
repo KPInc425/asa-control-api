@@ -218,6 +218,23 @@ export class ServerScriptManager {
     }
   }
 
+  /**
+   * Move the ids listed in a server's `firstMods` config to the front, preserving
+   * their declared order. Everything else keeps its relative position.
+   */
+  _hoistFirstMods(serverName, modIds) {
+    try {
+      const cfg = this.manager.getServerConfigFromDatabase(serverName);
+      const first = Array.isArray(cfg?.firstMods) ? cfg.firstMods.map(String) : [];
+      if (first.length === 0) return modIds;
+      const present = first.filter((id) => modIds.includes(id));
+      if (present.length === 0) return modIds;
+      return [...present, ...modIds.filter((id) => !present.includes(id))];
+    } catch {
+      return modIds;
+    }
+  }
+
   async getFinalModListForServer(serverName) {
     try {
       const serverModsData = getServerMods(serverName);
@@ -232,14 +249,18 @@ export class ServerScriptManager {
       const dbServerConfig = this.manager.getServerConfigFromDatabase(serverName);
       const excludeSharedMods = dbServerConfig?.excludeSharedMods === true;
 
-      if (excludeSharedMods) return [...new Set(serverMods)];
+      if (excludeSharedMods) return this._hoistFirstMods(serverName, [...new Set(serverMods)]);
 
       const sharedModsData = getAllSharedMods();
       const sharedMods = sharedModsData
         .filter((mod) => mod.enabled === 1 && mod.mod_id)
         .map((mod) => mod.mod_id);
 
-      return [...new Set([...sharedMods, ...serverMods])];
+      // Shared mods come first as the cluster-wide prefix, then the server's own.
+      // A server may declare firstMods (in its config) for mods that must lead the
+      // load order regardless - Randi's Halloween Mod, for instance, only plays
+      // its combat music when it is first.
+      return this._hoistFirstMods(serverName, [...new Set([...sharedMods, ...serverMods])]);
     } catch (error) {
       logger.warn(`Failed to get mod list for ${serverName}:`, error.message);
       return [];

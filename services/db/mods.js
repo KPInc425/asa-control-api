@@ -33,7 +33,9 @@ function getSharedMod(modId) {
  * Get all shared mods
  */
 function getAllSharedMods() {
-  const stmt = db.prepare("SELECT * FROM shared_mods ORDER BY created_at DESC");
+  // Ascending for the same reason as getServerMods: this list is the prefix of
+  // every server's "-mods=", so it must be stable between runs.
+  const stmt = db.prepare("SELECT * FROM shared_mods ORDER BY created_at ASC, id ASC");
   return stmt.all();
 }
 
