@@ -114,13 +114,22 @@ await fastify.register(rateLimit, {
 fastify.setErrorHandler(function (error, request, reply) {
   logger.error("Unhandled error:", error);
 
-  // Don't expose internal errors in production
-  const message =
-    config.server.nodeEnv === "production"
-      ? "Internal server error"
-      : error.message;
+  // Preserve client-error status codes. Squashing a 429 (rate limited) or a 4xx
+  // into 500 told the dashboard "the API is broken" and made it render empty
+  // screens, when the truth was "slow down, retry in Ns".
+  const statusCode =
+    typeof error.statusCode === "number" && error.statusCode >= 400 && error.statusCode < 500
+      ? error.statusCode
+      : 500;
 
-  reply.status(500).send({
+  const message =
+    statusCode !== 500
+      ? error.message
+      : config.server.nodeEnv === "production"
+        ? "Internal server error"
+        : error.message;
+
+  reply.status(statusCode).send({
     success: false,
     message,
     ...(config.server.nodeEnv === "development" && { stack: error.stack }),

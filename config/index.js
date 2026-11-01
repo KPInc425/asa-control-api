@@ -89,12 +89,16 @@ const config = {
   },
 
   rateLimit: {
+    // The dashboard polls: server list + per-server status + live-details +
+    // auto-update status, every few seconds, for every server. The old production
+    // default of 100 requests per 15 MINUTES locked the UI out of its own API
+    // after a couple of minutes of normal use, and every screen then rendered as
+    // empty. Keep a ceiling, but one that a real dashboard cannot trip.
     max:
       parseInt(process.env.RATE_LIMIT_MAX) ||
-      (process.env.NODE_ENV === "development" ? 1000 : 100),
+      (process.env.NODE_ENV === "development" ? 2000 : 1200),
     timeWindow:
-      parseInt(process.env.RATE_LIMIT_TIME_WINDOW) ||
-      (process.env.NODE_ENV === "development" ? 60000 : 900000),
+      parseInt(process.env.RATE_LIMIT_TIME_WINDOW) || 60000,
   },
 
   cors: {
