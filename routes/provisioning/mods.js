@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import config from '../../config/index.js';
 import logger from '../../utils/logger.js';
 import { requirePermission } from '../../middleware/auth.js';
-import { getAllSharedMods, upsertSharedMod, getServerMods, upsertServerMod, deleteAllServerMods, upsertServerSettings, getServerSettings } from '../../services/database.js';
+import { getAllSharedMods, upsertSharedMod, getServerMods, upsertServerMod, deleteAllServerMods, upsertServerSettings, getServerSettings, getServerConfig, upsertServerConfig } from '../../services/database.js';
 import { ServerProvisioner } from '../../services/server-provisioner.js';
 
 // Helper for regenerating start scripts
@@ -124,6 +124,25 @@ export default async function modRoutes(fastify) {
         if (typeof migrated === 'boolean') excludeSharedMods = migrated;
       }
       
+      // The flag lives in two places: server_settings (what this endpoint
+      // returns) and server_configs.config_data (what the start-script
+      // generator reads). They drift, and a server created directly in the DB
+      // rendered the checkbox UNCHECKED while its generated start.bat correctly
+      // excluded shared mods - one "Save Configuration" would then have added
+      // every shared mod to that server. Treat either source saying true as true;
+      // the PUT below writes both, so they cannot disagree for long.
+      if (!excludeSharedMods) {
+        const cfgRow = getServerConfig(serverName);
+        if (cfgRow && cfgRow.config_data) {
+          try {
+            const parsedCfg = JSON.parse(cfgRow.config_data);
+            if (parsedCfg.excludeSharedMods === true) excludeSharedMods = true;
+          } catch (parseErr) {
+            logger.warn(`[server-mods GET] Unparseable config_data for ${serverName}: ${parseErr.message}`);
+          }
+        }
+      }
+
       // Club ARK fallback
       const isClubArkServer = serverName.toLowerCase().includes('club') || serverName.toLowerCase().includes('bobs');
       if (isClubArkServer && additionalMods.length === 0) {
@@ -177,7 +196,22 @@ export default async function modRoutes(fastify) {
       
       // Store server settings (excludeSharedMods flag)
       upsertServerSettings(serverName, excludeSharedMods);
-      
+
+      // Mirror the flag into server_configs.config_data, which is what the
+      // start-script generator and buildServerArgs read. Without this a save from
+      // this screen changed only one of the two copies.
+      const cfgRow = getServerConfig(serverName);
+      if (cfgRow && cfgRow.config_data) {
+        try {
+          const parsedCfg = JSON.parse(cfgRow.config_data);
+          parsedCfg.excludeSharedMods = excludeSharedMods === true;
+          parsedCfg.mods = cleanAdditionalMods.map((m) => String(m));
+          upsertServerConfig(serverName, JSON.stringify(parsedCfg), cfgRow.game_type || 'ark');
+        } catch (cfgErr) {
+          logger.warn(`[server-mods PUT] Could not sync config_data for ${serverName}: ${cfgErr.message}`);
+        }
+      }
+
       // Regenerate start.bat
       const provisioner = new ServerProvisioner();
       await provisioner.regenerateServerStartScript(serverName);
