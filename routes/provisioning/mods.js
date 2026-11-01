@@ -5,6 +5,8 @@ import logger from '../../utils/logger.js';
 import { requirePermission } from '../../middleware/auth.js';
 import { getAllSharedMods, upsertSharedMod, getServerMods, upsertServerMod, deleteAllServerMods, upsertServerSettings, getServerSettings, getServerConfig, upsertServerConfig } from '../../services/database.js';
 import { ServerProvisioner } from '../../services/server-provisioner.js';
+import { getModNames, invalidateModNameCache } from '../../services/mod-name-resolver.js';
+import { setModNames } from '../../services/database.js';
 
 // Helper for regenerating start scripts
 async function regenerateServerStartScript(serverName, provisioner) {
@@ -52,10 +54,33 @@ export default async function modRoutes(fastify) {
       const sharedMods = sharedModsData
         .filter(mod => mod.enabled === 1)
         .map(mod => parseInt(mod.mod_id));
-      return { success: true, sharedMods };
+
+      const modNames = await getModNames();
+      try {
+        setModNames(Object.entries(modNames));
+      } catch (nameErr) {
+        logger.warn(`[shared-mods GET] Could not persist mod names: ${nameErr.message}`);
+      }
+
+      return { success: true, sharedMods, modNames };
     } catch (error) {
       logger.error('Failed to get shared mods:', error);
       return reply.status(500).send({ success: false, message: 'Failed to get shared mods configuration' });
+    }
+  });
+
+  // Re-resolve mod display names from the installs (mod cache + server logs)
+  fastify.post('/api/provisioning/mods/refresh-names', {
+    preHandler: requirePermission('write')
+  }, async (request, reply) => {
+    try {
+      invalidateModNameCache();
+      const modNames = await getModNames({ force: true });
+      const updated = setModNames(Object.entries(modNames));
+      return { success: true, resolved: Object.keys(modNames).length, rowsUpdated: updated, modNames };
+    } catch (error) {
+      logger.error('Failed to refresh mod names:', error);
+      return reply.status(500).send({ success: false, message: 'Failed to refresh mod names' });
     }
   });
 
@@ -148,7 +173,16 @@ export default async function modRoutes(fastify) {
       if (isClubArkServer && additionalMods.length === 0) {
         return { success: true, serverConfig: { additionalMods: [1005639], excludeSharedMods: true } };
       }
-      return { success: true, serverConfig: { additionalMods, excludeSharedMods } };
+      // Display names, resolved from the install itself and persisted, so the UI
+      // never has to show a bare id for a mod that is already on disk.
+      const modNames = await getModNames();
+      try {
+        setModNames(Object.entries(modNames));
+      } catch (nameErr) {
+        logger.warn(`[server-mods GET] Could not persist mod names: ${nameErr.message}`);
+      }
+
+      return { success: true, serverConfig: { additionalMods, excludeSharedMods }, modNames };
     } catch (error) {
       logger.error('Failed to get server mods:', error);
       return reply.status(500).send({ success: false, message: 'Failed to get server mods configuration' });

@@ -105,6 +105,33 @@ function upsertServerMod(
  * Get mods for a server
  * @param {string} serverName
  */
+/**
+ * Persist resolved display names against every row that carries the id.
+ * Names come from the install itself (see services/mod-name-resolver.js), so this
+ * is how "Mod 1104267" becomes "Randi's Halloween Mod" without anyone typing it.
+ * @param {Array<[string, string]>} pairs [modId, name]
+ * @returns {number} rows touched
+ */
+function setModNames(pairs) {
+  if (!Array.isArray(pairs) || pairs.length === 0) return 0;
+  const upShared = db.prepare(
+    "UPDATE shared_mods SET mod_name = ?, updated_at = datetime('now') WHERE mod_id = ? AND (mod_name IS NULL OR mod_name = '' OR mod_name <> ?)",
+  );
+  const upServer = db.prepare(
+    "UPDATE server_mods SET mod_name = ?, updated_at = datetime('now') WHERE mod_id = ? AND (mod_name IS NULL OR mod_name = '' OR mod_name <> ?)",
+  );
+  let touched = 0;
+  const tx = db.transaction((list) => {
+    for (const [id, name] of list) {
+      const modId = String(id);
+      touched += upShared.run(name, modId, name).changes;
+      touched += upServer.run(name, modId, name).changes;
+    }
+  });
+  tx(pairs);
+  return touched;
+}
+
 function getServerMods(serverName) {
   // Mod order is meaningful: at least one ASA mod states it must be first in
   // "-mods=" for its music to work, and the UI shows the list in this order.
@@ -179,6 +206,7 @@ export {
   deleteSharedMod,
   upsertServerMod,
   getServerMods,
+  setModNames,
   deleteServerMod,
   deleteAllServerMods,
   getAllServerMods,
