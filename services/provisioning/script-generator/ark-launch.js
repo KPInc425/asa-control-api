@@ -73,6 +73,10 @@ export function buildArkUrl(cfg = {}) {
     parts.push(`customdynamicconfigurl=${dynamicUrl}`);
   }
 
+  // Cluster id in the URL too: ASE clusters are configured this way and it costs
+  // nothing, while the flags below are what ASA actually honours.
+  if (cfg.clusterId) parts.push(`ClusterId=${cfg.clusterId}`);
+
   // SessionName goes last on purpose: it is the only value that can contain
   // spaces, so it must never sit in front of an option that matters.
   parts.push(`SessionName=${cfg.sessionName || cfg.name || "ASA Server"}`);
@@ -111,10 +115,11 @@ export function buildArkFlags(cfg = {}, mods = [], opts = {}) {
 
   if (opts.clusterId) {
     flags.push(`-clusterid=${opts.clusterId}`);
-    flags.push("-NoTransferFromFiltering");
     if (opts.clusterDataPath) {
       flags.push(`-ClusterDirOverride="${opts.clusterDataPath}"`);
     }
+    // Only meaningful alongside a cluster dir; without one, transfers stay filtered.
+    flags.push("-NoTransferFromFiltering");
   }
   return flags;
 }

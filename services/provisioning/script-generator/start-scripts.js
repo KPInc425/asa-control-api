@@ -95,10 +95,24 @@ export class StartScripts {
 
       const battleEyeArg = serverConfig.disableBattleEye ? " -NoBattleEye" : "";
 
+      // A server registered in the DB can still be a cluster member: the cluster id
+      // lives in its config, not in its directory layout. Without this the script
+      // regenerated for a cluster map dropped every cluster flag and the map would
+      // run standalone, unable to transfer.
+      const clusterId = serverConfig.clusterId || serverConfig.clusterName || null;
+      const clusterRoot =
+        process.env.NATIVE_CLUSTERS_PATH ||
+        config.server?.native?.clustersPath ||
+        path.join(process.env.NATIVE_BASE_PATH || config.server.native.basePath || "", "clusters");
+      const cluster = clusterId
+        ? { clusterId, clusterDataPath: path.join(clusterRoot, clusterId, "clusterdata") }
+        : null;
+
       const startScript = buildArkStartBat({
         exePath: path.join(serverPath, "ShooterGame", "Binaries", "Win64", "ArkAscendedServer.exe"),
         cfg: serverConfig,
         mods: finalMods || [],
+        cluster,
       });
 
       await fs.writeFile(path.join(serverPath, "start.bat"), startScript);
