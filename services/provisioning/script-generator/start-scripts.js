@@ -232,6 +232,12 @@ export class StartScripts {
 
       await fs.mkdir(clusterDataPath, { recursive: true });
 
+      // finalMods belonged to the removed inline template; the cluster branch has to
+      // resolve the mod list itself or every cluster map fails to regenerate.
+      const { NativeServerManager: ClusterServerManager } = await import("../../server-manager.js");
+      const clusterManager = new ClusterServerManager();
+      const finalMods = await clusterManager.getFinalModListForServer(serverName);
+
       const startScript = buildArkStartBat({
         exePath: path.join(binariesPath, "ArkAscendedServer.exe"),
         cfg: { ...serverConfig, name: serverName },
