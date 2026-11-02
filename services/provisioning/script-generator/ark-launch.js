@@ -70,7 +70,10 @@ export function buildArkUrl(cfg = {}) {
     // command-line and for utils/parse-start-bat.js, which then loses every
     // option after it (SessionName especially). A URL has no spaces, so it does
     // not need quoting.
-    parts.push(`customdynamicconfigurl=${dynamicUrl}`);
+    // Canonical spelling. UE's option parser is case-insensitive, but the working
+    // hand-written servers on this box all use this form, so match what is proven
+    // rather than rely on a parser quirk.
+    parts.push(`CustomDynamicConfigUrl=${dynamicUrl}`);
   }
 
   // Cluster id in the URL too: ASE clusters are configured this way and it costs
@@ -116,7 +119,13 @@ export function buildArkFlags(cfg = {}, mods = [], opts = {}) {
   if (opts.clusterId) {
     flags.push(`-clusterid=${opts.clusterId}`);
     if (opts.clusterDataPath) {
-      flags.push(`-ClusterDirOverride="${opts.clusterDataPath}"`);
+      // Windows accepts forward slashes, but this path is handed to a Win32 binary
+      // and is also read back by parse-start-bat, so normalise it.
+      const clusterDir =
+        process.platform === "win32"
+          ? String(opts.clusterDataPath).replace(/\//g, "\\")
+          : opts.clusterDataPath;
+      flags.push(`-ClusterDirOverride="${clusterDir}"`);
     }
     // Only meaningful alongside a cluster dir; without one, transfers stay filtered.
     flags.push("-NoTransferFromFiltering");
