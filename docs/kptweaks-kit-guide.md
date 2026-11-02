@@ -87,6 +87,33 @@ the data model exists.
 **Do not build:** an in-game player-facing kit menu. Nothing in your usage needs it,
 and it multiplies the UI work.
 
+## How our API still drives it
+
+The obvious idea is to extend RCON from inside the mod, so the dashboard and bot can
+keep issuing commands. That is not possible: registering console commands requires
+`IConsoleManager::RegisterConsoleCommand`, which is C++, and ASA mods cannot ship C++.
+The same wall as before, one level lower.
+
+What does work is a **command file bridge**, because the API already owns the
+filesystem:
+
+1. The API writes `kits.json` (definitions) and `queue.json` (pending actions) into the
+   server's `Saved` directory.
+2. The mod polls on a timer, applies each pending action through the inventory API, and
+   records which command ids it has already processed.
+3. The mod writes `results.json`, which the API reads to confirm what actually happened.
+
+That keeps the dashboard and Discord as the control surface with no C++ and no console
+commands, and it removes the engine command layer from the path entirely, which is the
+layer that failed tonight.
+
+Two implementation rules: write to a temp file and rename, so the mod never reads a
+half-written file; and persist processed ids, so a server restart does not replay the
+queue and hand out a second kit.
+
+Because the mod can also read chat, player-facing `!kit` and `!kit give <player> <kit>`
+come almost free once the executor exists.
+
 ## Devkit steps
 
 1. In the KPTweaks project, add a `KPTKitDefinition` struct: name, enabled, trigger
