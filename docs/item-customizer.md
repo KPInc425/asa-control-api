@@ -4,14 +4,79 @@ ASE had mods that let an admin edit item properties at runtime from an in-game p
 Nothing on ASA does this. Before planning a rebuild, it is worth being precise about
 which of those behaviours the engine exposes at all, because they are not one problem.
 
+## What the ASE mod actually was
+
+`ARK Customizer - Settings Evolved` (workshop 774413050, 301 KB, last updated 2018).
+Downloaded from the workshop and unpacked, it ships 25 assets:
+
+- `ArkCustomizerGameMode` and `_Child`: a GameMode override, the root every such mod
+  needs.
+- `ArkCustomizer_Actor`: a persistent world actor holding runtime state.
+- `Structs/ACItemModifier`: the per-item record, 24 named fields, listed below.
+- `Structs/ACParamPair`, `StringIndexPair`: a generic `{Name, Value}` string pair,
+  used for the editable list in the UI rather than for property setting.
+- `Structs/ACGlobalChanges`: world-level knobs (tribe XP share, enemy foundation
+  radius, explorer note XP, mod name and description).
+- `Structs/ACInventoryModifier`, `ACInventoryItemData`: inventory-level behaviour.
+- `Saves/*`: six save-game objects, so settings persist inside the world save rather
+  than in a config file.
+- `ArkCustomizerItemAdmin_UI`, `ArkCustomizerPrimalItem_UI`: the panel from the
+  screenshot.
+- `ACSharedFunctions`: a BlueprintFunctionLibrary doing save/load, array work, string
+  comparison, and a class remapping table (`ClassRemapping`, `FindItemRemapping`,
+  `EqualEqual_ClassClass`).
+- `PrimalItem_ArkCustomizer_Activator` and `CustomizerBuff`: the item and buff that
+  open the panel in game.
+
+It is Blueprint only. There is no C++, no ArkServerApi, and no custom native plugin,
+which matters because it means the whole technique is reachable from the devkit.
+
+### The 24 per-item fields it could change
+
+Recovered from `ACItemModifier` in the shipped package, so this is the complete list
+rather than a memory of the panel:
+
+```
+ItemClass  RemapTo  RequiredComponents  StackSize  Weight  SpoilTimer
+CraftQuantity  MaxCraftings  TimeToCraft  CraftingXP  CraftMinLevel
+CraftingCooldown  CraftingXP  RepairCostMultiplier  RepairXP  TimeToRepair
+AllowRepair  DurabilityDecreaseMultiplier  MinUseInterval  TameAffinityMultiplier
+CustomName  CustomDescription  DestroyBroken  PreventUpload  CheckDescription
+```
+
+That list is the real scope of the mod: 24 properties, each explicitly handled. It is
+not "any stat", which is good news for a rebuild, because a bounded list is a bounded
+job.
+
+**Correction to the table above:** `CraftQuantity` is a per-item field, so "craft more
+than one at a time" was implemented as an item property, not as crafting UI. Whether
+ASA exposes a comparable property is not yet known.
+
+### How it applies changes
+
+The data model and persistence are clear from the package. The exact mutation call is
+not visible from asset names, and the useful next step is a proper Blueprint dump of
+`ACSharedFunctions` with UAssetGUI or FModel, which reads UE4 packages and exports
+pseudo-code. Two details already narrow it down: there is a `ClassRemapping` table
+with `FindItemRemapping`, and there is a `TempItem` object passed through
+`CleanItemData`. That points at building a modified copy per item and remapping
+lookups to it, rather than stomping the base game's class defaults in place, which is
+the safer of the two patterns.
+
+On "is CDO editing dangerous": the danger is not corruption, it is divergence. Every
+item mod does this at load. It goes wrong when a change lands after clients have
+loaded (they disagree about weight until they relog), or when two mods set the same
+property and load order silently decides. Applying once at boot, before anyone
+connects, with the overrides loaded last, avoids both.
+
 ## What you actually used it for, split by difficulty
 
 | Behaviour | Kind of change | Available in ASA config | Difficulty to build |
 |---|---|---|---|
 | Bola (and similar) lighter | per-item property | No override exists | Small. Data-driven |
 | Rename pearls server-wide | display string | No | Small, with a caveat |
-| Craft more than one at a time | UI and queue behaviour | No | Large. Not a stat |
-| Crafting XP per item | XP source | Global multiplier only | Medium |
+| Craft more than one at a time | per-item `CraftQuantity` | No | Small, once the property is confirmed |
+| Crafting XP per item | per-item property | Global multiplier only | Medium |
 | Cheaper crafting per item | recipe cost | Documented ASE only, ASA unconfirmed | Test first |
 
 ## What stock ASA configuration can and cannot do
