@@ -134,7 +134,15 @@ export class ServerDiscovery {
         const clusterId = this.manager.getClusterIdFromConfig(dbConfig);
         if (clusterId) {
           const clustersPath = this.manager.clustersPath || config.server.native.clustersPath || path.join(this.manager.basePath, "clusters");
-          dbConfig.serverPath = path.join(clustersPath, clusterId, name);
+          const clusterPath = path.join(clustersPath, clusterId, name);
+          // A cluster member can be installed anywhere; only fall back to the
+          // clusters/<id>/<name> layout when the configured path is absent. Forcing it
+          // unconditionally launched a 15-month-stale install while the DB pointed at a
+          // current one, which looked exactly like "the server starts but binds nothing".
+          if (!dbConfig.serverPath || !existsSync(dbConfig.serverPath)) {
+            logger.warn(`Server ${name}: configured path missing, falling back to ${clusterPath}`);
+            dbConfig.serverPath = clusterPath;
+          }
         } else if (!dbConfig.serverPath) {
           dbConfig.serverPath = path.join(this.manager.serversPath || path.join(this.manager.basePath, "servers"), name);
         }
