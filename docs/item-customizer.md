@@ -54,20 +54,47 @@ ASA exposes a comparable property is not yet known.
 
 ### How it applies changes
 
-The data model and persistence are clear from the package. The exact mutation call is
-not visible from asset names, and the useful next step is a proper Blueprint dump of
-`ACSharedFunctions` with UAssetGUI or FModel, which reads UE4 packages and exports
-pseudo-code. Two details already narrow it down: there is a `ClassRemapping` table
-with `FindItemRemapping`, and there is a `TempItem` object passed through
-`CleanItemData`. That points at building a modified copy per item and remapping
-lookups to it, rather than stomping the base game's class defaults in place, which is
-the safer of the two patterns.
+Recovered by dumping the Blueprint bytecode, not by guessing at names. The relevant
+functions in `ArkCustomizer_Actor`:
+
+```
+CollectAllItemClasses   ApplyRemappings      FindItemRemapping (shared)
+BuildItemIndex          BuildInventoryIndex  DiffItems
+ModifyDefaultItems  ->  ModifyItem  ->  FixItemValues(Item, ItemModifier)
+ModifyAddedInventoryItems   ModifyLootCrates   ModifyEngrams   ModifyBoss
+CreateItemBackup        CleanItemBackups     UnmodifyItems
+RefreshInventory  RefreshAllInventories  RefreshCraftingInventory
+SendItemsToAll          SendSettingsToAll
+OnRep_SortedIndexList   OnRep_NewEngramOverrides
+```
+
+The loop is plain: `ModifyDefaultItems` walks the collected item classes and calls
+`ModifyItem` for each, which optionally backs up the current values, then calls
+`FixItemValues(Item, ItemModifier)`. The whole `ACItemModifier` record is handed over
+as one argument, so one function does every field.
+
+`FixItemValues` is a virtual call and **it is not defined in any of the 25 shipped
+packages**, so it is inherited from a class outside this mod. That is the one piece
+still missing, and it is the piece that contains the actual property writes.
+
+**Why changes applied without a relog.** `CustomizerBuff` is not cosmetic, it is the
+sync channel:
+
+```
+PingServer  PongClient  SetACA  BuffTickClient
+RequestAllData  RecieveAllData  DiffRecieveItemData  RecieveGlobalData  CleanData
+```
+
+A buff that exists on both client and server, requesting and diffing item data, paired
+with `SendItemsToAll` on the actor. That is why edits landed live: the server pushed
+the changed values to connected clients rather than waiting for a reload. Any rebuild
+has to do the same thing, and this is the part worth copying most closely.
 
 On "is CDO editing dangerous": the danger is not corruption, it is divergence. Every
 item mod does this at load. It goes wrong when a change lands after clients have
-loaded (they disagree about weight until they relog), or when two mods set the same
-property and load order silently decides. Applying once at boot, before anyone
-connects, with the overrides loaded last, avoids both.
+loaded and nothing tells them, which is exactly the problem this buff solves, or when
+two mods set the same property and load order silently decides. Applying at boot with
+the overrides loaded last, plus a push on change, avoids both.
 
 ## What you actually used it for, split by difficulty
 
