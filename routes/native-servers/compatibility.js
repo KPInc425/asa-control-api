@@ -26,6 +26,11 @@ export default async function compatibilityRoutes(fastify, options) {
             rconPort: server.rconPort,
             maxPlayers: server.maxPlayers,
             currentPlayers: server.currentPlayers || 0,
+            // Cluster membership has to be visible to clients: without it a caller
+            // cannot tell a cluster map from a standalone server, and a spin-up
+            // command would happily "join" a map that is not in the cluster.
+            clusterId: server.clusterName || server.clusterId || null,
+            isClusterServer: Boolean(server.isClusterServer || server.clusterName),
             uptime: server.uptime,
             lastStarted: server.lastStarted,
             configPath: server.configPath,
