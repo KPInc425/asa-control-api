@@ -137,6 +137,45 @@ come almost free once the executor exists.
 - Keep the mod set in step across the cluster, since a kit mod on one map and not
   another is a transfer trap.
 
+## Second feature: automation structures (sweeper and feeder)
+
+S+ had a nanny that collected dropped items and a gardener that serviced crops and
+troughs. Klinger in ASA is building sets and cosmetics, not automation, so there is
+nothing to duplicate here and no conflict with an installed mod.
+
+**Sweeper (build first).** Every N seconds, sphere-overlap for dropped item actors in a
+radius and move their contents into a target inventory. One structure, one timer, one
+transfer call. This is the highest-value half and the simplest to get right.
+
+**Feeder (build second).** A trough wants food, a compost bin wants thatch, a crop plot
+wants water and fertiliser. Three different rules, so build one structure with a mode
+selector rather than three near-identical placeables. Players understand "set it to
+feed"; they do not enjoy guessing which of three boxes does what.
+
+### The cost constraint that decides whether this is good or terrible
+
+S+ earned its lag reputation here. Server-side scanning is where a mod like this goes
+wrong, and it goes wrong badly: three of them placed near a busy base can stutter the
+whole server.
+
+Non-negotiable from the first commit:
+
+- A 5 to 10 second timer, never a per-frame tick.
+- A capped radius, with the cap enforced in the UI rather than merely documented.
+- A cap on actors processed per pass, so one crowded area cannot monopolise a frame.
+
+### Unknowns to probe in the devkit
+
+- Which actor class dropped bags are on ASA, and what call transfers a whole inventory
+  in one operation rather than item by item.
+- Whether a structure can safely own a timer that runs server-side on a dedicated
+  server without replication overhead per tick.
+
+### Ordering
+
+Build this after the kit executor. The kit work forces the same two lessons, inventory
+transfer and per-actor state, and this feature reuses both.
+
 ## Open questions to answer in the devkit, not by guessing
 
 1. Does ASA let a mod persist a custom buff across sessions reliably?
