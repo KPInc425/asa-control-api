@@ -103,6 +103,28 @@ item but does not initialise stats or colour the way a real craft does.
 This matters beyond the test: a kit full of broken tools and armour is worse than no kit,
 so the executor must initialise, not just construct.
 
+## Still broken after Initialize Item
+
+`Initialize Item` takes `Target`, `Force Reinit` and `OptionalInitWorld`, and no template
+pin. It therefore re-initialises from what the item already holds, which is zero for a
+constructed object. Tick Force Reinit, and find out where the number should come from
+instead of guessing:
+
+1. `Get Item Durability` on the constructed item, before initialisation.
+2. The same read after `Initialize Item`.
+3. `Get Default Object` on the item class, then `Get Item Durability` on that.
+
+| Reading | Meaning |
+|---|---|
+| class default non-zero, constructed 0, after init 0 | init is not pulling from the class: set it ourselves |
+| class default 0 | durability is not on the class: it comes from a template or `max_durabiltiy_override` |
+| after init non-zero but still broken | the maximum is missing, not the current value |
+
+Quick probe to separate those: `Set Item Durability` to 100000 right after init. If the item
+then reads full, the current value is what is missing and we wire it to the class default
+afterwards. Related fields on `PrimalItem`: `item_durability`, `new_item_durability_override`,
+`max_durabiltiy_override` (note the engine's spelling), `saved_durability`.
+
 ## What to report back
 
 Three possible outcomes, and each tells us something different:
