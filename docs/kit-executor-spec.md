@@ -68,20 +68,30 @@ Hook the character spawn, not the player login: inventory does not exist at logi
 
 ## 4. The grant itself
 
-For each `S_KPTKitItem`:
+**Use the native give node, not construction.** Proven in the devkit on 2026-11-07: a
+"Give Item To Character" node on the character grants an item correctly in one step, with
+durability and stats initialised. The construct-and-add route also works but needs manual
+initialisation and still produced broken items until the native path was found.
 
-1. `LoadClass` / `StaticClass` on `ItemClass`.
-2. `SpawnObjectFromClass` or the item's own `AddItemObject` path.
-3. Add with `AddItemObject` or `AddItemObjectEx` on the target `PrimalInventoryComponent`
-   (`GetMyInventoryComponent` on the character).
-4. Set `ItemQuantity` and, where quality matters, the item quality property before adding.
+The chain is then five nodes:
 
-`AddItemObject` and `AddItemObjectEx` are the two verified-by-name entry points on
-`PrimalInventoryComponent`. If the object-spawn route fights us, fall back to the
-inventory component's own add function and pass the class rather than an instance.
+```
+Switch Has Authority -> Get Player Controller (0) -> Get Controlled Pawn
+  -> Cast To ShooterCharacter -> Give Item To Character (class, quantity) -> Print
+```
 
-For the creature: spawn the class at the player's location, set the level, then set the
-owner and taming team. Give the saddle the same way items are given.
+Two traps worth keeping even with the simpler chain:
+
+- **Authority.** The grant must run on the server. A placed actor's BeginPlay runs on both
+  sides, and `Get Player Character` is local-only, so the client attempt fails and the
+  server has no pawn yet.
+- **Timing.** At BeginPlay the server's controller may have no possessed pawn. Either delay
+  a couple of seconds, or trigger on overlap. In the real executor this vanishes, because
+  the hook is the character's own spawn.
+
+Do not construct items and do not add them by hand. If a future engine patch removes the
+native node, that is the fallback, with `Initialize Item` plus a durability set, and we
+already know it costs a day.
 
 ## 5. The client side
 

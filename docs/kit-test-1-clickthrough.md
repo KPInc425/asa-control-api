@@ -1,5 +1,11 @@
 # Test 1: prove the item grant, click by click
 
+**RESULT: PASSED, 2026-11-07.** Items can be granted from a mod blueprint on this build.
+The working route is the native "Give Item To Character" node on the cast character, not
+construct-plus-add. That node also fixes the broken-durability problem the construction
+route produced. Everything below is kept as the record of how we got there and as the
+fallback if the node ever disappears.
+
 The one thing everything else depends on. Do not build the kit manager, the structs or
 the UI until this passes.
 
