@@ -57,6 +57,17 @@ Add `GetKPTSave` to `Actor_BP_KPTweaks`, a normal function (not static), returni
 
 Returning the object either way means callers never care whether it existed.
 
+**No separate repopulation step is needed.** `Load Game from Slot` returns a fresh instance
+of `KPTweaksSave` with every flagged property already read back from disk, so `GrantedKits`
+on the returned object is what was saved. Do not copy it into a local variable on the
+singleton; read it from the object you were handed, or you will end up looping an array that
+nothing ever writes.
+
+Print `Length` of `GrantedKits` immediately after the cast, once per spawn. That single line
+separates a load problem from a save problem: 0 on the first run is correct, 1 on the second
+run means the load works, and 0 on the second run means the slot does not contain the
+variable (the SaveGame flag, or the wrong object was saved).
+
 ## Part 3: the two helpers
 
 Both live on `Actor_BP_KPTweaks` as well, for the same reason, and both take the save object,
