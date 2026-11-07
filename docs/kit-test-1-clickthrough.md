@@ -34,11 +34,13 @@ You want roughly this chain on `Event BeginPlay`:
 2. From the character, **Get My Inventory Component** (this is the name that already
    exists on the item and character classes; if the node is not offered, use
    `Get Inventory Component` on the character).
-3. **Spawn Object From Class**:
+3. **Construct Object from Class** (Kismet System Library). This is the UE5 name; older
+   tutorials call it Spawn Object from Class, which is why it cannot be found by that
+   search term.
    - Class: the `ItemToGrant` variable
-   - Outer: the character (not the world)
-   - If you are offered `Spawn Actor from Class` instead, you have the wrong node category,
-     go back to Object.
+   - Outer: leave the default
+   - The palette hides it unless **Context Sensitive is unticked**, because it filters to
+     nodes compatible with the pin you dragged from.
 4. **Add Item Object** on the inventory component output from step 2, with the spawned
    object as the item, quantity 1.
 5. **Print String** with the result, so PIE tells you it ran.
