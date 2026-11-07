@@ -6,6 +6,12 @@ blocks what. Tick boxes as things land.
 Status note: the cluster is live (The Island running on 30100), the Discord `/ark`
 command works, and the API owns the servers. All of the below is additive.
 
+**Updated 2026-11-07.** Proven in the devkit: items grant correctly through the native
+Give Item To Character node, and a marker buff gates the grant and survives spawn, respawn,
+relog and an editor restart. The API side of kits is built, deployed and exercised. What
+remains is making it configurable, moving it out of a test actor, and getting it onto a
+server.
+
 ---
 
 ## Phase 0: answer these in the devkit before building (one session)
@@ -33,14 +39,24 @@ mechanical.
 ## Phase 1: KPTweaks, backend behaviour before any UI
 
 ### 1.1 Kit executor
+- [x] Grant path settled: native **Give Item To Character** on the cast character.
+      Construction plus Add Item Object works but ships broken durability, so it is the
+      fallback only.
+- [x] Claimed marker: a persistent buff, gated by `Has Buff`, survives spawn, respawn,
+      full relog and an editor restart. PIE persistence needs `-ForceLoad -ForceSave` AND
+      Play Persistent Player in the level's World Settings.
+- [ ] **Kits by tag**: one marker buff carrying a custom tag per kit, so kits do not need
+      a buff class each. Character exposes `has_buff_with_custom_tag` and
+      `has_any_buff_with_tag`; check whether Static Add Buff accepts a tag pin.
 - [ ] `KPTKitDefinition` struct: name, enabled, trigger, cooldown, items, creature,
       saddle.
-- [ ] Kit manager spawned by the existing game mode, holding the loaded kit list.
-- [ ] Player spawn hook that grants a matching kit and sets the claimed marker.
-- [ ] Claimed marker via buff (or player data, per Phase 0).
-- **Acceptance:** a fresh character receives the kit once; relogging does not grant a
-  second; a second character receives its own.
-- **Blocks:** 2.1, and the API bridge in 3.1.
+- [ ] Read `kits.json` from the bridge directory and build the kit list from it.
+- [ ] Move the logic out of the test actor into the singleton so every joining player is
+      served, not just whoever stands in a test map.
+- [ ] Write `results.json` back after each grant so the dashboard reports what happened.
+- **Acceptance:** a fresh character receives the kit once from config; relogging does not
+  grant a second; a second character receives its own; the dashboard shows the result.
+- **Blocks:** 2.1, and the dashboard in 2.1.
 
 ### 1.2 Item customiser, config-driven
 - [ ] Override record and an apply pass on game mode init.
@@ -48,6 +64,22 @@ mechanical.
 - **Acceptance:** a value changed in config appears on a live server after restart, and
   the same value survives a map reload.
 - **Note:** no GUI in this phase. The dashboard is the editor.
+
+## Phase 1.5: get it onto a server
+
+The devkit proves logic. The server proves the feature, and this is the part nobody has
+done yet in this project.
+
+- [ ] **Cook the mod.** Unreal's cook and package step for the devkit, output to a `.pak`.
+- [ ] **Upload to CurseForge** under KPTweaks, and note the published version.
+- [ ] **Install on the cluster.** Every cluster member needs the same version, so this is a
+      cluster-wide change, not a per-server one.
+- [ ] **Verify on a live server.** Spawn a character, receive the kit, relog, receive
+      nothing, and check the dashboard results.
+
+Unknowns worth naming: cook time on this project, whether the current KPTweaks page allows
+another upload without a version bump, and whether the live server needs a wipe (it should
+not, but the marker buff is new).
 
 ## Phase 2: KPTweaks, player-facing content
 
