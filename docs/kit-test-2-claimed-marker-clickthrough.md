@@ -55,9 +55,20 @@ Change it to:
    - Buff Class: `PrimalBuff_KPT_KitStarter`.
 2. From `Has Buff`, take the **Boolean** return through a **NOT** node.
 3. Wire the NOT into a **Branch**. True goes on to `Give Item To Character`.
-4. Immediately after `Give Item To Character`, add **Add Buff**:
-   - Target: the character.
+4. Immediately after `Give Item To Character`, add **Add Buff**. It is a static node
+   (`static_add_buff` on PrimalBuff), so place it from the palette with Context Sensitive
+   unticked rather than dragging off the character. Pins:
+   - Character: the `As Shooter Character` pin.
    - Buff Class: `PrimalBuff_KPT_KitStarter`.
+   - Instigator: the same character. An empty instigator can make the call a silent no-op.
+5. Order matters: no marker, then grant, then set the marker. Never set the marker first, or
+   a failed grant leaves the player permanently marked as served.
+
+**Do not route this through the singleton.** The singleton exists to maintain standing
+state for everyone, such as the raft tweaks. A kit marker has to be written by the same
+branch that grants the kit, or the two can diverge: a kit with no marker hands out infinite
+kits, a marker with no kit serves nobody. When the executor moves into the singleton, the
+grant and the marker move together and stay atomic.
 
 So the logic reads: has the marker, if not, give the kit and set the marker.
 
