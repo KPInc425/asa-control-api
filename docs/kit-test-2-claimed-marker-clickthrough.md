@@ -41,6 +41,14 @@ decides whether buffs work as a marker or whether we move to the save game.
 
 ## Part 2: gate the grant
 
+**This logic belongs in the placed actor (`BP_KPT_GrantTest`), never inside the buff.**
+A buff's BeginPlay only fires once something applies the buff, so a graph inside the buff
+cannot run the check that decides whether to apply it. It is chicken and egg, and it fails
+silently: nothing prints, nothing errors, the nodes simply never execute.
+
+The buff stays empty apart from its persistence flags. It is a marker, not a worker.
+
+
 You already have the working chain from test 1:
 
 ```
