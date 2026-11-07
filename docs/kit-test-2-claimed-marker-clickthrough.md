@@ -1,0 +1,73 @@
+# Test 2: the claimed marker, click by click
+
+Test 1 proved we can grant an item. This test proves we only grant it once per character.
+
+The question: can a buff act as a permanent per-character marker? The devkit says yes in
+principle. `PrimalBuff` exposes `is_buff_persistent`, `persistent_buff_survives_level_up`,
+`loaded_from_save_game` and `save_player_data_on_save_world`. This test finds out whether
+they mean what they look like.
+
+## Part 1: the marker buff
+
+1. Content Browser, right click, Blueprint Class, search `PrimalBuff`, choose it as the
+   parent. Name it `PrimalBuff_KPT_KitStarter`. Put it in `/Game/_KPTTest/`.
+2. Open its **Class Defaults** and set:
+   - `Is Buff Persistent` = true. This is the important one.
+   - `Persistent Buff Survives Level Up` = true if it exists.
+   - `Hide Timer From HUD` = true, so it does not clutter the screen.
+3. Do not give it any visual effects. It is a marker, not a gameplay buff.
+
+If `Is Buff Persistent` does not exist in the defaults, stop and tell me. That single fact
+decides whether buffs work as a marker or whether we move to the save game.
+
+## Part 2: gate the grant
+
+You already have the working chain from test 1:
+
+```
+Switch Has Authority -> Get Player Controller (0) -> Get Controlled Pawn
+  -> Cast To ShooterCharacter -> Give Item To Character -> Print
+```
+
+Change it to:
+
+1. After `Cast To ShooterCharacter`, insert **Has Buff**.
+   - Target: the `As Shooter Character` pin.
+   - Buff Class: `PrimalBuff_KPT_KitStarter`.
+2. From `Has Buff`, take the **Boolean** return through a **NOT** node.
+3. Wire the NOT into a **Branch**. True goes on to `Give Item To Character`.
+4. Immediately after `Give Item To Character`, add **Add Buff**:
+   - Target: the character.
+   - Buff Class: `PrimalBuff_KPT_KitStarter`.
+
+So the logic reads: has the marker, if not, give the kit and set the marker.
+
+## Part 3: the test that matters
+
+Four checks, in this order. Do not skip to the last one.
+
+1. **Spawn once.** Kit arrives. Print should say it granted.
+2. **Respawn, same character** (kill yourself in PIE, or exit and re-enter PIE while the
+   world save persists). Kit must NOT arrive again. If it does, the buff is not persisting
+   and we go to the save game.
+3. **Relog** (exit PIE entirely, re-enter). Still no kit.
+4. **Restart the editor, re-enter PIE.** Still no kit. This is the one that proves it
+   survives a real reload rather than an in-memory session.
+
+Also worth testing, because it decides the long-term design:
+5. **Die and respawn.** If ARK clears buffs on death, the marker disappears and the kit
+   re-grants. That is not fatal, but it means the save-game array is the correct home for
+   this data and the buff is only a shortcut.
+
+## What to report back
+
+- Which of the four checks passed.
+- Whether `Is Buff Persistent` was available.
+- What death did to the marker.
+
+## Known limitation, before you find it
+
+One buff class per kit. That is fine for the starter kit and it is the simplest thing that
+can work. If we end up with ten kits, the alternatives are a single marker buff carrying a
+custom tag per kit (`Has Buff With Custom Tag` exists on the character), or the save-game
+array. Decide that when there is a second kit, not now.
