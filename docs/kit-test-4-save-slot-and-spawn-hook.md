@@ -28,8 +28,13 @@ No SaveGameActor involvement anywhere.
 1. Content Browser, right click, Blueprint Class, search `SaveGame`, choose it as the parent.
    Name it `KPTweaksSave`. Put it beside KPTweaks content, not in `_KPTTest`.
 2. Add one variable: `GrantedKits`, type **String**, **Array** ticked.
-3. Ensure `Transient` is off.
-4. Nothing else. This class is storage, not logic.
+3. In its **Details > Advanced**, tick **SaveGame**. This is not optional and it is the
+   single most likely reason a slot appears to save nothing: `Save Game to Slot` serialises
+   with `ArIsSaveGame` set, and in that mode only properties carrying the `SaveGame` flag are
+   written. An unflagged variable is silently omitted and loads back as its default.
+4. Ensure `Transient` is off. `SaveGame` includes the property, `Transient` excludes it from
+   everything, so the two flags must not disagree.
+5. Nothing else. This class is storage, not logic.
 
 Entries are `<uniqueid>|<kitname>`.
 
@@ -62,8 +67,13 @@ Both live on `Actor_BP_KPTweaks` as well, for the same reason, and both take the
 return it.
 
 `ClaimKit`: call `HasClaimedKit`; if false, `Add Unique` the key to `GrantedKits`, then
-**`Save Game to Slot` immediately**. Saving inside the claim is deliberate: a claim that
-only exists in memory is lost on a crash, and the player gets a second kit.
+**`Save Game to Slot` immediately, with the same save object**, same slot, same user index.
+Saving inside the claim is deliberate: a claim that only exists in memory is lost on a crash,
+and the player gets a second kit.
+
+Call `GetKPTSave` **once per spawn** and pass the object down. Calling it separately inside
+`HasClaimedKit` and `ClaimKit` loads two different objects and the claim lands on one that is
+never written.
 
 ## Part 4: the hook that actually matters
 
