@@ -41,7 +41,11 @@ async function ensureDir(dir) {
 
 async function readJson(file, fallback) {
   try {
-    const text = await fs.readFile(file, "utf8");
+    let text = await fs.readFile(file, "utf8");
+    // Strip a UTF-8 BOM. Windows tooling adds one by default (PowerShell's Set-Content
+    // does), and JSON.parse throws on it, which would look like an empty file and
+    // silently swallow every result the mod reports.
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
     if (!text.trim()) return fallback;
     return JSON.parse(text);
   } catch (error) {
