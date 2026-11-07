@@ -7,6 +7,25 @@ principle. `PrimalBuff` exposes `is_buff_persistent`, `persistent_buff_survives_
 `loaded_from_save_game` and `save_player_data_on_save_world`. This test finds out whether
 they mean what they look like.
 
+## Part 0: make PIE persist at all
+
+Without this, the marker test cannot conclude anything, because every PIE run starts from
+an empty world.
+
+1. Open the test level (`TestMapArea_KPTweaks` or your own).
+2. **Window, World Settings**, and tick **Play Persistent Player**.
+3. Launch the editor with `-ForceLoad -ForceSave` on the command line. The Copilot launcher
+   already passes both; verify with the `extra args` line or by checking the process
+   command line.
+
+Source: Zarthan on the ARK modding Discord, who states both are required. The flags exist
+in this build as UTF-16 strings in `ShooterGameEditor-ShooterGame.dll`, alongside
+`PlayPersistentPlayer`.
+
+Sanity check before the real test: place a plain actor in the level, play, exit, play again.
+If it is still there, persistence is working and the marker test below is meaningful. If it
+is gone, world settings did not take and nothing else in this document will prove anything.
+
 ## Part 1: the marker buff
 
 1. Content Browser, right click, Blueprint Class, search `PrimalBuff`, choose it as the
