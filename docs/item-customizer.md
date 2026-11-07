@@ -96,6 +96,49 @@ loaded and nothing tells them, which is exactly the problem this buff solves, or
 two mods set the same property and load order silently decides. Applying at boot with
 the overrides loaded last, plus a push on change, avoids both.
 
+## Verdict from the devkit (2026-11-07)
+
+Read live from `PrimalItem` in the ARK devkit via Python: 422 properties, 350 functions.
+
+**Confirmed present, name and meaning both match:**
+
+| ASE field | ASA property |
+|---|---|
+| Weight | `base_item_weight` |
+| StackSize | `max_item_quantity` |
+| SpoilTimer | `spoiling_time` |
+| RequiredComponents (craft cost) | `base_crafting_resource_requirements`, `custom_resource_requirements` |
+| CraftingXP | `base_crafting_xp` |
+| TimeToCraft | `blueprint_time_to_craft` |
+| AllowRepair | `allow_repair`, `can_repair` |
+| CustomName | `custom_item_name` |
+| CustomDescription | `custom_item_description` |
+| DestroyBroken | `destroy_broken_item` |
+| PreventUpload | `prevent_upload` |
+| MinUseInterval | `bp_override_minimal_use_interval` |
+| ItemClass | inherent, not a property |
+
+**No equivalent found:** `RemapTo`, `MaxCraftings`, `CraftMinLevel`, `RepairXP`,
+`TimeToRepair`, `CraftQuantity`. There is no `craft_quantity` or `stack` name on ASA's
+item class at all, and crafting level lives on the engram, not the item.
+
+**Related but not the same thing:** `CraftingCooldown` (ASA exposes use cooldowns, not a
+craft cooldown), `RepairCostMultiplier` (`override_repairing_requirements` and
+`last_repair_speed_multiplier` are adjacent), `DurabilityDecreaseMultiplier`
+(`auto_decrease_durability_amount_per_interval` is the mechanism, not a multiplier),
+`TameAffinityMultiplier`, `CheckDescription`.
+
+So the honest scope is **13 of 24 fields directly settable**. That is still enough for
+the cases that mattered: lighter items, bigger stacks, cheaper crafting, renamed items,
+different craft times and XP. The ones that fall out are mostly the repair and
+craft-maximum knobs, which nothing in our usage depended on.
+
+One bonus from the same dump, which matters more than any of the above:
+`PrimalInventoryComponent` exposes `add_item_object` and `add_item_object_ex`. That is
+the clean grant call for player kits and for the sweeper moving loot, and it is the
+thing the console command could not do. Neither of these is proven yet; each needs a
+live set-and-read test on a throwaway item first.
+
 ## What you actually used it for, split by difficulty
 
 | Behaviour | Kind of change | Available in ASA config | Difficulty to build |
