@@ -29,6 +29,7 @@ function paths() {
   return {
     dir,
     kits: path.join(dir, "kits.json"),
+    kitsFlat: path.join(dir, "kits.txt"),
     queue: path.join(dir, "queue.json"),
     results: path.join(dir, "results.json"),
     processed: path.join(dir, "processed.json"),
@@ -107,7 +108,26 @@ export async function writeKits(kits) {
   const p = paths();
   await ensureDir(p.dir);
   await writeJsonAtomic(p.kits, { version: 1, updatedAt: new Date().toISOString(), kits: normalised });
-  logger.info(`[kit-bridge] wrote ${normalised.length} kit(s) to ${p.kits}`);
+  // A flat mirror for the mod. Blueprint string splitting is reliable; whether this devkit
+  // compiles the JSON blueprint utilities is unknown, and a config loader should not depend
+  // on a plugin being present. One record per line, pipe separated:
+  //   kit|<name>|<trigger>|<enabled 0/1>|<cooldownSeconds>
+  //   item|<kitName>|<itemClass>|<quantity>|<quality>
+  //   creature|<kitName>|<creatureClass>|<level>|<saddleClass or empty>
+  const flat = [];
+  for (const kit of normalised) {
+    flat.push(`kit|${kit.name}|${kit.trigger}|${kit.enabled ? 1 : 0}|${kit.cooldownSeconds}`);
+    for (const item of kit.items) {
+      flat.push(`item|${kit.name}|${item.class}|${item.quantity}|${item.quality}`);
+    }
+    if (kit.creature && kit.creature.class) {
+      flat.push(`creature|${kit.name}|${kit.creature.class}|${kit.creature.level}|${kit.creature.saddle || ""}`);
+    }
+  }
+  await fs.writeFile(`${p.kitsFlat}.tmp`, flat.join("\n") + "\n", "utf8");
+  await fs.rename(`${p.kitsFlat}.tmp`, p.kitsFlat);
+
+  logger.info(`[kit-bridge] wrote ${normalised.length} kit(s) to ${p.kits} and ${p.kitsFlat}`);
   return normalised;
 }
 
