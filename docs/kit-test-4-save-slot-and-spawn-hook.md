@@ -33,9 +33,16 @@ No SaveGameActor involvement anywhere.
 
 Entries are `<uniqueid>|<kitname>`.
 
-## Part 2: load-or-create
+## Part 2: load-or-create, on the singleton
 
-On `KPTweaksSave`, add a **static** function `GetKPTSave`, returning `KPTweaksSave`:
+**This function lives on `Actor_BP_KPTweaks`, not on the save class.** A SaveGame blueprint
+is a data object with no reference you can fetch at runtime, so a function placed there is
+awkward to reach from anywhere else. The singleton is a placed actor you already call into,
+and that is where Alien Plants puts `GetAlienPlantSave` too: its save class holds the data
+and the per-field helpers, the singleton holds the load.
+
+Add `GetKPTSave` to `Actor_BP_KPTweaks`, a normal function (not static), returning
+`KPTweaksSave`:
 
 1. `Does Save Game Exist`, Slot Name `KPTweaks`, User Index 0.
 2. **True**: `Load Game from Slot` with the same slot and index, then `Cast To KPTweaksSave`,
@@ -47,7 +54,8 @@ Returning the object either way means callers never care whether it existed.
 
 ## Part 3: the two helpers
 
-Both take the save object, `UniqueId` (String) and `KitName` (Name).
+Both live on `Actor_BP_KPTweaks` as well, for the same reason, and both take the save object,
+`UniqueId` (String) and `KitName` (Name).
 
 `HasClaimedKit` returns Bool: `For Each Loop` over `GrantedKits`, build the key
 `UniqueId` + `|` + `KitName`, `Equal (String)`, on a match set a local bool and `Break`,
