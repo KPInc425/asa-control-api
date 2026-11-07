@@ -64,6 +64,26 @@ Simplest reliable route:
 3. Play In Editor.
 4. Walk to the actor if needed, or set BeginPlay to run on the placed actor, which it does.
 
+## If the cast fails on the server
+
+Seen in practice: the cast succeeded on the client and printed the item name there, while
+the server printed `Failed to cast to Character`. A placed actor's BeginPlay runs on both
+sides, and `Get Player Character` is local-only, so the server side has nothing.
+
+Replacing it with `Get Player Controller` (0) -> `Get Controlled Pawn` is necessary but not
+sufficient: at BeginPlay the controller may exist with no possessed pawn yet. Add a
+**Delay 2.0** after `Switch Has Authority`, and print `Is Valid` for both the controller and
+the pawn so the failure is distinguishable:
+
+| Result | Meaning |
+|---|---|
+| PC null | no controller at index 0 yet, or this net mode gives the server none |
+| PC valid, Pawn null | controller exists, not yet possessed: spawn ordering |
+| both valid, cast still fails | the pawn is not a ShooterCharacter here, which changes the design |
+
+The reliable alternative for a test: grant on `Event ActorBeginOverlap` with a trigger
+volume. By overlap time the player exists and is possessed, so no timing fight.
+
 ## What to report back
 
 Three possible outcomes, and each tells us something different:
