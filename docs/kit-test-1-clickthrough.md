@@ -29,8 +29,13 @@ be deletable without touching KPTweaks.
 
 You want roughly this chain on `Event BeginPlay`:
 
-1. **Get Player Character** → `Cast To ShooterCharacter`. On failure, print a string
-   saying no character, and stop. Never continue past a failed cast.
+1. **Get Player Character** (Player Index 0), then wire its blue `Return Value` into the
+   **Object** pin of `Cast To ShooterCharacter`. This wiring is easy to miss: the cast
+   node sits with an empty Object pin and silently never succeeds.
+   On a failed cast, print a string saying no character and stop. Never continue past a
+   failed cast.
+   Server-side alternative, and the one the real executor uses: `Get Game Mode` ->
+   `Get Player Controller` (0) -> `Get Controlled Pawn`, into the same Object pin.
 2. From the character, **Get My Inventory Component** (this is the name that already
    exists on the item and character classes; if the node is not offered, use
    `Get Inventory Component` on the character).
