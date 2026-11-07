@@ -84,6 +84,25 @@ the pawn so the failure is distinguishable:
 The reliable alternative for a test: grant on `Event ActorBeginOverlap` with a trigger
 volume. By overlap time the player exists and is possessed, so no timing fight.
 
+## When the item arrives broken
+
+Symptom after a successful grant: the item is in the inventory but shows as broken and
+needs repair. Cause: constructing the object skips initialisation, so durability is zero.
+
+`PrimalItem` exposes the initialisers by name: `initialize_item`, `init_new_item`, plus
+`bp_pre_initialize_item` / `bp_post_initialize_item`, and the fields
+`new_item_durability_override`, `item_durability` and `saved_durability`.
+
+Fix: call **Initialize Item** (or Init New Item) on the constructed item before adding it
+to the inventory, passing the class's default object (`get_default_object`) as the template
+if it asks for one.
+
+Fallback if the node resists: set `Item Durability` to a large value. It produces a usable
+item but does not initialise stats or colour the way a real craft does.
+
+This matters beyond the test: a kit full of broken tools and armour is worse than no kit,
+so the executor must initialise, not just construct.
+
 ## What to report back
 
 Three possible outcomes, and each tells us something different:
