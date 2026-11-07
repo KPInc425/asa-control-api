@@ -25,6 +25,7 @@ import autoShutdownRoutes from "./routes/auto-shutdown.js";
 import autoUpdateRoutes from "./routes/auto-update/index.js";
 import StaticServer from "./services/static-server.js";
 import provisioningRoutes from "./routes/provisioning/index.js";
+import kitRoutes from "./routes/kits.js";
 import gamesRoutes from "./routes/games.js";
 import { gameRegistry } from "./games/index.js";
 import { startChatPolling } from "./services/chat-poller.js";
@@ -260,6 +261,8 @@ await fastify.register(provisioningRoutes);
 logger.info("Provisioning routes registered");
 await fastify.register(gamesRoutes);
 logger.info("Games routes registered");
+await fastify.register(kitRoutes);
+logger.info("Kit bridge routes registered");
 
 // Make Socket.IO instance available to routes after it's created
 fastify.decorate("io", null);
