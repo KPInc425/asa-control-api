@@ -52,6 +52,15 @@ export class ASABinariesManager {
     return this.verifier.verifyBinaries(gameType, serverPath);
   }
 
+  /**
+   * Disk-based install check used by ServerManager.listServers().
+   * The facade exposed verifyBinaries only, so every listServers() call logged
+   * "verifyInstallation is not a function" and lost binariesInstalled.
+   */
+  async verifyInstallation(serverPath, serverType = "standalone") {
+    return this.verifier.verifyInstallation(serverPath, serverType);
+  }
+
   async getInstalledVersion(gameType, serverPath) {
     return this.verifier.getInstalledVersion(gameType, serverPath);
   }

@@ -110,6 +110,27 @@ export class AutoUpdatePlayerState {
    */
   async getServerRconConfig(serverName) {
     try {
+      // DB row first: it carries rconPort and rconPassword. The disk-derived
+      // list knows the port but never the password, so RCON auth fell back to an
+      // unset env var and save-before-stop silently could not talk to the server.
+      try {
+        const { getServerConfig } = await import("./database.js");
+        const row = getServerConfig(serverName);
+        if (row?.config_data) {
+          const cfg = JSON.parse(row.config_data);
+          const port = cfg.rconPort || (cfg.gamePort ? cfg.gamePort + 2 : null);
+          const password =
+            cfg.rconPassword || cfg.adminPassword || process.env.RCON_PASSWORD;
+          if (port && password) {
+            return { host: "127.0.0.1", port, password };
+          }
+        }
+      } catch (dbError) {
+        logger.warn(
+          `[AutoUpdateService] DB RCON lookup failed for ${serverName}: ${dbError.message}`,
+        );
+      }
+
       const provisioner = this.service._provisionerFor(
         this.service._gameTypeFor(serverName),
       );

@@ -51,6 +51,20 @@ class RconService {
     return this.cache.cleanupCache();
   }
 
+  // Map of cached responses; the RCON routes read size/entries off it.
+  get cachedData() {
+    return this.cache.cachedData;
+  }
+
+  // Health for every server the service has talked to, keyed by server key.
+  getConnectionHealthSummary() {
+    const connections = {};
+    for (const [key, health] of this.connection.connectionHealth.entries()) {
+      connections[key] = health;
+    }
+    return { connections, total: Object.keys(connections).length };
+  }
+
   // ── Commands ────────────────────────────────────────────────
   sendRconCommandWithRetry(containerName, command, options) {
     return this.commands.sendRconCommandWithRetry(containerName, command, options);

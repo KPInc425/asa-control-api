@@ -110,7 +110,7 @@ export default async function miscRoutes(fastify, options) {
     preHandler: requirePermission('read')
   }, async (request, reply) => {
     try {
-      const lockFilePath = config.environment.lockFilePath || path.join(process.cwd(), '.update.lock');
+      const lockFilePath = config.environment?.lockFilePath || path.join(process.cwd(), '.update.lock');
 
       try {
         await fs.access(lockFilePath);

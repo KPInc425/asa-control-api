@@ -22,7 +22,7 @@ export class ClusterListing {
       }
       const clusterDirs = await fs.readdir(this.parent.clustersPath);
       // Get all DB configs for mapping
-      const { getAllServerConfigs } = await import("../database.js");
+      const { getAllServerConfigs } = await import("../../database.js");
       const dbConfigs = getAllServerConfigs();
       const dbClusterMap = {};
       for (const config of dbConfigs) {
