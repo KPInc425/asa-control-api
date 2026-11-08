@@ -61,7 +61,7 @@ export default async function statusRoutes(fastify, options) {
     async (request, reply) => {
       try {
         const { serverName } = request.params;
-        const updateStatus = autoUpdateService.getUpdateStatus(serverName);
+        const updateStatus = autoUpdateService.getUpdateStatus(serverName) || {};
         const config = autoUpdateService.getConfig(serverName);
 
         let nextCheck = null;
