@@ -113,6 +113,10 @@ export class AutoUpdateService extends EventEmitter {
   getServerRconConfig(s) { return this.playerState.getServerRconConfig(s); }
   stopServer(s) { return this.playerState.stopServer(s); }
   startServer(s) { return this.playerState.startServer(s); }
+  async isServerRunning(s) {
+    const { NativeServerManager } = await import("./native-server-manager.js");
+    return await new NativeServerManager().isRunning(s);
+  }
   verifyServerStartup(s) { return this.playerState.verifyServerStartup(s); }
   waitForRunningState(s, b, t) { return this.playerState.waitForRunningState(s, b, t); }
   getUpdateStatus(s) { return this.config.getUpdateStatus(s); }

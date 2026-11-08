@@ -16,11 +16,56 @@ export class UpdateModule {
   }
 
   /**
+   * Every server the suite manages, read from the server_configs table.
+   *
+   * The update manager used to walk listClusters(), which only ever contains
+   * cluster.json files under clusters/. Every real server here is a
+   * server_configs row whose install lives in servers/, so the walk found
+   * nothing: the UI said "No servers found" and "Update All" reported
+   * "0 servers". The DB row is the source of truth (see /api/servers).
+   */
+  async listUpdateTargets() {
+    const { getAllServerConfigs } = await import("../database.js");
+    const rows = getAllServerConfigs();
+    const targets = [];
+
+    for (const row of rows) {
+      let cfg = {};
+      try {
+        cfg = JSON.parse(row.config_data || "{}");
+      } catch (error) {
+        logger.warn(
+          `Update targets: unreadable config_data for ${row.name}: ${error.message}`,
+        );
+      }
+
+      const serverPath = cfg.serverPath || null;
+      if (!serverPath) {
+        logger.warn(
+          `Update targets: ${row.name} has no serverPath in its config, skipping`,
+        );
+        continue;
+      }
+
+      targets.push({
+        serverName: row.name,
+        gameType: row.game_type || cfg.gameType || "ark",
+        serverPath,
+        map: cfg.map || null,
+        clusterId: cfg.clusterId || cfg.clusterName || null,
+        gamePort: cfg.gamePort ?? null,
+      });
+    }
+
+    return targets.sort((a, b) => a.serverName.localeCompare(b.serverName));
+  }
+
+  /**
    * Get server update configuration
    */
   async getServerUpdateConfig(serverName) {
     try {
-      const { getServerUpdateConfig } = await import("../services/database.js");
+      const { getServerUpdateConfig } = await import("../database.js");
       const dbConfig = getServerUpdateConfig(serverName);
 
       if (dbConfig) {
@@ -66,7 +111,7 @@ export class UpdateModule {
    */
   async updateServerUpdateConfig(serverName, config) {
     try {
-      const { upsertServerUpdateConfig } = await import("../services/database.js");
+      const { upsertServerUpdateConfig } = await import("../database.js");
 
       const updateData = {
         serverName,
@@ -141,12 +186,17 @@ export class UpdateModule {
         }
       }
 
+      // An install with no appmanifest cannot be compared to Steam, and
+      // reporting "Up to date" for it is how a stale server stays stale.
+      const buildKnown = Boolean(latestBuildId && localBuildId);
       return {
         needsUpdate: false,
-        reason:
-          latestBuildId && localBuildId
-            ? `Installed build ${localBuildId} matches Steam build ${latestBuildId}`
-            : "Up to date",
+        unknownBuild: !buildKnown,
+        reason: buildKnown
+          ? `Installed build ${localBuildId} matches Steam build ${latestBuildId}`
+          : !latestBuildId
+            ? "Could not read Steam build info"
+            : "Installed build unknown: no Steam manifest in this install (an update repairs it)",
         lastUpdate: config.lastUpdate,
         currentBuildId: localBuildId,
         latestBuildId,
@@ -174,6 +224,15 @@ export class UpdateModule {
       return this.service.latestBuildCache.buildId;
     }
 
+    // Fast path: a plain HTTPS read takes ~1s where steamcmd app_info_print
+    // takes 15-30s and blocks the status endpoint. steamcmd stays the fallback
+    // so the suite still answers when the mirror is down.
+    const fromMirror = await this.getLatestAsaBuildIdFromMirror();
+    if (fromMirror) {
+      this.service.latestBuildCache = { buildId: fromMirror, checkedAt: Date.now() };
+      return fromMirror;
+    }
+
     try {
       const steamCmdExe = this.service.steamCmdManager.getExecutablePath();
       const command = `"${steamCmdExe}" +login anonymous +app_info_update 1 +app_info_print 2430930 +quit`;
@@ -195,6 +254,23 @@ export class UpdateModule {
     } catch (error) {
       logger.warn(`Failed to fetch latest Steam build ID for ASA: ${error.message}`);
       return this.service.latestBuildCache.buildId;
+    }
+  }
+
+  async getLatestAsaBuildIdFromMirror() {
+    try {
+      const response = await fetch("https://api.steamcmd.net/v1/info/2430930", {
+        signal: AbortSignal.timeout(8000),
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      const buildId =
+        payload?.data?.["2430930"]?.depots?.branches?.public?.buildid ?? null;
+      return buildId ? String(buildId) : null;
+    } catch (error) {
+      logger.debug(`Steam build mirror unavailable: ${error.message}`);
+      return null;
     }
   }
 
@@ -241,6 +317,24 @@ export class UpdateModule {
   }
 
   async getServerInstallPath(serverName) {
+    // The DB row is authoritative: its serverPath is what the start script and
+    // the process scan use, and it survives the server living outside
+    // clusters/ (all of ours do).
+    try {
+      const { getServerConfig } = await import("../database.js");
+      const row = getServerConfig(serverName);
+      if (row?.config_data) {
+        const cfg = JSON.parse(row.config_data);
+        if (cfg.serverPath) {
+          return cfg.serverPath;
+        }
+      }
+    } catch (error) {
+      logger.warn(
+        `Could not read serverPath for ${serverName} from the database: ${error.message}`,
+      );
+    }
+
     const standaloneServers = await this.service.listServers();
     const standalone = standaloneServers.find((server) => server.name === serverName);
     if (standalone?.path) {
@@ -272,13 +366,30 @@ export class UpdateModule {
         `Starting binary update for server ${serverName}${force ? " (forced)" : ""}`,
       );
 
+      const previousBuildId = await this.getInstalledAsaBuildId(serverName).catch(
+        () => null,
+      );
+
       await this.service.asaBinariesManager.updateForServer(serverName);
 
-      const { updateServerLastUpdate } = await import("../services/database.js");
+      const { updateServerLastUpdate } = await import("../database.js");
       updateServerLastUpdate(serverName);
 
-      logger.info(`Binary update completed for server ${serverName}`);
-      return { success: true, message: "Server binaries updated successfully" };
+      // steamcmd writes the appmanifest as part of the update, so this also
+      // repairs installs that had none and gives the caller something to verify.
+      const installedBuildId = await this.getInstalledAsaBuildId(serverName).catch(
+        () => null,
+      );
+
+      logger.info(
+        `Binary update completed for server ${serverName}: ${previousBuildId || "unknown"} -> ${installedBuildId || "unknown"}`,
+      );
+      return {
+        success: true,
+        previousBuildId,
+        installedBuildId,
+        message: "Server binaries updated successfully",
+      };
     } catch (error) {
       logger.error(`Error updating binaries for server ${serverName}:`, error);
       throw error;

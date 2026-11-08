@@ -387,6 +387,10 @@ export class ServerProvisioner {
     return await this._update.getServerUpdateConfig(serverName);
   }
 
+  async listUpdateTargets() {
+    return await this._update.listUpdateTargets();
+  }
+
   async updateServerUpdateConfig(serverName, config) {
     return await this._update.updateServerUpdateConfig(serverName, config);
   }

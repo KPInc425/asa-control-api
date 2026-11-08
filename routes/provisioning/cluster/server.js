@@ -789,16 +789,36 @@ export default async function serverRoutes(fastify) {
           );
         }
 
-        // Then trigger binary update via SteamCMD
+        // Then trigger the binary update. This goes through the auto-update
+        // executor, not provisioner.updateServerBinaries: the executor saves the
+        // world, stops the server, runs steamcmd, then restarts it. Calling
+        // steamcmd against a running install locks the exe and can corrupt it.
         logger.info(`Triggering binary update for ${serverName}`);
-        const updateResult = await provisioner.updateServerBinaries(
-          serverName,
-          force,
+        const { default: autoUpdateService } = await import(
+          "../../../services/auto-update-service.js"
         );
+        const updateResult = await autoUpdateService.performUpdate(serverName, {
+          force,
+          // Only bring it back up if it was up before the update.
+          restartIfWasRunning: true,
+          // background=true returns as soon as the job is queued instead of
+          // holding the HTTP request open for a 12 GB steamcmd download.
+          wait: !background,
+        });
+
+        if (updateResult?.success === false) {
+          return reply.status(409).send({
+            success: false,
+            message: updateResult.message || `Update not started for ${serverName}`,
+            data: updateResult,
+          });
+        }
 
         return {
           success: true,
-          message: `Server ${serverName} updated successfully`,
+          message: background
+            ? `Update started for ${serverName}. Progress is tracked on job ${updateResult.jobId}.`
+            : `Server ${serverName} updated successfully`,
           data: {
             ...updateResult,
             configUpdated: !!config,

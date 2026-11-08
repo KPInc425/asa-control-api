@@ -5,6 +5,7 @@ import { requirePermission } from "../../../middleware/auth.js";
 import logger from "../../../utils/logger.js";
 import config from "../../../config/index.js";
 import { ServerProvisioner } from "../../../services/server-provisioner.js";
+import { createJob } from "../../../services/job-manager.js";
 
 export default async function configRoutes(fastify) {
   const provisioner = new ServerProvisioner();
@@ -17,43 +18,51 @@ export default async function configRoutes(fastify) {
     },
     async (request, reply) => {
       try {
-        const clusters = await provisioner.listClusters();
+        // Servers come from server_configs, not from clusters/: every server we
+        // run is a DB row whose install sits under servers/, so walking
+        // cluster.json files here found nothing and the UI showed "No servers
+        // found" while /api/servers listed six.
+        const targets = await provisioner.listUpdateTargets();
         const allServers = [];
 
-        for (const cluster of clusters) {
-          if (cluster.config && cluster.config.servers) {
-            for (const server of cluster.config.servers) {
-              try {
-                const updateStatus = await provisioner.checkServerUpdateStatus(
-                  server.name,
-                );
-                const updateConfig = await provisioner.getServerUpdateConfig(
-                  server.name,
-                );
+        // Prime the Steam build cache once so the per-server checks do not each
+        // shell out to steamcmd.
+        await provisioner.getLatestAsaBuildId().catch(() => null);
 
-                allServers.push({
-                  serverName: server.name,
-                  clusterName: cluster.name,
-                  status: updateStatus,
-                  config: updateConfig,
-                });
-              } catch (error) {
-                logger.warn(
-                  `Failed to get update status for server ${server.name}:`,
-                  error,
-                );
-                allServers.push({
-                  serverName: server.name,
-                  clusterName: cluster.name,
-                  status: {
-                    needsUpdate: false,
-                    reason: "Error checking update status",
-                    error: error.message,
-                  },
-                  config: null,
-                });
-              }
-            }
+        for (const target of targets) {
+          try {
+            const updateStatus = await provisioner.checkServerUpdateStatus(
+              target.serverName,
+            );
+            const updateConfig = await provisioner.getServerUpdateConfig(
+              target.serverName,
+            );
+
+            allServers.push({
+              serverName: target.serverName,
+              clusterName: target.clusterId,
+              serverPath: target.serverPath,
+              map: target.map,
+              status: updateStatus,
+              config: updateConfig,
+            });
+          } catch (error) {
+            logger.warn(
+              `Failed to get update status for server ${target.serverName}:`,
+              error,
+            );
+            allServers.push({
+              serverName: target.serverName,
+              clusterName: target.clusterId,
+              serverPath: target.serverPath,
+              map: target.map,
+              status: {
+                needsUpdate: false,
+                reason: "Error checking update status",
+                error: error.message,
+              },
+              config: null,
+            });
           }
         }
 
@@ -411,67 +420,114 @@ export default async function configRoutes(fastify) {
           background = false,
         } = request.body;
 
-        const clusters = await provisioner.listClusters();
-        const results = [];
-
-        for (const cluster of clusters) {
-          if (cluster.config && cluster.config.servers) {
-            for (const server of cluster.config.servers) {
-              try {
-                // Check if updates are enabled for this server
-                if (skipDisabled) {
-                  const updateConfig = await provisioner.getServerUpdateConfig(
-                    server.name,
-                  );
-                  if (!updateConfig.updateEnabled) {
-                    results.push({
-                      serverName: server.name,
-                      success: false,
-                      reason: "Updates disabled",
-                    });
-                    continue;
-                  }
-                }
-
-                if (background) {
-                  // Start background update
-                  provisioner
-                    .updateServerBinaries(server.name, force)
-                    .catch((error) => {
-                      logger.error(
-                        `Background update failed for server ${server.name}:`,
-                        error,
-                      );
-                    });
-                  results.push({
-                    serverName: server.name,
-                    success: true,
-                    reason: "Background update started",
-                  });
-                } else {
-                  // Perform immediate update
-                  await provisioner.updateServerBinaries(server.name, force);
-                  results.push({
-                    serverName: server.name,
-                    success: true,
-                    reason: "Update completed",
-                  });
-                }
-              } catch (error) {
-                results.push({
-                  serverName: server.name,
-                  success: false,
-                  reason: error.message,
-                });
-              }
-            }
-          }
+        // Same source-of-truth fix as the status endpoint: server_configs rows,
+        // not cluster.json files. Walking clusters is what made "Update All"
+        // answer "Update process completed for 0 servers".
+        const targets = await provisioner.listUpdateTargets();
+        if (targets.length === 0) {
+          return reply.status(409).send({
+            success: false,
+            message: "No servers are registered in the suite.",
+            data: [],
+          });
         }
 
+        const { addJobProgress, updateJob } = await import(
+          "../../../services/job-manager.js"
+        );
+        const { default: autoUpdateService } = await import(
+          "../../../services/auto-update-service.js"
+        );
+
+        const results = [];
+        const queue = [];
+
+        for (const target of targets) {
+          const cfg = await provisioner.getServerUpdateConfig(target.serverName);
+          if (skipDisabled && !cfg.updateEnabled) {
+            results.push({
+              serverName: target.serverName,
+              success: false,
+              skipped: true,
+              reason: "Updates disabled",
+            });
+            continue;
+          }
+          queue.push(target.serverName);
+        }
+
+        if (queue.length === 0) {
+          return reply.status(409).send({
+            success: false,
+            message:
+              "Every registered server has updates disabled, so nothing was queued.",
+            data: results,
+          });
+        }
+
+        // Each server update saves the world, stops the server, runs steamcmd,
+        // then restarts it if it was running. Sequential on purpose: six
+        // concurrent steamcmd runs would trash the disk and the download link.
+        const batchJob = createJob("update-all", {
+          servers: queue,
+          force,
+          startedAt: new Date().toISOString(),
+        });
+
+        const runBatch = async () => {
+          const summary = [];
+          for (let i = 0; i < queue.length; i += 1) {
+            const name = queue[i];
+            addJobProgress(batchJob.id, {
+              message: `[${i + 1}/${queue.length}] Updating ${name}`,
+              percent: Math.round((i / queue.length) * 100),
+            });
+            try {
+              const result = await autoUpdateService.performUpdate(name, {
+                force,
+                restartIfWasRunning: true,
+                jobId: batchJob.id,
+              });
+              summary.push({ serverName: name, success: result?.success !== false });
+            } catch (error) {
+              summary.push({ serverName: name, success: false, error: error.message });
+            }
+          }
+
+          const failed = summary.filter((s) => !s.success);
+          addJobProgress(batchJob.id, {
+            message: `Batch finished: ${summary.length - failed.length} updated, ${failed.length} failed`,
+            percent: 100,
+          });
+          updateJob(batchJob.id, {
+            status: failed.length === summary.length && summary.length > 0 ? "failed" : "completed",
+            result: {
+              results: summary,
+              skipped: results,
+              completedAt: new Date().toISOString(),
+            },
+            ...(failed.length ? { error: failed.map((f) => `${f.serverName}: ${f.error}`).join("; ") } : {}),
+          });
+        };
+
+        if (background) {
+          runBatch().catch((error) => {
+            logger.error("Background update-all batch failed:", error);
+            updateJob(batchJob.id, { status: "failed", error: error.message });
+          });
+
+          return {
+            success: true,
+            message: `Update started for ${queue.length} server(s): ${queue.join(", ")}. Progress is tracked on job ${batchJob.id}.`,
+            data: { jobId: batchJob.id, queued: queue, skipped: results },
+          };
+        }
+
+        await runBatch();
         return {
           success: true,
-          message: `Update process completed for ${results.length} servers`,
-          data: results,
+          message: `Update finished for ${queue.length} server(s)`,
+          data: { jobId: batchJob.id, queued: queue, skipped: results },
         };
       } catch (error) {
         logger.error("Failed to update all servers:", error);

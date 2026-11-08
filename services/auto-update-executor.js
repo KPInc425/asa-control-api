@@ -45,14 +45,37 @@ export class AutoUpdateExecutor {
 
     this.service.cancelWarnings(serverName);
 
-    const job = createJob("auto-update", {
-      serverName,
-      options,
-      startedAt: new Date().toISOString(),
-    });
+    // A caller that owns a batch job passes jobId in so every server's progress
+    // lands on one job instead of six unrelated ones.
+    const job = options.jobId
+      ? { id: options.jobId }
+      : createJob("auto-update", {
+          serverName,
+          options,
+          startedAt: new Date().toISOString(),
+        });
 
     const updatePromise = this.executeUpdate(serverName, options, job.id);
     this.service.pendingUpdates.set(serverName, updatePromise);
+
+    if (options.wait === false) {
+      // Detached: the HTTP request returns now, the job carries the result.
+      updatePromise
+        .then(() => this.service.pendingUpdates.delete(serverName))
+        .catch((error) => {
+          logger.error(
+            `[AutoUpdateService] Background update failed for ${serverName}:`,
+            error,
+          );
+          this.service.pendingUpdates.delete(serverName);
+        });
+      return {
+        success: true,
+        background: true,
+        jobId: job.id,
+        message: `Update started for ${serverName}`,
+      };
+    }
 
     try {
       return await updatePromise;
@@ -79,6 +102,7 @@ export class AutoUpdateExecutor {
     ];
 
     let currentStep = 0;
+    let restartAfterUpdate = false;
 
     const emitProgress = (message, percent) => {
       addJobProgress(jobId, { message, percent });
@@ -107,6 +131,16 @@ export class AutoUpdateExecutor {
       currentStep = 1;
       emitProgress(steps[0], 10);
       logger.info(`[AutoUpdateService] ${serverName}: ${steps[0]}`);
+
+      // A manual update must not start a server that was deliberately stopped.
+      const wasRunning = await this.service
+        .isServerRunning(serverName)
+        .catch(() => false);
+      const restartAfterUpdateResolved =
+        options.restartIfWasRunning === true
+          ? wasRunning
+          : wasRunning || config.autoRestart;
+      restartAfterUpdate = restartAfterUpdateResolved;
 
       if (this.service.notificationService) {
         try {
@@ -176,7 +210,7 @@ export class AutoUpdateExecutor {
       updateLastAppliedTime(serverName);
 
       // Step 5: Start server
-      if (config.autoRestart) {
+      if (restartAfterUpdate) {
         currentStep = 5;
         emitProgress(steps[4], 80);
         logger.info(`[AutoUpdateService] ${serverName}: ${steps[4]}`);
@@ -347,7 +381,7 @@ export class AutoUpdateExecutor {
         }
       }
 
-      if (currentStep > 3 && config.autoRestart) {
+      if (currentStep > 3 && restartAfterUpdate) {
         try {
           logger.info(
             `[AutoUpdateService] ${serverName}: Attempting to restart server after failed update`,
