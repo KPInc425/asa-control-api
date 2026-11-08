@@ -1,4 +1,8 @@
 import logger from "../utils/logger.js";
+import {
+  STARTUP_VERIFY_TIMEOUT_MS,
+  STARTUP_VERIFY_INTERVAL_MS,
+} from "./auto-update-constants.js";
 
 /**
  * Player state and RCON operations for the Auto-Update Service.
