@@ -407,6 +407,8 @@ export default async function configRoutes(fastify) {
             updateConfig: { type: "boolean" },
             skipDisabled: { type: "boolean" },
             background: { type: "boolean" },
+            // Report what would be updated without stopping or updating anything.
+            dryRun: { type: "boolean" },
           },
         },
       },
@@ -418,6 +420,7 @@ export default async function configRoutes(fastify) {
           updateConfig = true,
           skipDisabled = true,
           background = false,
+          dryRun = false,
         } = request.body;
 
         // Same source-of-truth fix as the status endpoint: server_configs rows,
@@ -463,6 +466,14 @@ export default async function configRoutes(fastify) {
               "Every registered server has updates disabled, so nothing was queued.",
             data: results,
           });
+        }
+
+        if (dryRun) {
+          return {
+            success: true,
+            message: `Dry run: ${queue.length} server(s) would be updated (${results.length} skipped)`,
+            data: { dryRun: true, queued: queue, skipped: results },
+          };
         }
 
         // Each server update saves the world, stops the server, runs steamcmd,
