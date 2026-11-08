@@ -31,6 +31,19 @@ export class ASABinariesManager {
     return this.installer.installBinaries(gameType, serverPath, options);
   }
 
+  /**
+   * Update the binaries of one managed server in place.
+   * @param {string} serverName
+   * @param {string} [serverPath] absolute install dir (the DB serverPath)
+   */
+  async updateForServer(serverName, serverPath = null) {
+    return this.installer.installForServer(serverName, serverPath);
+  }
+
+  async updateAll() {
+    return this.updater.updateAll();
+  }
+
   async updateBinaries(gameType, serverPath, options) {
     return this.updater.updateBinaries(gameType, serverPath, options);
   }

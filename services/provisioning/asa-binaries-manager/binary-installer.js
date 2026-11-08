@@ -44,10 +44,15 @@ export class BinaryInstaller {
 
   /**
    * Install ASA binaries for a specific server (standalone)
+   * @param {string} serverName
+   * @param {string} [serverPathOverride] absolute install dir; the DB serverPath.
+   *   Without it the path is assumed to be serversPath/<name>, which is wrong
+   *   for any install that lives elsewhere.
    */
-  async installForServer(serverName) {
+  async installForServer(serverName, serverPathOverride = null) {
     try {
-      const serverPath = path.join(this.parent.serversPath, serverName);
+      const serverPath =
+        serverPathOverride || path.join(this.parent.serversPath, serverName);
 
       logger.info(`Installing ASA binaries for server: ${serverName}`);
 
@@ -60,11 +65,26 @@ export class BinaryInstaller {
       await fs.writeFile(scriptPath, scriptContent);
 
       const command = `"${steamCmdExe}" +runscript "${scriptPath}"`;
-      const { stdout, stderr } = await execAsync(command, { timeout: 900000 });
+      const { stdout, stderr } = await execAsync(command, {
+        // A full ASA build is ~12 GB; at 30 Mbit/s that is over an hour. The old
+        // 15 minute ceiling failed big updates halfway through a download.
+        timeout: 60 * 60 * 1000,
+        maxBuffer: 20 * 1024 * 1024,
+        windowsHide: true,
+      });
 
       if (stderr) {
         logger.warn(`SteamCMD stderr for ${serverName}: ${stderr}`);
       }
+
+      const stdoutTail = String(stdout || "")
+        .trim()
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(-6)
+        .join(" | ");
+      logger.info(`SteamCMD output tail for ${serverName}: ${stdoutTail}`);
 
       const serverExe = path.join(serverPath, adapter.binaryExeRelPath);
       const exists = await fs
@@ -72,11 +92,15 @@ export class BinaryInstaller {
         .then(() => true)
         .catch(() => false);
 
-      if (!exists) {
+      if (!exists && typeof this.parent._copyFromGlobalInstall === "function") {
         logger.warn(
           `SteamCMD install failed for ${serverName}, trying fallback from global SteamCMD install...`,
         );
         await this.parent._copyFromGlobalInstall(serverPath, serverName, adapter);
+      } else if (!exists) {
+        throw new Error(
+          `SteamCMD finished but ${serverExe} is missing. Tail: ${stdoutTail}`,
+        );
       }
 
       await fs.unlink(scriptPath);

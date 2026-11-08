@@ -370,7 +370,16 @@ export class UpdateModule {
         () => null,
       );
 
-      await this.service.asaBinariesManager.updateForServer(serverName);
+      // The install dir comes from the DB row. Deriving it from serversPath/<name>
+      // silently points steamcmd at a directory that is not the running install.
+      const serverPath = await this.getServerInstallPath(serverName);
+      if (!serverPath) {
+        throw new Error(
+          `No install path registered for ${serverName}; refusing to run steamcmd`,
+        );
+      }
+
+      await this.service.asaBinariesManager.updateForServer(serverName, serverPath);
 
       const { updateServerLastUpdate } = await import("../database.js");
       updateServerLastUpdate(serverName);
