@@ -177,6 +177,44 @@ The only fragment not covered is **auto-pull**: refilling the hotbar from nearby
 large builds do not stall on trips. That is small, and it extends the pull mod KP already
 runs rather than replacing it.
 
+Two details still open:
+
+- **DLC split.** Planning Mode appears in the patch notes as a plain feature with no
+  expansion gate, while the **Template Hammer is Lost Colony content** (confirmed by the
+  expansion announcement). So planning is probably free and only saving layouts needs the
+  DLC, which KP owns anyway.
+- **Does it need the piece in inventory?** Unverified. The wording everywhere is "enter
+  Planning Mode while placing a structure", which suggests you select something you hold. If
+  it does require the piece, the gap worth filling is a **planning palette**: choose any
+  engram you have unlocked and place its hologram without owning the item. That is a real
+  feature and a small one.
+
+### Behemoth walls: snap and ground gaps
+
+Current KPTweaks behemoth walls are clunky, leave large gaps on uneven ground, and do not
+snap to each other or to vanilla pieces. Worth fixing because they are structural, not
+cosmetic.
+
+Directions to investigate, in order of likely payoff:
+
+1. **Snap points first.** A blueprint structure only snaps where it declares snap sockets.
+   If these pieces were authored without them, or with sockets that do not match the vanilla
+   wall socket layout, nothing else will fix the feel. Check the structure class for snap
+   point setup and compare against a vanilla wall or gate frame.
+2. **Parent from a vanilla piece.** Deriving from the vanilla behemoth gate or wall class
+   rather than from a bare structure base inherits snapping, placement rules and collision
+   behaviour instead of reimplementing them.
+3. **Terrain gaps.** Options, cheapest first: extend the mesh downward with a buried "skirt"
+   that disappears into the ground, offer short and tall variants, or require placement on a
+   foundation-like base piece so the wall never meets raw terrain.
+4. **Check what the existing building mods do.** Arkitect Structures Remastered advertises
+   cosmetic variants without building twice and a delete mode, so it is the obvious
+   comparison for how pieces are authored and snapped. Evaluate it before authoring more.
+
+KP's own view: the glass and metal pieces predate proper custom cosmetics, so new building
+pieces are more likely to be cosmetics on existing structures than new structure classes.
+That reinforces the third and fourth directions.
+
 ### Shoulder pet as a backpack
 
 Willow wants a shoulder pet that attaches like a backpack and helps with carry weight. Worth
