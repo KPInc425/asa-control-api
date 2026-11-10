@@ -183,11 +183,20 @@ Two details still open:
   expansion gate, while the **Template Hammer is Lost Colony content** (confirmed by the
   expansion announcement). So planning is probably free and only saving layouts needs the
   DLC, which KP owns anyway.
-- **Does it need the piece in inventory?** Unverified. The wording everywhere is "enter
-  Planning Mode while placing a structure", which suggests you select something you hold. If
-  it does require the piece, the gap worth filling is a **planning palette**: choose any
-  engram you have unlocked and place its hologram without owning the item. That is a real
-  feature and a small one.
+- **Does it need the piece in inventory? CONFIRMED YES**, tested 2026-11-10. You cannot enter
+  Planning Mode without a structure selected from your inventory, so planning a large base
+  means carrying one of every piece you intend to use. Workable, and clunky enough that KP
+  called it half thought out. This is the gap worth filling.
+
+Two routes, and the second one works today:
+
+1. **Planning palette (proper).** Choose any engram you have unlocked and place its hologram
+   without owning the item. Needs devkit work: find how a hologram is spawned and whether
+   placement validation can be satisfied without the real item. Unknown feasibility.
+2. **Planner kit (works now).** The kit system is proven, so a kit that grants one of each
+   building piece a player has unlocked turns "carry a bag of everything" into "claim the
+   planner kit, plan the base, drop it". No new mechanics, no devkit probe, and it can be
+   shipped through the existing bridge. Start here.
 
 ### Behemoth walls: snap and ground gaps
 
@@ -238,6 +247,21 @@ So it belongs in the customiser, as a per-creature override alongside the per-it
 it needs a devkit probe: whether the drop data is reachable on the character class or sits in
 a separate cache object. Note also that Megalodons may already drop prime fish; worth
 confirming in game before building anything.
+
+## Next devkit session: take stock before building
+
+State as of 2026-11-10, so the next session starts oriented rather than re-deriving it:
+
+- Kits: proven end to end, marker per character, survives everything. Config loader is the
+  next piece (`docs/kit-test-5-config-loader-clickthrough.md`).
+- Ghost building: vanilla, but requires the piece in inventory; the planner kit is the cheap
+  fix and the planning palette is the proper one.
+- Emotes: recorded, feasibility unknown.
+- Creature drops: recorded, needs a probe.
+- Behemoth walls: recorded, snap points are the first thing to look at.
+
+The question for that session is not "what else can we add" but **which two of these move the
+mod forward**, since the kit work is the only thing currently proven.
 
 ## Standing rules for this work
 
