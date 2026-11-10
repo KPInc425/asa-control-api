@@ -144,6 +144,46 @@ not, but the marker buff is new).
 
 ---
 
+## Ideas backlog, no commitment, recorded so they are not lost
+
+### Emote favourites and a faster selector
+
+The emote list has outgrown the radial. Wanted: mark a handful of favourites, and reach them
+without digging through the full wheel. Open questions: whether this is a new compact radial,
+a hotkey bar, or a filtered version of the existing wheel; whether favouriting is per player
+(stored, like the kit markers) or per server; and whether the game exposes the emote list to
+blueprints at all, which decides whether this is feasible without a replacement UI.
+
+### Ghost building
+
+Place a whole structure as ghost pieces, fill in the materials afterwards. The pain is
+concrete: thatch is too heavy for the bases and RP structures you build, so carrying
+materials while placing is the bottleneck. Two smaller variants worth considering if full
+ghost building is too large:
+
+- **Auto-pull on placement**: when a piece is placed or the hotbar runs out, pull the next
+  one from a nearby container. You already run a pull mod, so this is an extension rather
+  than new ground.
+- **Ghost mode toggle**: place unbuilt frames that cost nothing, then a single "build all" at
+  the end that consumes materials if available.
+
+Open questions: whether ASA exposes a building piece's cost and ghost state to blueprints;
+whether the existing pull mod can be extended or must be replaced; and how to avoid ghost
+spam as a griefing vector on a private server.
+
+### Creature drop tables
+
+Change what a creature yields, for example prime fish meat from a Megalodon. This is **not**
+available in server config. The config keys that exist cover spawn tables
+(`ConfigOverrideNPCSpawnEntriesContainer`, `ConfigAddNPCSpawnEntriesContainer`), supply
+crates (`ConfigOverrideSupplyCrateItems`) and harvest multipliers
+(`HarvestResourceItemAmountClassMultipliers`), but nothing for a creature's own death drops.
+
+So it belongs in the customiser, as a per-creature override alongside the per-item ones, and
+it needs a devkit probe: whether the drop data is reachable on the character class or sits in
+a separate cache object. Note also that Megalodons may already drop prime fish; worth
+confirming in game before building anything.
+
 ## Standing rules for this work
 
 - Cluster members must run an identical mod set, so a KPTweaks version bump is a
