@@ -154,22 +154,39 @@ a hotkey bar, or a filtered version of the existing wheel; whether favouriting i
 (stored, like the kit markers) or per server; and whether the game exposes the emote list to
 blueprints at all, which decides whether this is feasible without a replacement UI.
 
-### Ghost building
+### Ghost building: already in the game, do not build it
 
-Place a whole structure as ghost pieces, fill in the materials afterwards. The pain is
-concrete: thatch is too heavy for the bases and RP structures you build, so carrying
-materials while placing is the bottleneck. Two smaller variants worth considering if full
-ghost building is too large:
+**Planning Mode shipped in ASA patch 88.3 and the client is on 94.7.** Verified against the
+official patch notes, 2026-06-12:
 
-- **Auto-pull on placement**: when a piece is placed or the hotbar runs out, pull the next
-  one from a nearby container. You already run a pull mod, so this is an extension rather
-  than new ground.
-- **Ghost mode toggle**: place unbuilt frames that cost nothing, then a single "build all" at
-  the end that consumes materials if available.
+- Hold **R** (X / Square) while placing a structure to enter Planning Mode.
+- Structures place as **Hologram Structures** and consume no materials.
+- Holograms are visible only to tribe members; enemy tribes cannot see them.
+- New structures snap over holograms and **automatically replace them** when placed, so
+  building happens directly onto the plan.
+- Holograms convert into **Templates** with the Lost Colony Template Hammer, so a whole
+  layout can be saved and repositioned.
+- **Extended Range Mode** places holograms from further away for large-scale planning.
+- **Planning Mode View** toggles hologram visibility, on the Action Wheel and bindable to a
+  key (unbound by default).
 
-Open questions: whether ASA exposes a building piece's cost and ghost state to blueprints;
-whether the existing pull mod can be extended or must be replaced; and how to avoid ghost
-spam as a griefing vector on a private server.
+So the ghost-building wish is satisfied by vanilla, and the material-sink problem is solved
+in the way KP actually wanted: plan first, build over it later.
+
+The only fragment not covered is **auto-pull**: refilling the hotbar from nearby storage so
+large builds do not stall on trips. That is small, and it extends the pull mod KP already
+runs rather than replacing it.
+
+### Shoulder pet as a backpack
+
+Willow wants a shoulder pet that attaches like a backpack and helps with carry weight. Worth
+knowing first: **vanilla shoulder pets already work this way.** The wiki states that every
+shoulder pet acts as a backpack, with only half its inventory weight counting against the
+survivor, and the Otter additionally carries multiple artifacts.
+
+So the mechanic exists and costs a tame rather than a mod. What vanilla does not do is raise
+the survivor's own weight capacity. If that is the actual ask, it is a stat change, and the
+per-player or per-item override belongs with the customiser rather than a new mod.
 
 ### Creature drop tables
 
