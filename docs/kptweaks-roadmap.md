@@ -235,6 +235,27 @@ So the mechanic exists and costs a tame rather than a mod. What vanilla does not
 the survivor's own weight capacity. If that is the actual ask, it is a stat change, and the
 per-player or per-item override belongs with the customiser rather than a new mod.
 
+### Drawable surfaces: chalkboard, dry-erase, canvas
+
+Wanted: a wall or skin you can draw on, like a chalkboard or whiteboard. KP's own instinct was
+that canvas walls might get laggy, and that instinct is right for one of the three designs.
+
+**The cost is in the update model, not the picture.**
+
+1. **Paint once, saved.** Draw, finish, the result is stored and sent as one texture. Cheap.
+   Dozens are fine. This is what the vanilla painting system already does.
+2. **Live collaborative drawing.** Strokes stream to nearby clients continuously. Expensive,
+   and this is the only version that lags. Render targets are per client, so the shared
+   drawing has to be replicated as stroke data and replayed, which is a real project.
+3. **Per-pixel streaming.** Not viable.
+
+**Cheapest version may already exist:** a black wall skin plus the vanilla paintbrush is a
+chalkboard that persists and shows to everyone. The compromise is paint resolution.
+
+**If more is wanted, skin the existing canvas** rather than authoring a new structure, so the
+paint UI and the save path come for free. A live board is out of scope until the cheaper two
+are exhausted.
+
 ### Creature drop tables
 
 Change what a creature yields, for example prime fish meat from a Megalodon. This is **not**
