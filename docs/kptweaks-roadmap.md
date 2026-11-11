@@ -198,6 +198,33 @@ Two routes, and the second one works today:
    planner kit, plan the base, drop it". No new mechanics, no devkit probe, and it can be
    shipped through the existing bridge. Start here.
 
+### Walkable plans: the hologram is not solid
+
+KP's constraint, 2026-11-10: vanilla holograms have no collision, so you cannot walk on them.
+That rules out planning a multi-storey build, a platform or a bridge in one pass, because
+upper floors can only be positioned relative to a walkable lower floor. The workaround is to
+plan a storey, build it, plan the next, build it, which is exactly the spurts approach Planning
+Mode was supposed to replace.
+
+**The missing property is collision, not cost.** Cost and snapping are solved by vanilla; being
+able to stand on the plan is not.
+
+Three routes, cheapest first:
+
+1. **Creative shell into a Template.** Build the whole structure in creative, where it is real
+   and walkable, save it with the Template Hammer, then place it in survival and pay. Likely
+   already possible with no mod at all. Verify that placing a template consumes materials; it
+   almost certainly must, since a free template placement is a duplication exploit.
+2. **Solid ghost structure (mod).** Spawn a structure actor with collision enabled and no
+   material cost, walk on it, delete it when the real build replaces it. Needs a devkit probe:
+   what collision the hologram class carries, and whether a spawned structure can be made
+   solid while exempt from cost validation.
+3. **Scaffold platforms (fallback).** Free walkable floors that are not building pieces, placed
+   and cleared. Crude but cheap, and it makes multi-storey planning possible without touching
+   building rules.
+
+Route 1 is worth an in-game test before any code, because it may close the whole gap.
+
 ### Behemoth walls: snap and ground gaps
 
 Current KPTweaks behemoth walls are clunky, leave large gaps on uneven ground, and do not
