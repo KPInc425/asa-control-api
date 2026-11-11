@@ -211,19 +211,46 @@ able to stand on the plan is not.
 
 Three routes, cheapest first:
 
-1. **Creative shell into a Template.** Build the whole structure in creative, where it is real
-   and walkable, save it with the Template Hammer, then place it in survival and pay. Likely
-   already possible with no mod at all. Verify that placing a template consumes materials; it
-   almost certainly must, since a free template placement is a duplication exploit.
+1. ~~**Creative shell into a Template.**~~ **REJECTED by KP, 2026-11-10.** He plays survival
+   only, does not want admin powers, and creative does nothing for anyone else on the server.
+   Do not propose admin or creative workarounds again for building features.
 2. **Solid ghost structure (mod).** Spawn a structure actor with collision enabled and no
    material cost, walk on it, delete it when the real build replaces it. Needs a devkit probe:
    what collision the hologram class carries, and whether a spawned structure can be made
-   solid while exempt from cost validation.
+   solid while exempt from cost validation. This is the route that serves every player on the
+   server, which is the requirement.
 3. **Scaffold platforms (fallback).** Free walkable floors that are not building pieces, placed
    and cleared. Crude but cheap, and it makes multi-storey planning possible without touching
    building rules.
 
-Route 1 is worth an in-game test before any code, because it may close the whole gap.
+**Where it matters most: over water.** KP is currently building over water, where there is no
+terrain to stand on, so every span has to be built for real before the next can be planned.
+That case is the one that justifies the work, because walkable ghosts are the only way to
+plan a water platform in one pass.
+
+### Why vanilla probably has no collision
+
+KP's own read is that free solid structures would be an exploit, and that is almost certainly
+why Planning Mode holograms are non-solid: a free structure with collision is a free wall, so a
+tribe could block off a base or a whole shoreline for nothing. Performance is the secondary
+reason, since holograms are meant to be cheap to draw in bulk.
+
+**Better mitigation than fragility.** Making ghosts fragile is one answer, but the sharper
+control is ownership: collision for members of the placing tribe only, pass-through for
+everyone else. Combine with a lifetime that expires unused ghosts, no damage output, and a cap
+on how many one player can hold in flight. That keeps the planning workflow intact while
+removing the reason vanilla refused it.
+
+### The evolved predecessor mod
+
+KP remembers an ASE mod that the current preview resembles, which did it better and was not
+partly behind a DLC. **Not identified yet.** Three searches through the wiki, official forums
+and general web results did not surface it, and no name will be guessed. Two ways forward:
+KP recalls the name or the workshop link, or a session with working CurseForge access.
+
+A design reference worth reading regardless: **PlanBuild for Valheim** is open source and
+implements exactly this model, plan a build then pay for it later. Different engine, same
+rules problem, so its answers about ghost ownership, expiry and material accounting transfer.
 
 ### Behemoth walls: snap and ground gaps
 
