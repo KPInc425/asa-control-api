@@ -256,10 +256,10 @@ operational cost rather than tidiness:
 **The only exception:** a skin that changes behaviour rather than appearance belongs in
 KPTweaks. Cosmetic-only does not.
 
-**Probe before authoring:** whether ASA lets a mod apply a skin to a vanilla *placed*
-structure without rebuilding it. Arkitect advertises "no need to build twice", which suggests
-the mechanism exists. If skins must instead be mod-provided building variants, the design
-shifts to variant pieces and the separate-mod argument gets stronger, not weaker.
+**Resolved 2026-11-10:** ASA's built-in cosmetics system re-skins an already-placed structure,
+so nothing is rebuilt and nothing needs to be a mod-provided variant. Skins are appearance
+only, applied to what is already there. That also means the separate-mod decision stands
+unchanged and no variant pieces need authoring.
 
 ### Drawable surfaces: chalkboard, dry-erase, canvas
 
@@ -309,6 +309,21 @@ State as of 2026-11-10, so the next session starts oriented rather than re-deriv
 
 The question for that session is not "what else can we add" but **which two of these move the
 mod forward**, since the kit work is the only thing currently proven.
+
+**When the devkit is open, in this order:**
+
+1. **Can a blueprint read the file?** `docs/kit-test-5-config-loader-clickthrough.md` Step 0:
+   read `D:\ARK\bridge\kits.txt` and print its length. Everything about config-driven kits
+   depends on it, and a zero or a missing node changes the design in an hour rather than a
+   week. This is the only item on the critical path.
+2. **Behemoth wall snap points.** Compare the wall's structure class against a vanilla
+   behemoth gate frame: does it declare snap sockets, and do they match vanilla layout. If
+   they do not, that is the entire cause of the clunk and the fix is authoring sockets, not
+   redrawing meshes.
+3. **Is the emote list reachable from a blueprint?** If not, emote favourites is a replacement
+   UI and should be priced as such before anyone commits to it.
+
+Everything else on this page can wait for those three answers.
 
 ## Standing rules for this work
 
