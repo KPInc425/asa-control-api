@@ -337,6 +337,32 @@ chalkboard that persists and shows to everyone. The compromise is paint resoluti
 paint UI and the save path come for free. A live board is out of scope until the cheaper two
 are exhausted.
 
+### Upgrade hammer: mass upgrade with material pull
+
+Wanted: upgrade large swathes of a base in one action, pulling the materials from nearby
+storage, taking time rather than being instant. Upgrading a big base piece by piece is the
+tedium KP wants gone.
+
+**Vanilla already upgrades one piece at a time**, through the radial, provided you hold the
+materials. So the gap is mass selection and material pulling, not the upgrade itself.
+
+**Prior art: Upgrade Station**, an ASE Steam Workshop mod (v1.8i), which upgrades structures in
+a radius for the material cost. Whether it has an ASA port is **unverified**: CurseForge
+blocks this rig, the automation browser is down, and ASA-specific searches returned nothing.
+Check the in-game mod browser by searching "upgrade station"; that queries CurseForge directly.
+
+If there is no port, the design notes for building it:
+
+- **Reuse the existing upgrade path.** The structure already knows how to become the next
+  tier; call that rather than swapping classes by hand.
+- **Cost correctness is the whole discipline.** Mass upgrade is an attractive duplication
+  exploit, so charge per piece, from the same validation the manual upgrade uses, and fail the
+  whole batch rather than half-charging.
+- **Stagger the work.** Upgrading hundreds of structures in one tick is a server spike. Walk a
+  queue a few pieces at a time, which also gives the "takes time" feel KP asked for.
+- **Permissions and refunds.** Tribe-rank checks on who may start a job, and a cancel path that
+  returns materials for pieces not yet touched.
+
 ### Creature drop tables
 
 Change what a creature yields, for example prime fish meat from a Megalodon. This is **not**
