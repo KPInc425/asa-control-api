@@ -235,6 +235,32 @@ So the mechanic exists and costs a tame rather than a mod. What vanilla does not
 the survivor's own weight capacity. If that is the actual ask, it is a stat change, and the
 per-player or per-item override belongs with the customiser rather than a new mod.
 
+### Cosmetic structure skins: separate mod, not KPTweaks
+
+Direction confirmed by KP: stop authoring new metal and glass structure classes, and stop
+duplicating anything that already has a vanilla variation. Build vanilla metal and skin it.
+The behemoth walls stay in KPTweaks because vanilla has no behemoth wall to skin.
+
+**Decision: cosmetic skins live in their own mod**, for four reasons that are all about
+operational cost rather than tidiness:
+
+1. Skins are textures and meshes, so they are the bulk of the bytes. Inside KPTweaks, every
+   gameplay hotfix becomes a large download for every player, and every cluster member must
+   match versions.
+2. A broken cosmetic cannot break gameplay. Packaged together, a bad skin can stop the mod
+   loading and take kits, tweaks and the sweeper with it.
+3. Skins and gameplay logic have different update rhythms and should not drag each other.
+4. Players can subscribe to the cosmetics without the tweaks, and CurseForge versions them
+   independently.
+
+**The only exception:** a skin that changes behaviour rather than appearance belongs in
+KPTweaks. Cosmetic-only does not.
+
+**Probe before authoring:** whether ASA lets a mod apply a skin to a vanilla *placed*
+structure without rebuilding it. Arkitect advertises "no need to build twice", which suggests
+the mechanism exists. If skins must instead be mod-provided building variants, the design
+shifts to variant pieces and the separate-mod argument gets stronger, not weaker.
+
 ### Drawable surfaces: chalkboard, dry-erase, canvas
 
 Wanted: a wall or skin you can draw on, like a chalkboard or whiteboard. KP's own instinct was
