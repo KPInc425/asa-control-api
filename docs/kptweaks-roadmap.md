@@ -244,9 +244,10 @@ removing the reason vanilla refused it.
 ### The evolved predecessor mod
 
 KP remembers an ASE mod that the current preview resembles, which did it better and was not
-partly behind a DLC. **Not identified yet.** Three searches through the wiki, official forums
-and general web results did not surface it, and no name will be guessed. Two ways forward:
-KP recalls the name or the workshop link, or a session with working CurseForge access.
+partly behind a DLC. **KP confirms the author deleted it long ago**, which is why three searches
+through the wiki, official forums and general web results found nothing. Do not search for it
+again; it is gone, and there is no workshop page or source to study. Design from principles and
+from the reference below instead.
 
 A design reference worth reading regardless: **PlanBuild for Valheim** is open source and
 implements exactly this model, plan a build then pay for it later. Different engine, same
