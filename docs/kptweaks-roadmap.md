@@ -753,6 +753,62 @@ dino before it goes near a real kit.
 
 Everything else on this page can wait.
 
+## Probes, 2026-11-13: skins, cryopods, emotes, weight
+
+Run live in the devkit (UE 5.8.3) via the MCP endpoint.
+
+### Structure skins are a runtime call, and the skin is a class
+
+`PrimalStructure` exposes exactly what the cosmetics feature needs:
+
+- **`set_structure_skin`** - apply a skin to a structure that already exists.
+- **`replicated_structure_my_skin_class`** - the skin is a **class**, not a material.
+- `is_valid_structure_skin_target`, `get_structure_skin_destroyed_meshes`,
+  `last_skin_applied_time`, `local_only_skin_custom_persistent_data`.
+- `exec_skin_net_message` / `multi_handle_skin_net_message` - the game replicates the change.
+- `my_custom_cosmetic_structure_skin_id` and `my_custom_cosmetic_structure_skin_variant_id` -
+  the built-in cosmetics IDs, which is the system KP already uses in game.
+
+Vanilla pairs confirm the shape: `PrimalItemStructureSkin_<thing>` is the **item**, and
+`StructureSkin_<thing>` is a **structure class** (BBQ's has 1108 members and its own
+`allow_structure_color_sets`, `bp_get_structure_id`, `allow_picking_up_structure_after_placement`).
+`/Game/PrimalEarth/Test/PrimalItemStructureSkin_Custom` plus `StructureSkinCustomBP` is the
+working example to copy.
+
+**CORRECTION to an earlier entry.** I recorded that our cosmetics mod would be "data, not
+structures", inferred from Arkitect's Paradise asset names. Reading the classes says otherwise:
+a skin needs a **skin structure class per look** plus its item. The good news is unchanged and
+better than assumed: `set_structure_skin` applies it to a placed structure with no rebuild, and
+the game handles replication. So authoring a skin means authoring a variant class and its item,
+not a new base structure, and still nothing is built twice.
+
+### Cryopods: no exposed way to pre-fill a dino, but items can carry payloads
+
+The cryopod item (`/Game/Extinction/CoreBlueprints/Weapons/PrimalItem_WeaponEmptyCryopod`)
+exposes only `get_cryopod_deployment_range` for dino work; capture goes through `ProjCryopod` and
+the `WeapEmptyCryopod` actor (`on_released`, `receive_actor_on_released`). So the cheap idea of
+grating a pre-filled cryopod from a kit has **no exposed function** behind it.
+
+But `PrimalItem` does expose a general payload system: `set_custom_item_data`,
+`get_custom_item_data`, `custom_item_datas`, `has_custom_item_data`, `merge_custom_item_datas`,
+`remove_custom_item_data`, plus `item_custom_data` and `item_custom_data` indexes. That is the
+primitive for a kit token that carries data (which kit, which dino, an id), and it is a better
+fit than inventing a struct on a subclass.
+
+### Emotes: play by index
+
+`play_emote_animation(emote_index: uint8, invert_gender: bool)` is the play call, and
+`emote_anims` is empty on the class default, so the list is built at runtime. The vanilla wheel
+`EmoteRadialSelectorBP` exposes `add_unlockable_emotes`, so the list comes from unlockables.
+Favourites therefore stores **indices into the runtime list**, and must resolve them at spawn
+rather than trusting a hardcoded number.
+
+### Weight boost: the hook exists
+
+`PrimalInventoryComponent` exposes `extra_max_inventory_weight`, `max_inventory_weight`,
+`max_inventory_weight_use_character_status` and `item_class_weight_multipliers`. So a weight
+boost near a template is a property change on the inventory, not a character stat hack.
+
 ## Overseer: the ARK Modding Discord archive, as a searchable API
 
 `https://www.reddwarfmods.com/overseer/` is an archivist bot over ten years of the ARK Modding
