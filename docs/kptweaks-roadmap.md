@@ -404,13 +404,38 @@ until something proves a delivery path.
 
 Panel design that fits the proven pieces:
 
-- A curated **DataTable asset inside the mod** holds the selectable items and creatures (class
-  path plus a display name). This is the one thing that must be baked at cook time, because a
-  blueprint cannot enumerate the asset registry at runtime.
-- Search is a filter over that table's display names, so it stays a UI problem rather than a
-  data problem.
+- **No DataTable is needed for the selection list. CORRECTION, verified 2026-11-12.** KP's
+  own unfinished admin menu listed every item without one, and the reason is `PrimalGameData`:
+  `master_item_list` holds **654 item classes** and `engram_blueprint_classes` holds **909
+  engrams** on the shipped game data asset. A blueprint can read those at runtime and list
+  everything. DataTables are for authoring static content in the editor, not for runtime
+  selection lists.
+- Search is a filter over that list's display names, so it stays a UI problem.
+- Creature enumeration is the one gap: `PrimalGameData` does not expose an equivalent dino
+  list, so the panel either filters the engram list for dino engrams or finds a
+  derived-classes helper. Unresolved.
 - Admin composes a kit, saves it into `KPTweaksSave`, and the claim path already built serves
   it.
+
+### How a customiser works without DataTables
+
+Asked by KP, and the answer is the same as for kits: **SaveGames plus per-item overrides**, not
+DataTables. The ASE mod we reverse-engineered (ARK Customizer: Settings Evolved, workshop
+774413050) is blueprint only and stores its settings in **six save-game objects** in the world
+save. Its per-item struct `ACItemModifier` is a struct with 24 fields, held in arrays, applied
+through a shared function library that remaps classes and cleans item data before the item is
+created.
+
+So the pattern for ASA is:
+
+1. A **struct** describing one override, held in an array on a save game.
+2. A **UI** that edits that array, listing candidates from `PrimalGameData.master_item_list`.
+3. An **apply step** when an item is created or spawned, which reads the override for its class
+   and adjusts the instance or remaps the class.
+
+Only step 3 is genuinely engine-specific and it is the same unknown the customiser already
+carries: which of the 24 ASE fields exist on ASA `PrimalItem` (13 do, per the earlier survey)
+and whether a blueprint can set them early enough to matter.
 
 ### Delivering dinos with a kit
 
