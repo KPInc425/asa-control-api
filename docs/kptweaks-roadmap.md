@@ -772,6 +772,18 @@ Returns JSON with `remaining_today` and a `results` array, each entry carrying `
 (discord / wiki / youtube), `date`, `url` and `excerpt`. Limit is **100 searches per day**, the
 key is personal, and the rules forbid republishing results or bulk-copying the archive.
 
+**It is an MCP server, with two ways in.** `https://reddwarfmods.com/overseer/mcp`, Streamable
+HTTP, exposing a single tool `search_ark_modding`. Apps that support MCP OAuth (Claude, Claude
+Code, ChatGPT custom connectors, Cursor, VS Code) add that URL and sign in with Discord. Apps
+that send headers, or cannot, use the key: `Authorization: Bearer ovs_...`, or
+`?key=ovs_...` in the URL for clients with no header support. Staff approve each member once.
+The key comes from `/overseer-api-key` in that Discord, and deleting the key also disconnects
+every app signed in via Discord.
+
+For this machine the **key plus the plain `/api/search` endpoint** is the route, because the
+caller here is a script rather than an MCP connector app. The key belongs in `.env`, never pasted
+into chat or committed, since it identifies KP.
+
 **How to use it, precisely:** as a source of leads, never as a fact. These are chat messages, and
 a confident answer in 2019 about ASE may be wrong for ASA 5.8. The pattern that has been working
 in this project is: Overseer or a mod payload suggests a technique, the devkit or a live test
