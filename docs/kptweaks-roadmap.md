@@ -1061,6 +1061,13 @@ as hair-on-buff and dino-throwing, and a choice or randomiser for the hair style
    whether strains are per-item variants, buffs, or data on the save, and whether biome is
    evaluated at planting, at harvest, or continuously.
 
+## Editor checklist
+
+Everything that needs hands in the editor, ordered by what it unblocks, lives in
+`docs/editor-checklist.md`. Report results back and the roadmap gets updated in the same pass.
+Items 1 to 3 are PIE tests; item 4 is the wall reparent; items 5 and 6 are two five-minute
+inspections.
+
 ## Standing rules for this work
 
 - Cluster members must run an identical mod set, so a KPTweaks version bump is a
