@@ -492,6 +492,35 @@ dino before it goes near a real kit.
 
 Everything else on this page can wait.
 
+## Probe status, 2026-11-12
+
+Static devkit probing is essentially finished. Closed today, all verified live:
+
+| Question | Answer |
+|---|---|
+| Can a blueprint read a file, ini or JSON? | **No.** No file API in `KismetSystemLibrary`, BlueprintFileUtils absent, both JSON libraries absent. Only `DataTableFunctionLibrary` can fill a table from a JSON path. |
+| How does a menu list every item? | `PrimalGameData.master_item_list`, 654 item classes. `engram_blueprint_classes`, 909 engrams. No DataTable needed. |
+| Why do behemoth walls not snap? | 21 snap points exist but `structure_snap_type_flags` is 0 on Metal, Stone and Tek (Wood is 512). Vanilla walls and the game's own S+ large wall both use **8** plus `extra_structure_snap_type_flags` (64,0,0), and parent from `Base_Wall_Large_C` rather than `StructureBaseBP_C`. |
+| Are emotes reachable? | Yes. `emote_anims` is an array on `ShooterCharacter`, `play_emote_animation(emote_index: uint8, invert_gender: bool)` plays by index, and the vanilla wheel is the blueprint `/Game/PrimalEarth/UI/EmoteRadialSelectorBP` which exposes `add_unlockable_emotes`. |
+| Where do creature drops live? | On the dino class: `death_inventory_templates` plus `death_inventory_chance_to_use`. So per-creature drop overrides are possible, and Megalodon prime fish is a template entry rather than a config key. |
+| Can we tame a spawned dino? | By composition: `change_actor_team`, `set_owner`, `bp_setup_tamed(was_just_tamed)`, optionally `set_imprint_player` / `imprint_baby_dino`. There is **no** single set-tamed call; `force_auto_tame` is a bool property. |
+| Is there a structure upgrade API? | **No.** Only demolish: `demolish`, `demolish_just_destroy`, `demolish_structure_and_depending_linked_structures`, `demolish_give_item_crafting_resource_percentage`. So an upgrade hammer is refund-then-place, not a native tier change. |
+
+Still open, and **none of these can be answered by looking at the editor**:
+
+1. **Dino enumeration for the panel.** `PrimalGameData` has no master dino list. Only
+   `additional_allow_download_dino_classes` exists. Options: filter `engram_blueprint_classes`
+   for dino engrams, or maintain a soft class list of our own.
+2. **Does the taming composition actually yield a tamed creature?** Needs PIE with a cheap
+   dino. This gates kit dinos entirely.
+3. **Can a blueprint set item properties early enough for the customiser to matter?** Needs
+   PIE: spawn or receive an item, apply an override, check it sticks.
+4. **Walkable ghosts.** There is no exposed hologram structure class (`PrimalStructureHologram`
+   and similar names do not exist), so Planning Mode's ghost is internal and cannot be reused.
+   A walkable ghost means our own actor with collision, tested in game.
+5. **Cooked behaviour.** Everything above was probed in the editor. A mod is not proven until it
+   runs cooked on a server, which is the Phase 1.5 item already on the list.
+
 ## Standing rules for this work
 
 - Cluster members must run an identical mod set, so a KPTweaks version bump is a
