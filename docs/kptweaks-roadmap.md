@@ -337,6 +337,39 @@ chalkboard that persists and shows to everyone. The compromise is paint resoluti
 paint UI and the save path come for free. A live board is out of scope until the cheaper two
 are exhausted.
 
+### Structure skins are items, confirmed from a shipped cosmetics mod
+
+Inspected `Arkitect's Paradise` (installed as `Mods/83374/1062233_9416083`, 608 assets, 253 MB
+ucas), 2026-11-12. Note it is the cosmetics mod, not Arkitect Structures Remastered, which is
+not installed here, so the "delete mode" and no-build-twice claims still cannot be verified
+locally.
+
+What it proves, which is what KP needs:
+
+- Structure skins are **`PrimalItemStructureSkin_*` items** built on a shared base
+  (`PrimalItemStructureSkinBase_AP`), one per look: `_Chrome`, `_WhiteMarble`, `_FineWood`,
+  `_CleanTiles`, `_ClearGlass`, `_GraniteTiles`, `_WeatheredPlanks`, `_ModernBricks`, and so on
+  for furniture.
+- The item carries its own data: material overrides and actor attachments, plus a boolean flag
+  whose mangled name reads `bCosmetic...skin`, and `ExtraResources` suggesting a cost.
+- There is a `StructuresSkinBase_MultiSwap_AP`, so one item can cycle several looks rather than
+  one per look.
+- It also ships `ArkitectsParadisePrimalStructureDB`, the same structure database pattern as
+  Sprinkles and Dino Depot.
+
+**Consequence: our cosmetics mod is data, not structures.** Each skin is a subclass of the
+vanilla structure-skin item base, pointing at a target vanilla structure and carrying a material
+override. No new structure classes, no variants, no duplication of anything that has a vanilla
+equivalent. That is exactly the "build vanilla metal and skin it" rule, and it means skins are
+cheap to author and cheap to add.
+
+Bonus: because skins are **items**, the kit system can grant them. A cosmetic can be a kit
+reward with no extra machinery.
+
+**Probe to add:** find the vanilla `PrimalItemStructureSkin` base class in the devkit and read
+its properties (target structure class, material override array, the cosmetic flag). That turns
+skin authoring into filling in fields.
+
 ### What Dino Depot does, and the shortcut it suggests
 
 Inspected the installed payload (`Mods/83374/942024_9416341`, 636 assets, 156 MB ucas),
