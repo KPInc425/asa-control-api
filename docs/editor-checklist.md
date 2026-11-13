@@ -34,6 +34,31 @@ A console-only sanity check that costs nothing: type `cheat ForceTame` in PIE wi
 targeted, and see whether the resulting creature is tame and yours. That tells us what a
 correctly tamed dino looks like without involving our code.
 
+### Reference state, measured 2026-11-13 from a console `cheat ForceTame`
+
+Read back from the PIE world after KP tamed the spawned Dodo with the vanilla console command.
+This is the target our own call has to reproduce:
+
+| field | value |
+|---|---|
+| `bp_is_tamed` | **True** |
+| `targeting_team` | 161006563 |
+| `taming_team_id` | 161006563 |
+| player `targeting_team` | 161006563 |
+| `imprinter_name` | empty string, expected for an adult |
+| `dino_id1` / `dino_id2` | 139938077 / 42225625 |
+| `get_owner` | its own AI controller, normal for a dino |
+
+**The assertion is simple: after our call, `taming_team_id` must equal the player's
+`targeting_team`, and `bp_is_tamed` must be true.**
+
+Note the player's team is **161006563**, not 0. So in the harness either pass
+`override_taming_team_id` = the player's `targeting_team`, or pass 0 and check whether it means
+"use the tamer's team". If the dino ends up on team 0, that answers it.
+
+Read-only checks from Python are safe and were used to gather the table above. Do not call
+`tame_dino` from Python.
+
 ## 2. Does `spawn_from_dino_data` reproduce a dino (5 minutes)
 
 Gates: exact-replica kits, and the choice between the two delivery routes.
