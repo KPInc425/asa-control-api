@@ -337,6 +337,47 @@ chalkboard that persists and shows to everyone. The compromise is paint resoluti
 paint UI and the save path come for free. A live board is out of scope until the cheaper two
 are exhausted.
 
+### What Dino Depot does, and the shortcut it suggests
+
+Inspected the installed payload (`Mods/83374/942024_9416341`, 636 assets, 156 MB ucas),
+2026-11-12. Same evidence limits as Sprinkles: asset names and identifiers, not decompiled
+logic.
+
+What it is:
+
+- **`DD_CaptureComponent`** does capture and release. The dinoball is a container; the logic is
+  a component. `BuffDinoDepot` and `BuffCryoConversion` sit alongside it.
+- **`DinoInABallArguments`** carries the dino as data: species, current level, `MaxLevel`,
+  mutations, `Tamed`, `Leveled`, `TamingEffectiveness`, imprint assignment (`AlwaysGiveToReleaser`,
+  `ImprintAssignmentModes`), trait manager data, time since capture, and `RestoreSettings`.
+- Structures: `Dino_Depot_Terminal_*` variants, `DinoballStorageBox`, `DepotGeneStorage`, plus a
+  `DinoDepotPrimalStructureDB` and `DD_CacheStateSaveGame`.
+- Behaviour is configured through **enums**, not free values: `CaptureInventoryHandlingModes`,
+  `CaptureGestatingModes`, `CapturePlatformModes`, `PostReleaseBuffModes`, `ReleaseFailReasons`,
+  `DeathAutoCaptureMode`.
+- Save games: `ModSettingsSaveGame`, `ModCacheSaveGame`, `DD_CacheStateSaveGame`,
+  `ClientPreferencesSaveGame`.
+
+Two things to take:
+
+1. **The pattern for a kit token is a struct of dino state plus a spawn step**, exactly as
+   suspected, and this list is the field inventory to start from. Note how much state matters
+   for a dino to feel right: imprint owner, taming effectiveness, mutations, traits. A minimal
+   token that only carries species and level will produce a creature that is legally tamed and
+   visibly wrong.
+2. **`BuffCryoConversion` means vanilla cryopod data is readable and writable by a mod.**
+   That raises a much cheaper option for kit dinos than the tamable-spawn composition: if a
+   blueprint can build a cryopod item that already contains a dino, the kit simply grants that
+   pod and vanilla does the rest. No team setting, no tamed setup, no imprint plumbing.
+
+**Probe to add, and rank it first for the next session:** does the vanilla cryopod item class
+expose functions for setting or writing the stored dino (something like a set-cryo-data or
+capture path)? If yes, kit dinos become an item-grant problem, which the kit system already
+solves. If no, fall back to the composition test.
+
+Also worth copying: enums for finite modes rather than numbers, which makes an admin panel far
+more usable than free-form fields.
+
 ### What Vanilla with Sprinkles does instead of remapping
 
 KP spotted that Sprinkles claims it does not remap items to set stack size. Inspected the
