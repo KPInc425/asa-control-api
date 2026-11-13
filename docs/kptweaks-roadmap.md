@@ -370,6 +370,52 @@ reward with no extra machinery.
 its properties (target structure class, material override array, the cosmetic flag). That turns
 skin authoring into filling in fields.
 
+### Arkitect Structures Remastered: variants, comm components, skin entries, tier tags
+
+Inspected the installed payload (`Mods/83374/931874_9555651`, 6,014 assets, 1.6 GB ucas),
+2026-11-12. Asset names plus a 700 MB string scan of the payload; the scan did not cover the
+whole file, so absence of a name below is not proof it is absent.
+
+ASR is four mechanisms, and each one answers something on our list:
+
+1. **`SkinEntries`.** A property of type array with per-entry `Guid`, seen on the structure
+   assets. So a placed structure carries a list of applied skin entries and keeps them. This is
+   the concrete answer to "how do I skin a structure that is already built": the structure
+   stores its own skin records.
+2. **Comm components.** `ASR_Comm_C`, `ASR_Comm2_C`, plus `ASR_StructureComm`, `ASR_DoorComm`,
+   `ASR_LightComm` and `ASR_SingletonComm` in `/ArkitectStructures/_Interfaces/`. Structures get
+   behaviour through an interface plus a component and a coordinating singleton, which is how a
+   mod improves placed objects without replacing their classes. Same idea as Sprinkles'
+   structure hook, taken further.
+3. **Variants.** `ASR_Variants`, `ASR_Variant_Data`, `ASR_Variant_Data_Array`,
+   `Widget_ASR_VariantMenu`, with content in per-tier folders like `ASR_VariantsRoofs/Base/...`.
+   "No need to build twice" is mesh and material swapping on a structure that already exists.
+4. **Tiers as tags.** An `ASR_Tiers` enum plus a `TierTag` string, with tier items
+   (`PrimalItemStructure_ASR_Metal_Tier` and friends for Thatch through Tek). Tiers are tracked
+   as tags rather than being baked into distinct structure classes, which is what would let a
+   tier change happen in place rather than by demolish and rebuild.
+
+Also present: `ArkitectStructuresPrimalStructureDB` and `ArkitectStructuresPrimalInventoryDB`,
+`ASR_ServerSaveData` / `ASR_ClientSaveData`, per-material settings assets
+(`StructureSettings_ASR_Metal`, `_MetalGlass`, ...), and UI for copy, dye, glass, structure
+settings, user settings and server settings.
+
+**Three takeaways for us:**
+
+- **Skins on built structures are stored on the structure**, so our cosmetics mod needs a data
+  record per structure, not a rebuild. `SkinEntries` is the shape to copy.
+- **Tier by tag, not by class**, is the route around having no upgrade API. If a structure's tier
+  is a tag rather than its class, an upgrade is a tag change plus a mesh/material swap, which is
+  far cheaper than demolish and re-place, and avoids losing stored contents.
+- **Master blueprint per piece family.** Names like `BP_ASR__Doorframe_Skinny_Quarter_Master`
+  show one master parent per piece family with tier children. That is the pattern our behemoth
+  walls should adopt instead of parenting from the bare `StructureBaseBP_C`: define snap points
+  once on a master and inherit them.
+
+Still unverified: no `Upgrade`, `Delete` or `Copy` identifiers appeared in the portion scanned,
+so ASR's delete mode and any mass-upgrade behaviour are still not confirmed, only its widgets
+named for them.
+
 ### What Dino Depot does, and the shortcut it suggests
 
 Inspected the installed payload (`Mods/83374/942024_9416341`, 636 assets, 156 MB ucas),
