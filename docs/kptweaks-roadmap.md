@@ -337,6 +337,44 @@ chalkboard that persists and shows to everyone. The compromise is paint resoluti
 paint UI and the save path come for free. A live board is out of scope until the cheaper two
 are exhausted.
 
+### What Vanilla with Sprinkles does instead of remapping
+
+KP spotted that Sprinkles claims it does not remap items to set stack size. Inspected the
+installed mod payload (client `Mods/83374/1188679_9416935`, 191 assets, 211 manifest entries),
+2026-11-12. This is string and asset-name evidence from the packed build, not decompiled logic,
+but the architecture is unambiguous.
+
+What it contains:
+
+- **`ItemCDO`** as an identifier, in the same asset as item modifier code. So it caches and
+  works on the item's **class default object** rather than creating variant classes.
+- `SprinklesItemModifierStackConfig`, `SprinklesDinoModifierStackConfig`, `SprinklesStackConfig`,
+  `SprinklesStackPresets` describing configuration.
+- Per-concern **save games**: `SprinklesSaveGame`, `SprinklesStackConfigSaveGame`,
+  `SprinklesGunSaveGame`, `SprinklesHotbarPresetSaveGame`, `SprinklesPushRequestSaveGame`,
+  `SprinklesDevSaveGame`.
+- A **`SprinklesStructureHookComponent`** (with a `VWS_StructureHook` class), a
+  `SprinklesPrimalStructureDB`, and a `CachedStructureDataMap`. So structures are hooked and
+  cached rather than replaced.
+- Items as tools: `ItemPickupGun`, `ItemDinoGun`, `ItemVariantGun`, `ItemDevGun`,
+  `SprinklesStackModifierItem`.
+- A settings dialog with row widgets (`SprinklesModSettingsDialog`, `SprinklesSliderRow`,
+  `SprinklesCategoryData`).
+
+**Two conclusions that change our plan.**
+
+1. **Do not remap for the customiser.** Sprinkles sets stack size on the CDO instead, which is
+   why existing items and stack merging keep working. The earlier plan leaned on the ASE mod's
+   class remapping; for ASA the CDO route is the shipped, working pattern, and it is simpler.
+2. **`SprinklesStructureHookComponent` is the answer to how placed structures get modified.**
+   That is the lead for applying skins to already-built structures, which was the most valuable
+   open item on the hammer list. A hook component plus a cached structure DB is exactly the
+   shape needed.
+
+Also worth noting the shape they chose overall, because it matches what we converged on
+independently: per-concern save games, config assets for authored data, a hook component for
+world objects, and item-based tools for player actions.
+
 ### Template Hammer enhancements, and why they are one feature with the upgrade hammer
 
 KP's list after using the vanilla hammer, 2026-11-12:
