@@ -59,6 +59,26 @@ Note the player's team is **161006563**, not 0. So in the harness either pass
 Read-only checks from Python are safe and were used to gather the table above. Do not call
 `tame_dino` from Python.
 
+### First harness run, 2026-11-13: three graph bugs, API is fine
+
+Result: two wild dodos, both `targeting_team 1`, `taming_team_id 0`, while the player was team
+161006563. An earlier run of the same graph printed `Server: Targeting Team: 161,006,563`,
+`Is Tamed: true`, so **`tame_dino` works**. The failures were the graph.
+
+1. **`BeginPlay` runs in both worlds.** The chain executed on server and client, summoning two
+   dodos and printing twice (the paired Client/Server lines on screen). Gate everything behind
+   `Switch Has Authority` and use the Authority pin only.
+2. **`Specific Player` was unconnected on `Execute Console Command`.** A `cheat` command with no
+   player context runs as the server, so the spawned dino lands on wild team 1.
+3. **`Get(0)` is ambiguous with more than one dino.** Clear the field first: `Get All Actors of
+   Class` -> `For Each Loop` -> `Destroy Actor`, then summon, then index 0 is the only dino.
+
+Revised order: `BeginPlay` -> `Switch Has Authority` (Authority) -> clear all
+`PrimalDinoCharacter` -> `Delay` 0.5 -> `Execute Console Command` with `Specific Player` =
+player controller 0 -> `Delay` 1.5 -> `Get All Actors of Class` -> `Get` 0 -> `Tame Dino`
+(`for_pc` = player controller 0, `override_taming_team_id` = 0, `prevent_name_dialog` = true) ->
+print `BP Is Tamed` and `Targeting Team` on the server.
+
 ## 2. Does `spawn_from_dino_data` reproduce a dino (5 minutes)
 
 Gates: exact-replica kits, and the choice between the two delivery routes.
