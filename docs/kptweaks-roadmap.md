@@ -753,6 +753,48 @@ dino before it goes near a real kit.
 
 Everything else on this page can wait.
 
+## tame_dino exists: no capture required (2026-11-13)
+
+KP's objection was right, and the fix is one call. `PrimalDinoCharacter` exposes:
+
+```
+tame_dino(for_pc=None, ignore_max_tame_limit=False, override_taming_team_id=0,
+          prevent_name_dialog=False, skip_adding_tamed_levels=False,
+          suppress_notifications=False, prevent_dossier_and_milestones=False)
+```
+
+So an admin does **not** have to capture a creature first. Spawn the dino class, then
+`tame_dino` with `for_pc` set to the claimer, `override_taming_team_id` set to their tribe and
+`prevent_name_dialog` true.
+
+That gives two routes, and they are for different jobs:
+
+- **Spawn plus `tame_dino`** for "a level N rex for this player". No payload, no capture, no
+  species list beyond the class.
+- **`spawn_from_dino_data`** for an exact replica: same stats, colours, mutations, imprint. The
+  admin captures once and the payload is reused forever.
+
+`force_auto_tame` is a bool property, not a call, which is what misled the earlier probe.
+
+## Video in game: the framework is present (2026-11-13)
+
+The devkit has the full media stack: `FileMediaSource`, `StreamMediaSource`,
+`PlatformMediaSource`, `ImgMediaSource`, `MediaPlayer`, `MediaTexture`, `MediaSoundComponent`.
+The `/videoPlayer` content folder is only the BlankMod starter (BlankMod, ModDataAsset,
+PrimalGameData, TestMapArea), so nothing is built yet.
+
+Feasible: play your own video from a file or a direct stream URL into a MediaTexture on an
+in-world screen.
+
+The hard part is specifically **YouTube**, not video in general. YouTube page URLs are not
+streams; playback needs a direct media URL, and the ones extracted from YouTube expire and
+break. Realistic options are (a) host your own MP4 or HLS and play that, (b) run a resolver on a
+server that hands the mod a short-lived direct URL, refreshed as needed. Option (b) is a
+service to maintain, not a one-off, and it sits badly against YouTube's terms.
+
+Also worth knowing before building: streaming to many clients is bandwidth, and codec support
+varies by platform.
+
 ## Dino data: VERIFIED, 2026-11-13, and it replaces the whole taming plan
 
 The Overseer lead was right. On `PrimalDinoCharacter`:
@@ -979,6 +1021,45 @@ Still open, and **none of these can be answered by looking at the editor**:
    A walkable ghost means our own actor with collision, tested in game.
 5. **Cooked behaviour.** Everything above was probed in the editor. A mod is not proven until it
    runs cooked on a server, which is the Phase 1.5 item already on the list.
+
+## Alien Plants: backlog pulled from the Obsidian vault, 2026-11-13
+
+Notes found at `E:\Obsidian`, all from 2024 and therefore possibly stale. Worth re-checking each
+against the live build rather than trusting the list.
+
+**Known bugs, from `Alien Plants/Bugs.md` and the two Todo notes:**
+
+- Drying hut collision box: cannot walk on the roof.
+- Dino lift looks glitchy and is too fast; wild dino "yeeting" needs toning down.
+- Bud stays in the world after destruction, though it does vanish eventually.
+- Products spoil too quickly in crop plots.
+- Moldy plant matter becomes an issue while growing.
+- Settings all revert to 0.
+- "Contact high" buff yeets other players.
+- Drying hut takes longer than curing.
+- If a player logs off during an active buff, the hair stays changed.
+- Missing textures: hut atlas, and the particle effect on wild plants.
+- Plant size adjustments unchecked when fully grown.
+- Harvest component for the plant never figured out.
+
+**Documentation debts:** update the engram list, update spawn codes, document the new product
+flow publicly, add structure instructions into item descriptions, fuel notes for the doobie
+roller.
+
+**Config work already imagined:** tabbed config (global, plant, misc), per-feature toggles such
+as hair-on-buff and dino-throwing, and a choice or randomiser for the hair style granted.
+
+**New asks from KP, 2026-11-13:**
+
+1. **Grow lights** were never finished. Needs finishing plus **snapping**, which is currently
+   rough. Snap fix follows the same rules as the behemoth walls: declare `snap_points` and set
+   `structure_snap_type_flags` to match the vanilla piece family.
+2. **Greenhouse effect for nearby plants.** A grow light should count as shelter for the crop
+   plots in range. Probe needed: how a crop plot decides it has greenhouse coverage, and whether
+   that can be granted from a nearby actor rather than an enclosing structure.
+3**Biome-specific strains and effects.** A design direction, not a task yet. Needs a decision on
+   whether strains are per-item variants, buffs, or data on the save, and whether biome is
+   evaluated at planting, at harvest, or continuously.
 
 ## Standing rules for this work
 
