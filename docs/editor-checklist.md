@@ -3,19 +3,36 @@
 Ordered by what unblocks the most work. Each item says what to do and what to report back.
 Items 1 to 3 are PIE tests on a throwaway map; nothing touches the live cluster.
 
-## 1. Does `tame_dino` work on a spawned dino (2 minutes)
+## 1. Does `tame_dino` work on a spawned dino (5 minutes)
 
 Gates: kit dinos.
 
-- Open a throwaway map in PIE. Start PIE with **Play Persistent Player** ticked if you want the
-  save step in item 3 to work.
-- Spawn a cheap dino, for example a Dodo, with `Spawn Actor from Class`.
-- Call `tame_dino` on it with:
-  - `for_pc` = your player controller
-  - `override_taming_team_id` = your tribe id
-  - `prevent_name_dialog` = true
-- Report: does it come out tame, owned by you, on the right team, with no name dialog? Any error
-  in the log?
+**Do not do this from Python.** Calling `tame_dino` from editor Python crashed the editor on
+2026-11-13 because the MCP handler is not on the game thread. The call has to come from a
+Blueprint, where the engine owns the thread.
+
+Build one throwaway actor, `BP_KPT_TameTest`, parent **Actor**, and wire:
+
+1. `Event BeginPlay`
+2. `Delay` 3.0
+3. `Execute Console Command`, command `cheat Summon Dodo_Character_BP_C`, world context self
+4. `Delay` 1.5
+5. `Get All Actors of Class` (`PrimalDinoCharacter`), then `Get` index 0
+6. `Cast to PrimalDinoCharacter`
+7. `Tame Dino` from the cast result: `for_pc` = `Get Player Controller` (index 0),
+   `override_taming_team_id` = 0, `prevent_name_dialog` = true
+8. `Print String` of `BP Is Tamed` from the same dino, plus `targeting_team`
+
+Drop the actor into the throwaway map, press Play, watch the log.
+
+Report: does the dodo come out tame, with no name dialog, and does the log show any warning?
+If the editor crashes here, that is a finding too, and it would mean `tame_dino` itself is
+unstable rather than the Python thread. Tick **Play Persistent Player** in World Settings now if
+you want the save step in item 3 to work later.
+
+A console-only sanity check that costs nothing: type `cheat ForceTame` in PIE with a wild dino
+targeted, and see whether the resulting creature is tame and yours. That tells us what a
+correctly tamed dino looks like without involving our code.
 
 ## 2. Does `spawn_from_dino_data` reproduce a dino (5 minutes)
 
