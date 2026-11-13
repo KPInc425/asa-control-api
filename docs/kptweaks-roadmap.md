@@ -753,6 +753,46 @@ dino before it goes near a real kit.
 
 Everything else on this page can wait.
 
+## Overseer: the ARK Modding Discord archive, as a searchable API
+
+`https://www.reddwarfmods.com/overseer/` is an archivist bot over ten years of the ARK Modding
+Community Discord (1.39M messages, 149k conversations), with an API that any AI tool can query.
+
+Endpoint, verified from the API page 2026-11-12:
+
+```
+GET|POST https://reddwarfmods.com/overseer/api/search
+  Authorization: Bearer ovs_<key>
+  q=<query>          required
+  game=ASA|ASE       optional
+  limit=1..10        default 5
+```
+
+Returns JSON with `remaining_today` and a `results` array, each entry carrying `source`
+(discord / wiki / youtube), `date`, `url` and `excerpt`. Limit is **100 searches per day**, the
+key is personal, and the rules forbid republishing results or bulk-copying the archive.
+
+**How to use it, precisely:** as a source of leads, never as a fact. These are chat messages, and
+a confident answer in 2019 about ASE may be wrong for ASA 5.8. The pattern that has been working
+in this project is: Overseer or a mod payload suggests a technique, the devkit or a live test
+confirms it. This session alone produced two corrections (DataTables, and the upgrade API) that
+came from looking rather than asking.
+
+**Questions worth spending the quota on**, because they are the ones chat history plausibly
+answers and the devkit does not:
+
+1. Does the vanilla cryopod item class expose a way to set the stored dino? This decides whether
+   kit dinos are an item grant or a taming composition.
+2. How do ASA mods read configuration now that ini files are out of favour? Our kit config
+   decision rests on this, and a blueprint cannot read files.
+3. Is there any way to give a planning hologram collision, and has anyone tried walkable ghosts?
+4. Does `change_actor_team` plus `bp_setup_tamed` actually produce a working tame, or is there a
+   missing step nobody documents?
+5. How do mods enumerate dinosaur classes when `PrimalGameData` has no master dino list?
+
+Getting a key: `/overseer-api-key` in the ARK Modding Community Discord, then staff approval.
+Once KP has one, the search is a single curl and can be wired in as a tool.
+
 ## Probe status, 2026-11-12
 
 Static devkit probing is essentially finished. Closed today, all verified live:
