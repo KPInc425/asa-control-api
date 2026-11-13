@@ -391,20 +391,36 @@ State as of 2026-11-10, so the next session starts oriented rather than re-deriv
 The question for that session is not "what else can we add" but **which two of these move the
 mod forward**, since the kit work is the only thing currently proven.
 
-**When the devkit is open, in this order:**
+**Answered 2026-11-12, live in the devkit (UE 5.8.3, devkit 95.14.338).**
 
-1. **Can a blueprint read the file?** `docs/kit-test-5-config-loader-clickthrough.md` Step 0:
-   read `D:\ARK\bridge\kits.txt` and print its length. Everything about config-driven kits
-   depends on it, and a zero or a missing node changes the design in an hour rather than a
-   week. This is the only item on the critical path.
-2. **Behemoth wall snap points.** Compare the wall's structure class against a vanilla
-   behemoth gate frame: does it declare snap sockets, and do they match vanilla layout. If
-   they do not, that is the entire cause of the clunk and the fix is authoring sockets, not
-   redrawing meshes.
-3. **Is the emote list reachable from a blueprint?** If not, emote favourites is a replacement
-   UI and should be priced as such before anyone commits to it.
+1. **Can a blueprint read a file? NO.** `KismetSystemLibrary` (310 names) exposes no file read
+   or write, only directory getters (`get_project_directory`, `get_project_saved_directory`).
+   The BlueprintFileUtils plugin is not present, and neither JSON library exists
+   (`BlueprintFileUtilsBPLibrary`, `JsonUtilities.*` both missing). The only file-ish API in
+   the engine is `DataTableFunctionLibrary.fill_data_table_from_json_file` /
+   `_from_json_string`, which fills a DataTable from a path and needs a DataTable asset.
+   **The dashboard-writes-kits.json-and-the-mod-reads-it design does not work in a
+   blueprint-only mod.** Options: bake a DataTable into the mod at cook time (config then
+   needs a mod rebuild, so the dashboard becomes read-only reporting), define kits in the
+   graph and manage them with the in-game panel, or test whether the DataTable JSON fill
+   survives cooking (unverified, and it would still need an in-memory DataTable).
+2. **Behemoth walls: the snap flags are zero.** All four declare 21 snap points, so sockets
+   were authored, but three of the four report `structure_snap_type_flags = 0` (Metal, Stone,
+   Tek) and Wood reports `512`. Compare: vanilla `Wall_Metal` has 32 snaps, flags **8**, and
+   `extra_structure_snap_type_flags` of IntVector(64,0,0); the game's own S+
+   `BP_LargeWall_Metal` has 74 snaps, flags **8**, same extra flags, and parents from
+   **`Base_Wall_Large_C`**. The behemoth walls parent from the bare `StructureBaseBP_C`.
+   Fix, in order of preference: reparent to `Base_Wall_Large_C` so they inherit the large-wall
+   snap set and placement rules; then set `structure_snap_type_flags = 8` and
+   `extra_structure_snap_type_flags = (64,0,0)` on all four so they match each other. Do the
+   reparent on one piece first and test snapping before touching the other three.
+3. **Emote list: reachable, confirmed.** `ShooterCharacter` exposes `emote_anims` and
+   `emote_anims_gender_override` plus `play_emote_animation`, `on_emote_finished` and
+   `net_force_call_emote_finished`, and `PrimalBuff` can intercept another player's emote via
+   `intercept_instigator_player_emote_anim`. Emote favourites is a stored list plus a trigger,
+   not a replacement UI.
 
-Everything else on this page can wait for those three answers.
+Everything else on this page can wait.
 
 ## Standing rules for this work
 
