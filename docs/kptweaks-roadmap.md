@@ -753,6 +753,44 @@ dino before it goes near a real kit.
 
 Everything else on this page can wait.
 
+## Overseer searches, 2026-11-13 (3 spent, 97 left)
+
+Approved. Three questions asked, limit 5-6 each. These are community leads with dates, not
+verified facts.
+
+### Get Dino Data and Spawn from Dino Data probably exist (2026-09 thread)
+
+A September 2026 thread answers "is there a node that stores all the information about a
+dinosaur" with a screenshot naming **`Get Dino Data`** (input: Primal Dino Character, output:
+Dino Data) and then **`Spawn from Dino Data`** (input: Dino Data). If both are blueprint
+callable, kit dinos become: build or capture a Dino Data payload, then spawn from it. That is
+strictly better than the taming composition and better than a cryopod hack.
+
+**Not yet verified.** The editor was closed when this came up, and my own earlier probe of
+`PrimalDinoCharacter` filtered on tame/imprint/owner/team/cryo/spawn, which would not have
+matched `get_dino_data`. **Next devkit session, first check: does `get_dino_data` exist on
+`PrimalDinoCharacter`, and is there a `spawn_from_dino_data`?** If yes, the kit dino design
+changes to a data payload plus one spawn call.
+
+Related, same neighbourhood: a 2026-03 note that "with the new binding on shootergame you can
+just write your own CID to the cryo", and a 2026-01 complaint about "the Get cryo" node, both
+implying cryopod dino data is at least partly readable and writable from blueprints.
+
+### Dinosaur enumeration: there is no such function (2025 threads, several)
+
+Repeated and consistent: no working "get all classes of type" for dinos in a live game.
+Community practice is **a hardcoded list of vanilla dinos plus the enabled-mod classes list**
+for modded dinos, and the devkit has an asset-based way to build the list but it does not ship.
+That settles the panel gap: we maintain our own soft class list, seeded from a hardcoded vanilla
+set, optionally extended by active mod classes.
+
+### Taming a spawned dino: buggy, and the taming team is the sticking point
+
+2026-03: someone running Spawn Dino, Tame Dino, Set Targeting Team, Set Rider reports it is
+buggy. 2025-09: the answer to a failed tame is "you need the taming team", with confusion over
+whether the value should be 0 or 1. So even the composition route has a known sharp edge. If
+`Spawn from Dino Data` works, it sidesteps this entirely.
+
 ## Probes, 2026-11-13: skins, cryopods, emotes, weight
 
 Run live in the devkit (UE 5.8.3) via the MCP endpoint.
