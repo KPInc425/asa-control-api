@@ -370,6 +370,62 @@ reward with no extra machinery.
 its properties (target structure class, material override array, the cosmetic flag). That turns
 skin authoring into filling in fields.
 
+### Automated Ark and Cyber's Structures: the automation blueprint
+
+Inspected both installed payloads, 2026-11-12. Asset names only, no decompilation, but these two
+are the closest prior art we have for the sweeper and feeder and they answer design questions
+we had left open.
+
+**Automated Ark** (`928597`, 944 assets):
+
+- Automated structures: `AATekTrough`, `AACompostBin`, `AutoCompostBin`, `Incubator`, `EggCrate`,
+  `BP_IND_CropPlotSetter`.
+- **Pulling is implemented as buffs**: `BuffCustomPulling`, plus variants per station
+  (`_Benchn`, `_Chem`, `_Fab`, `_Smith`, `_AAMortarPestle`), a `Buff_AA_PullMenu_Main` for the UI,
+  and `Buff_PullMultiplier_AA`. So pull behaviour is attached to an existing station by a buff
+  rather than by a new class.
+- Range feedback: `RangeSphereMatAA`, `SiloShowRangeAA_MAT`.
+- The usual `PrimalStructureDB` / `PrimalInventoryDB` / `ShooterWeaponDB` cache assets.
+
+**Cyber's Structures QOL+** (`940975`, 2,702 assets):
+
+- **The nanny and gardener are structures with inventories plus buffs**: `Nanny_CS` with
+  `PrimalInventory_Nanny_CS`, `Buff_NannyFeed_CS`, `Buff_NannyImprint_CS`; `Gardener_CS` and
+  `Farmer_CS` with their own inventories. The automaton is a placed object that owns an
+  inventory and applies effects, not a global actor that scans the world.
+- **The item collector is a composed object with staged data**:
+  `CS_ItemCollector_ComObject`, `CS_ItemCollectorCollectData`, `CS_ItemCollectorInvCollectData`,
+  `CS_ItemCollectorDistributeData`. Collection and distribution are separate stages with their
+  own payloads.
+- **Wireless transfer is a request protocol**: `BPI_WirelessTransfer`, `CS_WirelessTransfer`,
+  `CSTransferFunctions`, `CSTransferRequest`, `CSTransferInventoryData`, plus
+  `GameComp_HatcheryTransfer` and `GameComp_IncubationTransfer`.
+- **Storage is linked and ranged**: `CS_DedicatedStorage`, `CSLinkedStorage`, `GlobalWirelessRanges`,
+  `MI_CSRangeIndicator`, with range widgets.
+- Also `CS_CropPlotManager`, `CSAutoDoor_Data`, `AutoCrafter_CS`, `EggIncubator_CS`,
+  `Cybers_EggFilter`, `Buff_CS_ItemAggregator`, `CSItemMap`, `CS_Enum_AggregatorItemType`.
+
+**Four design lessons for our sweeper and feeder, all of which change what we had planned:**
+
+1. **Stage collection separately from distribution.** Cyber's splits collect from distribute with
+   distinct data payloads. That means a sweep can be interrupted or deferred without half-moving a
+   stack, and it makes each stage testable on its own. Our plan was one loop that picked up and
+   deposited; this is better.
+2. **Put the automaton in a structure with an inventory, and let buffs do the effects.** The nanny
+   works because it is a placed object with `PrimalInventory_Nanny_CS` and buffs for feeding and
+   imprinting. That means our feeder does not need a new global actor: it can be a buff plus an
+   inventory behaviour on the structures that already exist.
+3. **Use buffs as capability carriers.** Automated Ark gives pull behaviour to existing stations by
+   attaching `BuffCustomPulling_*`. Same pattern KPTweaks already uses for the raft. This is how we
+   add behaviour to a vanilla structure without a new class.
+4. **Move items by request, not by direct write.** The wireless transfer system is a request struct
+   plus inventory data plus a component handler. Direct cross-inventory writes are what break under
+   load and stutter; a request protocol with a queue is how a shipped mod does it.
+
+Combined with the earlier findings, the shape for our automation is: structure or buff for the
+actor, staged data payloads for the work, a request protocol for cross-inventory moves, config via
+data assets, and a structure DB for caching lookups.
+
 ### Arkitect Structures Remastered: variants, comm components, skin entries, tier tags
 
 Inspected the installed payload (`Mods/83374/931874_9555651`, 6,014 assets, 1.6 GB ucas),
