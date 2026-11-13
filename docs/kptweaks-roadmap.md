@@ -337,6 +337,53 @@ chalkboard that persists and shows to everyone. The compromise is paint resoluti
 paint UI and the save path come for free. A live board is out of scope until the cheaper two
 are exhausted.
 
+### Template Hammer enhancements, and why they are one feature with the upgrade hammer
+
+KP's list after using the vanilla hammer, 2026-11-12:
+
+1. Building a template requires every structure item in inventory, and the weight limit makes
+   large templates impossible. Wanted: pay in **raw resources** instead of finished pieces, and
+   a weight boost while in range of a template.
+2. Adjustable auto-build speed.
+3. Interacting is blocked while holding the hammer, so doors and containers cannot be opened.
+4. The hammer exposes a structure **tier** setting, possibly reusable.
+5. Completing a template offers a skin for that build. Wanted: apply a skin to structures
+   already placed, independent of templates.
+
+**The key insight, and it changes the size of item 1.** Do not modify the hammer's build path.
+Mint the structure items from resources at build time: read each piece's crafting cost, consume
+those resources from inventory, and add the resulting structure item to the inventory, then let
+the vanilla hammer place it exactly as it does today. `add_item_object` and
+`add_item_object_ex` on `PrimalInventoryComponent` are already verified primitives, and the
+crafting cost per structure item is readable from the item's own resource requirements.
+That turns a hammer rewrite into an inventory trick, and it keeps vanilla placement, snapping
+and template bookkeeping intact.
+
+Item 5 is the one worth doing **first and separately**, because it does not need the hammer at
+all: applying a skin to an existing structure is the same feature cosmetics needs, and it would
+also satisfy the desire to re-skin a finished base.
+
+Design notes:
+
+- **Weight (item 1b):** a buff granted while near an active template, modifying the carry
+  limit, rather than changing weight rules globally. Needs a probe for the weight multiplier
+  hook on `ShooterCharacter` or `PrimalInventoryComponent`.
+- **Interacting (item 3):** holding an item class that blocks interaction is a weapon-state
+  behaviour, so a copy of the hammer item could re-enable it. Whether that is a property or
+  hard-coded behaviour needs a probe of the item class.
+- **Auto-build speed (item 2):** only adjustable if the build loop is a blueprint. If the
+  hammer is native, the speed is not ours to change, and this item dies.
+- **Tier (item 4):** if the hammer's tier setting maps to a structure class or quality, it may
+  be reusable for the upgrade hammer's refund-and-replace step.
+
+### Probes for the next devkit session (hammer and skins)
+
+1. Is the template hammer a blueprint or native? If native, items 2 and 3 are off the table.
+2. Does `PrimalStructure` expose anything that applies a skin to a placed structure? This is the
+   most valuable single probe, since it unlocks item 5 and the cosmetics mod together.
+3. What weight-multiplier hook exists on `ShooterCharacter` or `PrimalInventoryComponent`?
+4. What does the hammer's tier setting actually control?
+
 ### Upgrade hammer: mass upgrade with material pull
 
 Wanted: upgrade large swathes of a base in one action, pulling the materials from nearby
