@@ -393,6 +393,51 @@ mod forward**, since the kit work is the only thing currently proven.
 
 **Answered 2026-11-12, live in the devkit (UE 5.8.3, devkit 95.14.338).**
 
+**DECISION following the file-read result: kits are configured in an in-game admin panel, not
+from files.** KP's call, and it matches the direction of the platform: in-game configuration is
+now the norm rather than ini files. The panel composes kits, stores them in a SaveGame (the
+mechanism already proven by the claim marker), and the dashboard becomes a readout.
+
+Consequence worth stating plainly: the API kit bridge (`kits.json`, `queue.json`,
+`results.json`) has no consumer in a blueprint-only mod. Keep the code, but do not build on it
+until something proves a delivery path.
+
+Panel design that fits the proven pieces:
+
+- A curated **DataTable asset inside the mod** holds the selectable items and creatures (class
+  path plus a display name). This is the one thing that must be baked at cook time, because a
+  blueprint cannot enumerate the asset registry at runtime.
+- Search is a filter over that table's display names, so it stays a UI problem rather than a
+  data problem.
+- Admin composes a kit, saves it into `KPTweaksSave`, and the claim path already built serves
+  it.
+
+### Delivering dinos with a kit
+
+KP's reference: an old ASE vault mod that handed over a purchased dino inside a one-time-use
+orb, like a cryopod you release. That is the right shape, and it avoids trying to add a tame
+to an inventory as if it were an item.
+
+What the devkit gives us on `PrimalDinoCharacter` (probed 2026-11-12):
+
+- `change_actor_team(new_team)` to put it on the player's tribe.
+- `set_owner(actor)` for ownership replication.
+- `bp_setup_tamed(was_just_tamed)` to run the tamed setup path.
+- `set_imprint_player(char)` and `imprint_baby_dino(player_controller, skip_naming)` if the kit
+  should hand over an imprinted creature.
+- Cryo lifecycle hooks exist (`bp_can_cryo`, `on_cryo`, `on_uncryo`) but are not needed: a
+  kit token is simpler than cryo storage.
+- **There is no single "set tamed" function.** `force_auto_tame` is a bool property, not a
+  call, so taming a spawned creature is a composition of the four calls above.
+
+Design: the kit grants a **kit token item**, a PrimalItem subclass that on use spawns the
+creature, applies team, owner and optional imprint, then destroys itself. One use, one dino, no
+inventory slot for a live creature.
+
+**Unverified and the first thing to test:** whether that composition yields a properly tamed
+creature, in particular the team plus tamed-setup pair. Test on a throwaway map with a cheap
+dino before it goes near a real kit.
+
 1. **Can a blueprint read a file? NO.** `KismetSystemLibrary` (310 names) exposes no file read
    or write, only directory getters (`get_project_directory`, `get_project_saved_directory`).
    The BlueprintFileUtils plugin is not present, and neither JSON library exists
