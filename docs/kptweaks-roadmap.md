@@ -753,6 +753,58 @@ dino before it goes near a real kit.
 
 Everything else on this page can wait.
 
+## Dino data: VERIFIED, 2026-11-13, and it replaces the whole taming plan
+
+The Overseer lead was right. On `PrimalDinoCharacter`:
+
+```
+get_dino_data() -> ARKDinoData
+peek_dino_data(dino_data, run_blueprint_construction=False) -> PrimalDinoCharacter
+spawn_from_dino_data(dino_data, world, at_location, at_rotation,
+                     for_team=0, generate_new_dino_id=False,
+                     tamer_controller=None) -> PrimalDinoCharacter
+spawn_from_dino_data_ex(..., dont_update_download_time=False,
+                        skip_controller_checks=False) -> (PrimalDinoCharacter, duped_dino)
+```
+
+`ARKDinoData` is a struct with `dino_class`, `dino_data` (an array, the serialised blob),
+`dino_name`, `dino_name_in_map`, `net_info_from_client`, `painting_revision_map`,
+`unique_painting_id_map`.
+
+**Note the parameters that make this a kit feature rather than a copy tool:** `for_team` sets the
+owning tribe, `tamer_controller` attributes the tame, and `generate_new_dino_id` avoids id
+collisions when the same data is spawned repeatedly. There is no `set_dino_data`, so data always
+comes from a real creature via `get_dino_data`; it cannot be authored by hand.
+
+`peek_dino_data` decodes data into a transient, unregistered dino purely so ordinary property
+reflection can read or write fields. That is how a kit could tweak level, stats or imprint after
+capture without spawning anything.
+
+### What this changes
+
+**The taming composition is dead.** No `change_actor_team`, no `set_owner`, no
+`bp_setup_tamed`, no taming-team value of 0 or 1 to argue about. Kit dinos become:
+
+1. An admin captures a reference creature with `get_dino_data` and the kit stores that
+   `ARKDinoData` in the save.
+2. A claim calls `spawn_from_dino_data` with the claimer's location, `for_team` set to their
+   tribe, `generate_new_dino_id` true, and `tamer_controller` set to them.
+
+**The dino enumeration gap stops mattering.** The panel does not need a list of 400 species; the
+admin captures the creature they are standing in front of. That also matches what the shipped mods
+do: Automated Ark and Cyber's both ship a `ItemDinoGun` for picking a dino directly.
+
+**The pre-filled cryopod idea is unnecessary.** It was a workaround for not having this.
+
+### Still to test in PIE, in this order
+
+1. Capture a cheap dino, spawn from its data, confirm it arrives tame, owned, and correct team.
+2. Confirm `generate_new_dino_id` means two spawns from one payload are distinct dinos and both
+   persist after a save and restart.
+3. Confirm `ARKDinoData` survives being stored in a SaveGame and read back on a later session.
+4. Confirm `peek_dino_data` edits actually change the spawned result, if we want per-claim level
+   variation.
+
 ## Overseer searches, 2026-11-13 (3 spent, 97 left)
 
 Approved. Three questions asked, limit 5-6 each. These are community leads with dates, not
