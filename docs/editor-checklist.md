@@ -82,6 +82,59 @@ author by hand, and not something we need for ordinary kits.
 `custom_data_classes` and the level in `custom_data_ints` or `item_custom_data`, which is tiny,
 survives saves with the item, and needs no capture from anyone.
 
+### The real signatures, from the game's own usage output (2026-11-13)
+
+KP ran the commands with no arguments and ARK printed the expected parameter lists. This settles
+the capture question outright.
+
+**`GMSummon`** works: `cheat GMSummon "Dodo_Character_BP_C" 150` produced a **perfect level 225
+Dodo**. Note the number is the *base* level; the creature came out at 225 because ASA adds bonus
+levels.
+
+**`SpawnSetupDino`**
+
+```
+DinoBlueprintPath[FString] SaddleBlueprintPath[FString] SaddleQuality[float]
+DinoLevel[int32] DinoStats[FString] SpawnDistance[float] YOffset[float] ZOffset[float]
+```
+
+**`SpawnExactDino`**
+
+```
+DinoBlueprintPath[FString] SaddleBlueprintPath[FString] SaddleQuality[float]
+BaseLevel[int32] ExtraLevels[int32] BaseStats[FString] AddedStats[FString]
+DinoName[FString] Cloned[int8] Neutered[int8] TamedOn[FString] UploadedFrom[FString]
+ImprinterName[FString] ImprinterUniqueNetId[FString] ImprintQuality[float]
+Colors[FString] DinoID1[int64] Exp[int64]
+SpawnDistance[float] YOffset[float] ZOffset[float]
+```
+
+**Capture is not required, at all.** `SpawnExactDino` takes the level, extra levels, base and
+added stats, imprint quality, colours, name, imprinter and dino id as plain parameters. It can
+reconstruct a creature from numbers alone, which is precisely the "same dino out of the ball"
+case without anyone putting a dino in a ball first.
+
+**`SpawnSetupDino` is the better fit for kits**, and for KP's stated goal that every kit dino be
+identical: one `DinoLevel` plus one `DinoStats` string, so every claimant gets the same creature.
+
+Known caveat reported by KP: `SpawnExactDino` is regarded as borked in the community, with the
+workaround being to cryopod the creature a couple of times to normalise it. That is consistent
+with the general problem that spawned dinos can carry inconsistent state until re-serialised.
+
+### Still unknown: the stats string format
+
+`DinoStats`, `BaseStats` and `AddedStats` are `FString`s and their grammar is not printed. To be
+determined empirically, cheapest first:
+
+1. `cheat SpawnSetupDino "Dodo_Character_BP_C" "" 0 150 "" 500 0 0` with an empty stats string.
+   If it spawns, the string is optional and defaults are fine.
+2. `cheat SpawnSetupDino "Dodo_Character_BP_C" "" 0 150 "1,1,1,1,1,1,1" 500 0 0` and compare
+   stats against the empty-string dodo.
+3. If the list is rejected, try semicolons, and try absolute values against multipliers.
+
+Compare using `absolute_base_level` and the stat properties, not `get_level`, which returns the
+Actor's world level and misled us once already.
+
 ### Three tests that settle the no-capture path
 
 All in Blueprint, server side, on a throwaway map.
