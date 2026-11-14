@@ -45,15 +45,18 @@ for v1 setting the class default is enough.
 
 ## 4. The use event
 
-Open the event graph and add `Event BPOnItemConsumed`. It comes with `Inventory` and
-`Remaining Quantity` pins.
+**Use `Event BlueprintUsed`, not `BPOnItemConsumed`.** This cost KP a round of debugging: the
+consumed event does not fire on the last item in a stack, and because an orb has
+`Max Item Quantity` 1, every orb is the last item. The consumed hook would never fire at all.
+`BlueprintUsed` fires on use regardless of stack size. It gives you `For Inventory` and `For
+Controller` style pins instead of `Inventory`, which is more convenient anyway.
 
 ```
-Event BPOnItemConsumed
+Event BlueprintUsed
   -> Switch Has Authority          (Authority pin only; everything below is server side)
-  -> Inventory -> Get Owner        (the character or dino that owns the inventory)
-  -> Cast to ShooterCharacter
-  -> Get Controller -> Cast to ShooterPlayerController
+  -> For Controller                (already a controller from the BlueprintUsed pins)
+  -> Cast to ShooterPlayerController
+  -> Get Controlled Pawn -> Cast to ShooterCharacter   (for location and rotation)
 
   -> Make Dino Setup
        Dino Type               = DinoClass
@@ -78,8 +81,10 @@ Event BPOnItemConsumed
 
 Notes that will save you a run:
 
-- **The authority gate is mandatory.** `BPOnItemConsumed` fires on the client too, and a client
-  cannot spawn.
+- **Use `BlueprintUsed`, never `BPOnItemConsumed`.** See above: the consumed event silently does not
+  fire for the last item, and every orb is the last item.
+- **The authority gate is mandatory.** The use event fires on the client too, and a client cannot
+  spawn.
 - **No delay is needed.** Unlike the test actor, this runs when a player uses an item, so the
   controller already has a pawn. That was the only reason the test needed two seconds.
 - **`Skip Adding Tamed Levels` must stay unchecked**, or the creature arrives below the requested
@@ -91,9 +96,11 @@ Notes that will save you a run:
 
 1. Compile and save.
 2. In PIE: `cheat gfi BP_KPT_DinoOrb_Dodo 1 0 0` puts one in your inventory.
-3. Use it.
+3. Use it. With `BlueprintUsed` this fires every time; with the consumed event it would never fire,
+   because a single orb is always the last item in its stack.
 
-Expect a level 150 dodo, tame, yours, standing next to you, and the orb gone.
+**Confirmed working 2026-11-13**, including a duplicate orb for a Wyvern. Expect a level 150 dodo,
+tame, yours, standing next to you, and the orb gone.
 
 If it does not appear, run the same `Select-String` on the log the last failure taught us:
 
