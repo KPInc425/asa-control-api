@@ -478,6 +478,36 @@ it produce a deliberately extreme build and read its output:
 That converts the remaining unknown from a guessing game into one observation, and it also gives us
 a reference string to copy the field order from for our own admin panel.
 
+### `SpawnSetupDino`'s stat pairs do not land. Measured. (2026-11-13)
+
+`cheat SpawnSetupDino ... 0 150 "0,200" 500 0 0` produced a level 225 Dodo with **Health 288.1**,
+Stamina 520, Oxygen 705, Food 2610.1, Melee 322.2%.
+
+Other level-225 dodos from the same command measured 344, 392 and 432 health. 288 is below all of
+them, where 200 health points would have made it the highest by a wide margin. So the pairs are
+parsed (the log shows `Trying stat: [0] = [2]`) but they **do not steer the result**.
+
+**Conclusion: level-only spawning is what works.** That is also all TC's Auto Rewards ever did, so it
+is not a regression, it is parity.
+
+### If stats must matter, `SpawnExactDino` does steer them
+
+The generator's all-in-Health command produced health **1064.1** and **1008.1** on two identical runs,
+against a base of about 40. Both are enormous, so that path *does* apply an allocation. The two runs
+differed by roughly 5%, which is the catch: steered but not identical.
+
+So the trade is:
+
+| route | level | stats | identical across players |
+|---|---|---|---|
+| `SpawnSetupDino` | yes | no, random | level yes, stats no |
+| `SpawnExactDino` | yes | **steered** | within about 5% |
+| spawn + set points | yes | points recorded | no, and needs a reload to show |
+
+**Recommendation: build the orb on level-only now**, which matches TC exactly and is a shippable
+feature. Add `SpawnExactDino` later if a 5% stat spread is acceptable for fairness. Do not spend more
+time on the pairs grammar; it parses and does nothing.
+
 ### ARK's stat enumeration, from KP (ASE, 2026-11-13)
 
 ```
