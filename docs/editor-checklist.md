@@ -1,5 +1,54 @@
 # Editor checklist: things only KP can do
 
+## Local dedicated server with a cooked mod: the working setup (2026-11-14)
+
+Server install: `I:\SteamLibrary\steamapps\common\ARK Survival Ascended Dedicated Server`.
+First launch generates `ShooterGame\Saved\Config\WindowsServer\GameUserSettings.ini`, which is
+**ASCII, not UTF-16**.
+
+**Config edits that matter, and the sections they belong in:**
+
+```ini
+[SessionSettings]
+SessionName=KPT Mod Test
+MaxPlayers=4
+
+[ServerSettings]
+ServerAdminPassword=ktptest
+```
+
+Putting `SessionName` or `MaxPlayers` in `[ServerSettings]` creates duplicates and the later section
+wins, so the value you set may not be the value used.
+
+**Launch:**
+
+```
+cd "<server>\ShooterGame\Binaries\Win64"
+ArkAscendedServer.exe "TheIsland_WP?listen" -mods=935261 -server -log -NoBattlEye
+```
+
+### The install loop, in order
+
+1. First launch with `-mods=935261`. LogCFCore downloads the **published** mod from forgecdn into
+   `Mods\83374\935261_<fileId>\` (it created `935261_9230547`), then reports `Mod valid` and
+   `LoadGameMods with 1 mods`.
+2. Stop the server.
+3. Copy the three files from `KPTweaks-WindowsServer.zip` (`KPTweaks/Content/Paks/WindowsServer/`)
+   over the downloaded `WindowsServer` folder, **keeping the `.uplugin` and manifests**.
+4. Do the same on the client with `KPTweaks-Windows.zip` into
+   `Mods\83374\935261_9230544\KPTweaks\Content\Paks\Windows\`.
+5. Restart. `No need to update existing mod` plus `Mod valid` means the swapped files were accepted.
+
+Our cooked build is visibly different from the published one: pak 86 KB against 55 KB, ucas 246 KB
+against 230 KB on the server. Both `.uplugin` files carry the same `VersionName`, so client and
+server agree on mod identity.
+
+**Trap that wasted a round:** zip entries begin with `KPTweaks/...`, not `Content/...`. Filtering on
+`Content/Paks/WindowsServer/` copies zero files and the sizes stay identical, which is the tell.
+
+**Risk to watch:** the client's CurseForge may re-download and overwrite the swapped paks on launch,
+which makes the new content disappear.
+
 ## Local cook fails: the mod folder is nested one level too deep (2026-11-14)
 
 The cook aborted with:
