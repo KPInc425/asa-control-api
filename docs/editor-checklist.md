@@ -49,6 +49,11 @@ server agree on mod identity.
 **Risk to watch:** the client's CurseForge may re-download and overwrite the swapped paks on launch,
 which makes the new content disappear.
 
+**VERIFIED END TO END 2026-11-14:** KP joined the dedicated server with the swapped cooked build on both
+ends and the orb worked. `Mod valid` plus `LoadGameMods with 1 mods` in the server log is the signal
+that the swap was accepted, and the client did not get its paks overwritten by CurseForge on launch.
+The dino path is no longer editor-only.
+
 ## Local cook fails: the mod folder is nested one level too deep (2026-11-14)
 
 The cook aborted with:
