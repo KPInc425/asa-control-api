@@ -30,6 +30,30 @@ Open **Class Defaults** and set:
 
 Do not set a crafting recipe yet. Spawn it with `cheat gfi` for testing.
 
+## 2b. Icon and hand model
+
+**Inventory icon:** set **`Item Icon`** in Class Defaults. It is a Texture2D property (`item_icon`)
+and null by default, which is exactly why the orb shows as a blank square. `DodoEyeIcon` in
+`Assets/Icons` is a ready-made option. `Item Icon Material` and `Item Icon Material Parent` exist if a
+flat texture looks wrong.
+
+**The texture must live inside the mod's content folder.** Assets referenced from outside it are not
+cooked and fail silently, the same way a creature once shipped without its model.
+
+**Nothing appears in the hand, and that is normal for a generic item.** Held meshes come from
+weapons; the base item class has `associated_weapon` null and exposes only `net_dropped_mesh_override`,
+which is the mesh shown when the item lies on the ground.
+
+Options, in order of cost:
+
+1. **Leave it.** Most consumables in ARK show nothing in hand.
+2. **Reparent to `PrimalItem_WeaponEmptyCryopod`**, the closest relative: hold, point, release. Gives
+   a hand mesh and pose, but brings cryopod behaviour with it, so test on a duplicate.
+3. **Set `associated_weapon`** to a weapon class if a held actor is genuinely wanted.
+
+For v1, set the icon and skip the hand model. A blank square is a five minute fix; a reparent that
+drags in cryo behaviour is an afternoon spent debugging something that already worked.
+
 ## 3. Variables
 
 Add three:
