@@ -34,6 +34,43 @@ A console-only sanity check that costs nothing: type `cheat ForceTame` in PIE wi
 targeted, and see whether the resulting creature is tame and yours. That tells us what a
 correctly tamed dino looks like without involving our code.
 
+## ITEM 1: PASSED, 2026-11-13
+
+`tame_dino` from Blueprint works. Live read after the successful run: `bp_is_tamed True`,
+`targeting_team 161006563`, `taming_team_id 161006563`, `imprinter_name ''`, both dino ids set.
+
+What made it work: feeding `Override Taming Team ID` from the **player's** `targeting_team`
+(16 1006 563), not 0. The harness is retired; it was a probe, not the feature.
+
+### The final form: a dino orb item, not a live spawn
+
+KP wants the dino handed over as an item the player releases when they choose, like a cryopod.
+The pieces line up, all verified by reflection:
+
+- **Capture**: `get_dino_data` returns `ARKDinoData` with `dino_class` and `dino_data`, and
+  `dino_data` is an **array of byte arrays**.
+- **Carry it in the item**: `PrimalItem.set_custom_item_data(data)` with a `CustomItemData` whose
+  `custom_data_bytes.byte_arrays` is the same array-of-byte-arrays shape, and whose
+  `custom_data_classes` / `custom_data_soft_classes` hold the class. So the payload rides inside
+  the item and persists with it, exactly as a cryopod does.
+- **Release**: `spawn_from_dino_data(dino_data, world, location, rotation,
+  for_team=<claimant tribe>, generate_new_dino_id=true, tamer_controller=<claimant>)`, then
+  destroy the item.
+
+Two delivery styles, for two jobs, and the kit should offer both:
+
+1. **Orb**: an exact replica, same stats, colours, mutations, imprint. Needs a capture to exist.
+2. **Spawn and tame**: a fresh tamed creature of a species, for level-based kits. Uses
+   `tame_dino` with the claimant's team, which is now proven.
+
+### Next test (item 2, reframed for the orb)
+
+In Blueprint, on the server: tame a dodo, `get_dino_data` it, write `dino_class` plus `dino_data`
+into a `CustomItemData`, `set_custom_item_data` on an item, read it back with
+`get_custom_item_data`, rebuild an `ARKDinoData` from it, then `spawn_from_dino_data` twice with
+`generate_new_dino_id` true. Confirm both spawns are tame, on the right team, distinct dinos, and
+match the original's stats and colours.
+
 ### Reference state, measured 2026-11-13 from a console `cheat ForceTame`
 
 Read back from the PIE world after KP tamed the spawned Dodo with the vanilla console command.
