@@ -1,5 +1,41 @@
 # Editor checklist: things only KP can do
 
+## STATE, 2026-11-13: what is proven and what is next
+
+**Proven in the devkit** (each one cost real time, none is still in doubt):
+
+- Kit claim marker persists per character across respawn, relog and editor restart.
+- Items grant through the native `Give Item To Character` node, durability intact.
+- `tame_dino` from Blueprint works, provided `Override Taming Team ID` is fed the player's
+  `targeting_team`; passing 0 fails silently.
+- `Spawn Custom Dino` with a `Make Dino Setup` spawns a **level 150 tamed dino owned by the player**,
+  every run, once the authority gate, the 2 second delay, the wired location and rotation, and the
+  `Owner Player Controller` are all in place.
+- `DinoSetup`'s stat arrays are FixedArray and not exposed to Blueprint, so a blueprint kit cannot
+  author an allocation. Level-only is the shippable answer and matches TC's Auto Rewards.
+- TC's Auto Rewards was decompiled: packs store a specification, and an item carrying custom data
+  spawns the class and tames it. Nothing was ever captured or serialised.
+- Blueprints cannot read files, ini or JSON. Kit configuration is therefore an in-game panel writing
+  to `KPTweaksSave`, not a file the API can edit.
+- Items enumerate from `PrimalGameData.master_item_list` (654 classes) at runtime.
+- Emotes are reachable: `emote_anims` plus `play_emote_animation(index)`.
+- Structure skins apply in place via `PrimalStructure.set_structure_skin`.
+- Behemoth walls fail to snap because `structure_snap_type_flags` is 0 on three of four and 512 on
+  Wood, where vanilla and S+ large walls use 8 and parent from `Base_Wall_Large_C`.
+
+**Open, and only one is on the critical path:**
+
+1. **The orb item** - the last piece of the dino kit. `PrimalItem` subclass carrying a soft class ref,
+   level, tamed flag and saddle; on use, spawn, then destroy itself. No unknowns left in it.
+2. **The kit spec and panel** - soft class reference arrays in `KPTweaksSave`, item pickers from
+   `master_item_list`, dinos picked in world.
+3. Behemoth walls: apply the flags and reparent on one wall, then test.
+4. Template hammer: is it a Blueprint or native, which decides whether auto-build speed is even
+   possible.
+5. Alien Plants: grow light snapping, greenhouse coverage, and the 2024 bug list.
+6. Cooked behaviour: nothing here has been tested in a cooked build or on a server.
+
+
 Ordered by what unblocks the most work. Each item says what to do and what to report back.
 Items 1 to 3 are PIE tests on a throwaway map; nothing touches the live cluster.
 
