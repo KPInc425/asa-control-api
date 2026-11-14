@@ -214,6 +214,57 @@ Ran the generator's all-in-Health command. Result: **Generated (Dodo), LEVEL 100
 Also visible: Weight shows 0.0 of 195.0, which is the "broken until cryo'd" symptom the generator
 warns about.
 
+### The deterministic route exists, and it is a blueprint API (2026-11-13)
+
+The spawn command is not deterministic: two identical `SpawnExactDino` calls produced Dodos both
+at level 1001 with different stats (Health 1064.1 against 1008.1, Stamina 1350 against 1320, Oxygen
+2145 against 1980, Melee 804.4% against 839.7%). Close, never equal. So the command cannot be the
+foundation for identical kit dinos.
+
+KP found the community answer in Discord, and every function it uses exists in ASA, verified by
+reflection on `PrimalCharacterStatusComponent`:
+
+```
+get_level_up_points(value_type, tamed_points) -> int32
+set_level_up_points(value_type, tamed_points, new_points)
+get_mutation_points(value_type) -> int32
+set_mutation_points(value_type, new_points)
+clear_all_level_up_points()
+clear_all_mutation_points()
+get_base_level_from_level_up_points()
+```
+
+`PrimalCharacterStatusValue` carries all twelve stats: HEALTH, STAMINA, TORPIDITY, OXYGEN, FOOD,
+WATER, TEMPERATURE, WEIGHT, MELEE_DAMAGE_MULTIPLIER, SPEED_MULTIPLIER, TEMPERATURE_FORTITUDE,
+CRAFTING_SPEED_MULTIPLIER.
+
+**So the pattern is: read the point allocation off a reference creature, spawn a fresh one of the
+same class, write the allocation onto it.** That is deterministic by construction, because we are
+setting the numbers rather than hoping a spawner reproduces them.
+
+### What this means for the kit
+
+A kit dino template becomes:
+
+- class
+- per-stat **wild** points
+- per-stat **tamed** points
+- per-stat **mutation** points
+
+Grant flow: spawn the class, apply the three point sets, `tame_dino` for the claimer's team, and
+optionally give the saddle. The orb carries the template in item custom data.
+
+Note the arithmetic constraint carried over from the spawn command: the wild points must total the
+level minus one, so the panel has to validate that the array sums correctly or the creature will be
+inconsistent.
+
+### The one remaining test
+
+Apply points to a freshly spawned dino and check the tooltip. Specifically: spawn a Dodo, set every
+stat's level-up points to a lopsided allocation, and see whether the creature shows those stats
+**without** needing a cryo cycle. If it does, the whole dino feature is solved and the orb is just
+UI plus storage.
+
 ### The test that actually matters: is it deterministic?
 
 Everything above is secondary. A kit needs **the same creature every time**, so the only question
