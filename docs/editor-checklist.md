@@ -1,5 +1,40 @@
 # Editor checklist: things only KP can do
 
+## Local cook fails: the mod folder is nested one level too deep (2026-11-14)
+
+The cook aborted with:
+
+```
+Could not find file 'G:\ARKDevkit\Projects\ShooterGame\Mods\KPTweaks\KPTweaks.uplugin'
+```
+
+The cooker builds the path `Mods\<ModName>\<ModName>.uplugin`. Compare the actual layouts:
+
+```
+videoPlayer\videoPlayer.uplugin + videoPlayer\Content            <- correct, would cook
+KPTweaks\KPTweaks\KPTweaks.uplugin + KPTweaks\KPTweaks\Content   <- one level too deep
+AlienPlants\AlienPlants\AlienPlants.uplugin + ...                  <- same problem
+```
+
+**Fix, with the devkit closed** (assets are locked while it runs):
+
+```
+robocopy "G:\ARKDevkit\Projects\ShooterGame\Mods\KPTweaks" ^
+         "G:\ARKDevkit\Backups\KPTweaks_nested_20261114" /E
+cd "G:\ARKDevkit\Projects\ShooterGame\Mods\KPTweaks"
+move KPTweaks\* .
+rmdir KPTweaks
+```
+
+The folder should then hold `KPTweaks.uplugin`, `Content`, `Resources` and `settings.cfg` directly.
+
+**It is safe because nothing references the path.** `DefaultGame.ini` lists the mod by name
+(`EditorEnabledMods=(("KPTweaks", True))`), and the `/KPTweaks` content mount is derived from the
+plugin name in the `.uplugin`, not from the directory layout. Reopen the devkit and confirm the
+content browser still shows `/KPTweaks` before cooking.
+
+`AlienPlants` needs the same treatment before it can cook. `videoPlayer` is already correct.
+
 ## Testing the mod in game WITHOUT uploading (answered by Overseer, 2026-11-13)
 
 The question was whether an official cook and a CurseForge upload are required before the mod can be
