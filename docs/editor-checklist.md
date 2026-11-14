@@ -181,6 +181,37 @@ stats in the inventory panel, cryo it, release it, and compare. If its stats wer
 and stay correct, `SpawnSetupDino` is the kit command and we are done. If it also needs cryo
 cycling, then every route needs a normalisation step and the orb must hide that from the player.
 
+### Same level does not mean same stats (measured 2026-11-13)
+
+Two Dodos at level 225, spawned by different methods, differ: Health 432 vs 392, Stamina max 84 vs
+91, Food 825 vs 750, and the stat bars 37/64/32/62/39/33 against 41/37/56/42/38/32.
+
+That is not a bug, it is how wild points work: the total is fixed by level and the **distribution
+is random per spawn**. So `GMSummon <class> <level>` and any level-only route can never give
+identical creatures, which rules them out for kits on their own.
+
+**Identical dinos require the allocation to be specified**, which is what those parameter strings
+do:
+
+- `SpawnExactDino` takes `BaseStats` and `AddedStats`, each **eight values**, in fixed stat order.
+- `SpawnSetupDino` takes `DinoStats` as **index,value pairs**, proven by the parser printing
+  `Trying stat: [0] = [2]`.
+
+### The last unknown: which index is which stat
+
+Both grammars are positional, so the mapping has to be nailed down once, and then it is ours
+forever. The cheap way is to ask the generator for an unmistakable build.
+
+1. On arkutils, set **all points into Health** and every other stat to its minimum, with Wild
+   allocation. Copy the command it produces.
+2. Run it, then look at the resulting dino. Whichever stat is absurdly high is index 0 in that
+   grammar, or the first pair in `SpawnSetupDino`'s form.
+3. Repeat once with everything in Melee. Two runs give us both ends of the mapping and confirm the
+   order is the obvious one.
+
+After that, a kit dino is a fixed eight-value (or pair) allocation, and every claimant gets exactly
+the same creature: same level, same points, same stats.
+
 ### The kit answer, now settled
 
 A kit dino is: **class path, level, and a stats string**. `SpawnSetupDino` with those three fixed
