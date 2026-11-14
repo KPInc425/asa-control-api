@@ -197,6 +197,39 @@ do:
 - `SpawnSetupDino` takes `DinoStats` as **index,value pairs**, proven by the parser printing
   `Trying stat: [0] = [2]`.
 
+### The command works, but the arrays are not point counts (2026-11-13)
+
+Ran the generator's all-in-Health command. Result: **Generated (Dodo), LEVEL 1001**, with Health
+1008.1, Stamina 1320, Oxygen 1980, Food 5850.1, Melee **839.7%**, Torpidity 1380.5, Weight
+0.0/195.0, Imprinting 0%.
+
+- **Level 1001 confirms the arithmetic:** `BaseLevel 501` + `ExtraLevels 500`.
+- **The allocation definitely applies:** health past 1000 and melee at 839% on a Dodo is not a
+  random roll.
+- **But the arrays are not point counts.** 500 health points at a Dodo's roughly 8 health per level
+  would be about 4000; it came out 1008. Stamina, oxygen and food are all inflated despite being
+  zero in both arrays. So the numbers are consumed in some other way, possibly as multipliers, and
+  a naive points model is wrong.
+
+Also visible: Weight shows 0.0 of 195.0, which is the "broken until cryo'd" symptom the generator
+warns about.
+
+### The test that actually matters: is it deterministic?
+
+Everything above is secondary. A kit needs **the same creature every time**, so the only question
+left is whether repeating the identical command gives identical stats.
+
+1. Run the exact same command again.
+2. Cryo both, or read both fresh, and compare health, stamina, melee and food.
+
+- **Identical twice: kits are solved.** Store the class, the level and the two arrays, and every
+  claimant gets that creature.
+- **Different twice: the arrays steer the distribution but leave randomness inside it**, and we
+  need another route for exact sameness.
+
+Do not try to decode the array semantics until that is answered, because if the command is not
+deterministic there is nothing to encode.
+
 ### The format is now understood. Points must sum to the level. (2026-11-13)
 
 KP set Health to **500** on the arkutils generator with everything else at 0, and it produced:
