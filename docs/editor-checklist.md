@@ -214,6 +214,26 @@ Ran the generator's all-in-Health command. Result: **Generated (Dodo), LEVEL 100
 Also visible: Weight shows 0.0 of 195.0, which is the "broken until cryo'd" symptom the generator
 warns about.
 
+### In Blueprint, spawn directly. Do not drive the console from a graph.
+
+`Get All Actors of Class` returned an empty array in KP's points test, so `Get 0` had nothing to
+cast. Rather than debug why the console summon did not land in that PIE session, remove the
+dependency: inside a Blueprint the console was never necessary. It existed only so Python could
+create actors without touching the game thread.
+
+Correct shape for any in-game test or feature:
+
+```
+BeginPlay -> Switch Has Authority (Authority only)
+          -> Spawn Actor from Class (Dodo_Character_BP, at player location + Z 300)
+          -> Cast to PrimalDinoCharacter -> My Character Status Component
+          -> print before, set points, Delay 0.5, print after
+          -> Tame Dino (team fed in), optional saddle
+```
+
+Three advantages: no console command to be refused, no guessed delay waiting for an actor to
+register, and the spawn node returns the creature so there is no array index to get wrong.
+
 ### The deterministic route exists, and it is a blueprint API (2026-11-13)
 
 The spawn command is not deterministic: two identical `SpawnExactDino` calls produced Dodos both
