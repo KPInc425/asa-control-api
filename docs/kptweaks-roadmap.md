@@ -941,6 +941,46 @@ rather than trusting a hardcoded number.
 `max_inventory_weight_use_character_status` and `item_class_weight_multipliers`. So a weight
 boost near a template is a property change on the inventory, not a character stat hack.
 
+## TC's Auto Rewards decompiled: it never captured or serialised a dino
+
+Downloaded workshop item 1260983937 with SteamCMD (ASE app 346110), decompressed 140 packages and
+read the name tables, 2026-11-13. This is the answer to "how did they give dinos in balls without
+an admin capturing one", and it validates our design instead of contradicting it.
+
+**The data model:**
+
+```
+TCsAR_PackDino_Struct
+  Name, Type (TCsAR_DinoType_Enum), DinoClass (Class -> PrimalDinoCharacter)
+  DinoEntry (PrimalDinoEntry), Quantity, IsMultipleChoice
+  WildLevel (Int), TamedLevel (Int)
+  Gender (TCsAR_DinoGender_Enum), IsGenderChoice (Bool), IsNeutered (Bool)
+```
+
+A pack dino is a **specification**: which class, which levels, gender, neutered, how many. No
+creature data anywhere. There is no `ARKDinoData` in this mod and no stat allocation either, which
+is a limit of theirs we can beat.
+
+**The delivery item:** `PrimalItemConsumable_SpawnTamedDino`. Its name table is the whole mechanism:
+
+- `GetCustomItemData`, `CustomDataStrings`, `CustomDataFloats`, `CustomDataClasses`,
+  `CustomDataNames`, `CustomDataDoubles`, `CustomDataObjects`, `CustomItemDatas`
+- `Conv_StringToFloat`, `Conv_StringToInt` - the spec is stored as **strings** inside custom item data
+- `RandomIntegerInRange`, `RandomFloatInRange`, `SelectInt`, `SelectFloat`, `LevelRange`,
+  `GenerateDinoLevel`, `GeneratedLevel` - level and gender are rolled within the configured ranges
+- `CallFunc_SpawnDino_ReturnValue`, then **`TameDino`**
+- `K2Node_ClassDynamicCast_AsPrimalDinoCharacter`, `ClassIsChildOf`, `SpawnOffset`
+
+So the flow is: **buy a pack, the vault hands you an item whose custom data holds the spec as
+strings, and using it spawns the class and tames it.** No capture, no serialisation, no cryo.
+
+**What we copy, and what we improve:**
+
+- Same shape as our orb: an item carrying custom data, spawn at birth, tame to the claimant.
+- Same fields for the admin panel, plus a stat allocation they never had.
+- ASA primitives for the same steps: spawn the class (or `SpawnSetupDino` for level and stats at
+  birth), `tame_dino` with the claimer's team, destroy the item.
+
 ## Overseer: the ARK Modding Discord archive, as a searchable API
 
 `https://www.reddwarfmods.com/overseer/` is an archivist bot over ten years of the ARK Modding
