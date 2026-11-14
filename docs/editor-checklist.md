@@ -197,6 +197,37 @@ do:
 - `SpawnSetupDino` takes `DinoStats` as **index,value pairs**, proven by the parser printing
   `Trying stat: [0] = [2]`.
 
+### The format is now understood. Points must sum to the level. (2026-11-13)
+
+KP set Health to **500** on the arkutils generator with everything else at 0, and it produced:
+
+```
+cheat SpawnExactDino "Blueprint'/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP'" "" 0 501 500 "500,0,0,0,0,0,0,0" "500,0,0,0,0,0,0,0" "Generated" 0 0 "" "" "" 0 0 "" 0 0 0 20 20
+```
+
+Read the parameters:
+
+| parameter | value | meaning |
+|---|---|---|
+| `BaseLevel` | **501** | 500 wild points **plus one** |
+| `ExtraLevels` | 500 | the tamed allocation, same count |
+| `BaseStats` | `500,0,...` | how the wild points are spent, slot order matches the UI |
+| `AddedStats` | `500,0,...` | how the tamed points are spent |
+
+**The invariant: the numbers in a stats array must sum to `BaseLevel - 1`** (or `ExtraLevels` for
+`AddedStats`). That is why my earlier test failed twice over: 20 points at `BaseLevel 1` is not a
+small allocation, it is an impossible one, and the engine had nothing coherent to do with it.
+
+There are no caps, which makes the confirmation trivially visible: a Dodo with 500 health points
+should show health in the thousands, against a base of about 40.
+
+**Confirmation step:** run the command above and read the tooltip. If health is enormous and every
+other stat is baseline, the field order and the sum-to-level rule are both confirmed, and a kit dino
+becomes: class, level, and an allocation whose sum equals the level minus one.
+
+Note the eighth slot stays 0 even though the UI offers seven stats, so the trailing slot is either
+unused or something we never need to touch.
+
 ### Two inconclusive tests, 2026-11-13, and why
 
 Ran both commands. Neither answered the question, and both failures were design errors on my side.
