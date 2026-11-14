@@ -197,6 +197,35 @@ do:
 - `SpawnSetupDino` takes `DinoStats` as **index,value pairs**, proven by the parser printing
   `Trying stat: [0] = [2]`.
 
+### Two inconclusive tests, 2026-11-13, and why
+
+Ran both commands. Neither answered the question, and both failures were design errors on my side.
+
+- **`SpawnExactDino` with `BaseLevel 1` and 20 in slot 0** produced a dino at exactly base stats:
+  health 40.1, stamina 100, oxygen 150, food 450, weight 50, melee 134.1%. A level 1 creature has
+  no wild points to distribute, so the array had nothing to act on. The test was void by
+  construction.
+- **`SpawnSetupDino` level 150 with `"0,20"`** produced health 344.1, against 392 and 432 from
+  earlier 150 spawns. The natural spread is roughly ±90, so a 20 point change is unmeasurable
+  against it. Inconclusive in both directions.
+
+Also learned: after cryo and release, `absolute_base_level` reads **0** on every dino, so Python
+readback cannot confirm levels any more. The in-game tooltip is the reliable view.
+
+### Stop guessing the grammar. Use the generator as the authority.
+
+The generator at arkutils is known to emit working commands. Instead of hand-testing formats, have
+it produce a deliberately extreme build and read its output:
+
+1. On the arkutils Spawn Exact Dino page, pick Dodo, then put **all available points into Health**
+   and everything else at minimum, Wild allocation.
+2. Copy the exact command string it generates and paste it here before running it.
+3. Run it. If the creature comes out with absurd health and nothing else, the field order in that
+   array is confirmed, and we have a working template for kits.
+
+That converts the remaining unknown from a guessing game into one observation, and it also gives us
+a reference string to copy the field order from for our own admin panel.
+
 ### ARK's stat enumeration, from KP (ASE, 2026-11-13)
 
 ```
