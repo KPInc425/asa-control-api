@@ -478,6 +478,48 @@ it produce a deliberately extreme build and read its output:
 That converts the remaining unknown from a guessing game into one observation, and it also gives us
 a reference string to copy the field order from for our own admin panel.
 
+### PROVEN: the dino spawn recipe (2026-11-13, KP, works every run)
+
+```
+Event BeginPlay
+  -> Switch Has Authority  (Authority pin only)
+  -> Delay 2.0
+  -> Get Player Controller (0)
+  -> Get Controlled Pawn
+  -> Get Actor Location  -> +300 on Z   (drop in beside the player, not inside them)
+  -> Get Actor Rotation
+  -> Spawn Custom Dino
+       Dino Setup            = Make Dino Setup (Dino Type + Dino Soft Reference; Is Tamed ticked)
+       Owner Player Controller = the controller above
+       Spawn Location / Rotation = the wired values
+```
+
+Each element is load-bearing, and each cost a round of debugging to find:
+
+- **`Switch Has Authority`**, because `BeginPlay` fires in both worlds and the client cannot spawn.
+- **`Delay 2.0`**, because at `BeginPlay` the server has not possessed a pawn yet, so
+  `Get Player Controller` gives you a controller with no pawn and `Owner Player Controller` reads as
+  invalid. Two seconds is enough for possession. **In the real feature this disappears:** an item
+  being used implies a live player, so the spawn can run immediately.
+- **`Owner Player Controller` is mandatory whenever `Is Tamed` is ticked**, else the spawn is
+  refused with `bIsTamed is enabled but no valid OwnerPlayerController was specified`.
+- **Location and rotation must be wired**, because both are by-ref parameters and literals are
+  rejected at compile time.
+- **`Dino Type` plus `Dino Soft Reference`** resolved the class without fighting a path string.
+
+### What the orb does differently
+
+Same node, different trigger and no delay:
+
+```
+Item used (player exists, server side)
+  -> Spawn Custom Dino with a Dino Setup built from the kit spec
+       class, level, Is Tamed, saddle, imprint quality
+       Owner Player Controller = the using player's controller
+  -> optionally tame_dino for team certainty
+  -> destroy the orb item
+```
+
 ### Why `Spawn Custom Dino` refused to spawn, from the log
 
 ```
