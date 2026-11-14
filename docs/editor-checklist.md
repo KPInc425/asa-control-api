@@ -63,6 +63,41 @@ Two delivery styles, for two jobs, and the kit should offer both:
 2. **Spawn and tame**: a fresh tamed creature of a species, for level-based kits. Uses
    `tame_dino` with the claimant's team, which is now proven.
 
+### Capture is NOT required. Two separate delivery modes.
+
+KP's objection is correct and my earlier framing was sloppy. There are two different things:
+
+- **Delivery**: giving a player a dino. Requires no payload and no capture. Spawn the class, then
+  `tame_dino` with the claimant's team. Proven on 2026-11-13.
+- **Exactness**: reproducing a *specific* tamed creature, with its stats, colours, mutations and
+  imprint. That is the only case needing `ARKDinoData`, and even then nobody has to "capture" by
+  hand: the mod can spawn a dino of the class, read its data, destroy it, and keep the 698-byte
+  payload. That is a build step, not an admin chore.
+
+Measured: `ARKDinoData.dino_data` for a Dodo is a **flat array of 698 bytes**, with `dino_class`
+holding the blueprint class. So the payload is real serialised object state, not something we can
+author by hand, and not something we need for ordinary kits.
+
+**So the base kit stores a class and a level, not a payload.** The orb then carries the class in
+`custom_data_classes` and the level in `custom_data_ints` or `item_custom_data`, which is tiny,
+survives saves with the item, and needs no capture from anyone.
+
+### Three tests that settle the no-capture path
+
+All in Blueprint, server side, on a throwaway map.
+
+1. **Can a spawned dino be levelled before taming?** Spawn a Dodo, set its level properties, call
+   `tame_dino`, then read the level back. If we can set the level, "a level 150 rex" works with no
+   payload. Report which property actually changed the level, since several exist (`base_level` is
+   not readable from Python and may not be the right one).
+2. **Does `spawn_from_dino_data` accept an empty payload?** Make an `ARKDinoData` with
+   `dino_class` set and `dino_data` empty, then call `spawn_from_dino_data`. If it spawns a default
+   creature of that class, the orb can skip payloads entirely and the exact-clone mode becomes an
+   optional extra.
+3. **Does the class survive in item custom data?** Put the dino class into a `CustomItemData` via
+   `custom_data_classes`, `set_custom_item_data` on an item, read it back with
+   `get_custom_item_data`, and spawn from it. That is the orb's whole mechanism, minus the blob.
+
 ### Next test (item 2, reframed for the orb)
 
 In Blueprint, on the server: tame a dodo, `get_dino_data` it, write `dino_class` plus `dino_data`
