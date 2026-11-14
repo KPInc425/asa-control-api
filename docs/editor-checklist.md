@@ -197,6 +197,51 @@ do:
 - `SpawnSetupDino` takes `DinoStats` as **index,value pairs**, proven by the parser printing
   `Trying stat: [0] = [2]`.
 
+### ARK's stat enumeration, from KP (ASE, 2026-11-13)
+
+```
+0  Health
+1  Stamina
+2  Torpidity
+3  Oxygen
+4  Food
+5  Water
+6  Temperature
+7  Weight
+8  MeleeDamageMultiplier
+9  SpeedMultiplier
+10 TemperatureFortitude
+11 CraftingSpeedMultiplier
+```
+
+This is the canonical list, and it matches what the `SpawnSetupDino` parser logged verbatim
+(`Trying stat: [0] = [2]`, `[8] = [2]`). So the **pairs grammar uses these indices directly**, and
+`"0,20,8,10"` means 20 points of health and 10 of melee.
+
+**Discrepancy to resolve:** `SpawnExactDino`'s `BaseStats` and `AddedStats` are each **eight**
+values, against these **twelve** stats. The arkutils UI offers seven (Health, Stamina, Oxygen,
+Food, Weight, Melee, Speed), so the eighth slot is unaccounted for and the order is unproven.
+
+Two tests settle it, one per grammar:
+
+**Pairs grammar** (already half proven):
+
+```
+cheat SpawnSetupDino "/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP" "" 0 150 "0,20" 500 0 0
+```
+
+If the dodo's health jumps well above the other 150 spawns, index 0 is Health and the list above
+is correct.
+
+**Eight-value grammar:**
+
+```
+cheat SpawnExactDino "Blueprint'/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP'" "" 0 1 0 "20,0,0,0,0,0,0,0" "0,0,0,0,0,0,0,0" "Test" 0 0 "" "" "" 0 0 "" 0 0 0 20 20
+```
+
+If position 0 is Health, this lands 20 health points. If it turns out to be something else, we have
+learned which stat sits in slot 0 and can shift accordingly.
+
 ### The last unknown: which index is which stat
 
 Both grammars are positional, so the mapping has to be nailed down once, and then it is ours
