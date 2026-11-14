@@ -478,6 +478,43 @@ it produce a deliberately extreme build and read its output:
 That converts the remaining unknown from a guessing game into one observation, and it also gives us
 a reference string to copy the field order from for our own admin panel.
 
+### Stats via DinoSetup: closed. Dynamic kits: yes. (2026-11-13)
+
+**Level 150 confirmed working** with `Skip Adding Tamed Levels` unchecked.
+
+**The stat arrays cannot be set from Blueprint.** The debugger dump shows the struct carries
+`BasePointsPerStat[0..11]` and `PlayerAddedPointsPerStat[0..11]`, but reflection reports both as
+**FixedArray**, and neither appears as a pin on `Make Dino Setup`. The debugger reads every property;
+Blueprint only gets what is exposed. So a blueprint kit cannot author a stat allocation through this
+struct, and the only exposed stat knob is `prioritize_stats`, an ordinary Array, whose semantics are
+untested.
+
+That closes the stats question for now. Level-only is the shippable answer, which is also what TC's
+Auto Rewards did.
+
+### Dynamic kits: soft class references, no hardcoded paths
+
+KP asked whether kit creation can be more dynamic than typing blueprint paths. Yes, and it is also
+safer:
+
+```
+Kit spec (stored in KPTweaksSave)
+  items:    array of soft class refs (PrimalItem) + quantity + quality
+  dino:     soft class ref (PrimalDinoCharacter), level, is_tamed, neutered
+            saddle soft class ref, imprint quality
+```
+
+At grant time each soft reference is resolved and used. No `/Game/...` strings anywhere, so nothing
+breaks when an asset is renamed or moved, and the same spec works across maps.
+
+**Populating the pickers:**
+
+- **Items** come from `PrimalGameData.master_item_list` (654 classes) at runtime, which is how an admin
+  menu can list and search everything without a baked table.
+- **Dinos** have no master list, so pick the creature rather than the class: aim at a dino, store
+  `get_class()`. That is the pattern the shipped mods use with their DinoGun tools, and it cannot be
+  mistyped.
+
 ### PROVEN: the dino spawn recipe (2026-11-13, KP, works every run)
 
 ```
