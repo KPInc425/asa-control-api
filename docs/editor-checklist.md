@@ -121,6 +121,39 @@ Known caveat reported by KP: `SpawnExactDino` is regarded as borked in the commu
 workaround being to cryopod the creature a couple of times to normalise it. That is consistent
 with the general problem that spawned dinos can carry inconsistent state until re-serialised.
 
+### Why the first attempts failed, and the corrected forms (2026-11-13)
+
+Read from the editor log rather than guessed.
+
+**`SpawnSetupDino` needs a full asset path, not a short name.** With `"Dodo_Character_BP_C"` the
+log says `Failed to find object 'Blueprint Dodo_Character_BP_C'`. `GMSummon` accepts short names
+because it resolves them its own way; this command does not.
+
+**The stats string grammar is index,value pairs.** With `"1,1,1,1,1,1,1"` the log printed
+`LogShooter: Warning: Trying stat: [1] = [1]` three times, so it consumed pairs and ignored the
+leftover seventh number. That means the form is `<statIndex>,<multiplier>,<statIndex>,<multiplier>`
+and so on, for example `"0,2,8,2"` for health x2 and melee x2.
+
+**`SpawnExactDino` complains in property names**, `Bad or missing property 'BaseLevel'`, so its
+parameters are expected as named arguments rather than positionally.
+
+Corrected forms to try:
+
+```
+cheat SpawnSetupDino "/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP" None 0 150 "" 500 0 0
+```
+
+```
+cheat SpawnSetupDino "/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP" None 0 150 "0,2,8,2" 500 0 0
+```
+
+```
+cheat SpawnExactDino DinoBlueprintPath="/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP" SaddleBlueprintPath=None SaddleQuality=0 BaseLevel=150 ExtraLevels=0 BaseStats="" AddedStats="" SpawnDistance=500 YOffset=0 ZOffset=0
+```
+
+Compare the stat results between the empty-string and `"0,2,8,2"` spawns. Read stats with
+`absolute_base_level` and the stat properties, never `get_level`.
+
 ### Still unknown: the stats string format
 
 `DinoStats`, `BaseStats` and `AddedStats` are `FString`s and their grammar is not printed. To be
