@@ -1,5 +1,43 @@
 # Editor checklist: things only KP can do
 
+## Testing the mod in game WITHOUT uploading (answered by Overseer, 2026-11-13)
+
+The question was whether an official cook and a CurseForge upload are required before the mod can be
+tested outside the editor. They are not, and the reason is that **KP Tweaks is already published
+(935261)**: local cooking requires an existing CurseForge project, which is why a brand new mod is
+blocked but this one is not.
+
+Consistent across Discord threads from 2023 to 2026:
+
+- **The local cooker lives in the devkit toolbar, the boiling pot icon.** Output is labelled
+  `UGC Local Cook`.
+- You set how many cook processes to run; roughly **5 GB of RAM each**.
+- "In order to use a local cook, your mod must already be published on CurseForge. Afterwards you can
+  use local cooks and test them on singleplayer/servers."
+- Local cooking **does not update the published mod**. It is a test method only, so live players keep
+  running the CF version while this is iterated.
+- **`-dev` is not needed.** That flag loads *unpublished* versions from CurseForge, which is a
+  different mechanism.
+
+### The loop
+
+1. Download the current published version of the mod from CurseForge.
+2. Local cook in the devkit.
+3. Replace the files in that downloaded copy with the locally cooked output, **keeping the
+   `.uplugin`**.
+4. Launch and test. Singleplayer needs only the client cook; a dedicated server needs the
+   WindowsServer package copied across.
+
+That is cook, swap, test, repeat, with no upload per iteration.
+
+### Two traps
+
+- **Assets outside the mod's content folder are not cooked, silently.** Someone shipped a cook that
+  passed review with a creature missing its model, and a local recook fixed it. Everything the mod
+  references must live inside its own content folder.
+- **Cook the server package separately** when testing on a server, and never both at once on older
+  devkit builds.
+
 ## STATE, 2026-11-13: what is proven and what is next
 
 **Proven in the devkit** (each one cost real time, none is still in doubt):
