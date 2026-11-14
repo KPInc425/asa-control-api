@@ -478,6 +478,57 @@ it produce a deliberately extreme build and read its output:
 That converts the remaining unknown from a guessing game into one observation, and it also gives us
 a reference string to copy the field order from for our own admin panel.
 
+### `Spawn Custom Dino` takes a DinoSetup. This supersedes the console commands. (2026-11-13)
+
+KP found two blueprint spawn nodes. The important one:
+
+**`Spawn Custom Dino`**
+
+```
+World Context Object, Spawn Location, Spawn Rotation
+Dino Setup            <- the DinoSetup struct
+Owner Player Controller
+Debug Draw Duration, Apply Rotation to Spawn Offset, Use Exact Spawn Location
+Skip Adding Tamed Levels, Suppress Taming Notifications
+Mission, Color Set, Gender Override, Spawned from Dino
+-> Return Value (the spawned dino)
+```
+
+**`Spawn Dino`** takes a Dino Class directly with `Level Multiplier`, `Extra Level Offset`,
+`Override Base NPCLevel`, `Base Level Override Value`, `NPC Absolute Base Level`, `Should Gender`,
+`Make Female` and an escort class.
+
+This is the missing piece. `DinoSetup` carries exactly what a kit needs:
+
+```
+dino_type / dino_blueprint_path / dino_soft_reference
+dino_level
+base_points_per_stat          12 ints
+player_added_points_per_stat  12 ints
+is_tamed
+saddle_blueprint_path, saddle_quality, auto_equip_saddle
+dino_imprinting_quality
+spawn_offset, use_fixed_spawn_level, prioritize_stats
+```
+
+Everything the console commands fumbled is a struct field here, and because it is a proper spawn path
+rather than a patch afterwards, the deferred-recalculation problem should not apply.
+
+**The decisive test:**
+
+1. `Make DinoSetup`.
+2. `dino_blueprint_path` = `/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP` (or set
+   `dino_soft_reference` / `dino_type`), `dino_level` = 150, `is_tamed` = true.
+3. `base_points_per_stat` = twelve ints summing to **149**, lopsided on purpose, for example 149 into
+   health and zero elsewhere.
+4. `Spawn Custom Dino` with that setup, spawn location beside the player, `Owner Player Controller` =
+   the player controller.
+5. Look at the tooltip. Big health and level 150 means exact stat control works at spawn, and the
+   orb becomes a struct plus one node.
+
+If health comes out ordinary at level 150, then the allocation is being ignored here too and the
+level-only route stands as the shippable answer.
+
 ### `SpawnSetupDino`'s stat pairs do not land. Measured. (2026-11-13)
 
 `cheat SpawnSetupDino ... 0 150 "0,200" 500 0 0` produced a level 225 Dodo with **Health 288.1**,
