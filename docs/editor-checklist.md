@@ -514,6 +514,24 @@ it produce a deliberately extreme build and read its output:
 That converts the remaining unknown from a guessing game into one observation, and it also gives us
 a reference string to copy the field order from for our own admin panel.
 
+### Stats are back on the table: `Server Force Update Max Stat Values` (2026-11-13)
+
+KP found stat manipulation graphs using nodes that change an earlier conclusion:
+
+- **`Server Force Update Max Stat Values`** on `PrimalCharacterStatusComponent`. This is the
+  recalculation call that a reflection sweep did not surface, so the "points do not show until the
+  creature reloads" finding has a workaround: set the points, force the update, then set current to
+  max.
+- **`Rescale Max Stat`** with `Level Up Value Type`, `Target Value` and `Is Percent Of True Value`.
+- **`Shift Stat Point`** with `Dino`, `Stat In`, `Positive`, `Stat Decrease`, `Amount To Modify` and a
+  `World Context`, which suggests moving points between stats.
+- **`Check Dino Uses Stat`** with `Status Value`, `Ignore Torpidity` and `For Tamed Add`, returning
+  `Used`. That matters because a dodo does not use Oxygen, so allocating into unused stats is waste.
+- **`Set Base Level No Stat Change`**, which sets the level without re-rolling stats.
+
+So exact stat allocation is still achievable, as a second pass over a spawned creature rather than a
+spawn parameter. It is not needed for v1 of the orb.
+
 ### Stats via DinoSetup: closed. Dynamic kits: yes. (2026-11-13)
 
 **Level 150 confirmed working** with `Skip Adding Tamed Levels` unchecked.
