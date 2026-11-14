@@ -121,6 +121,39 @@ Known caveat reported by KP: `SpawnExactDino` is regarded as borked in the commu
 workaround being to cryopod the creature a couple of times to normalise it. That is consistent
 with the general problem that spawned dinos can carry inconsistent state until re-serialised.
 
+### CONFIRMED working forms, 2026-11-13
+
+KP ran them. Results, verified from the log and the live world:
+
+- **Full asset path fixes the class lookup.** Three dodos spawned at `absolute_base_level 150`
+  from `SpawnSetupDino "/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP" ...`.
+- **Stats are index,value pairs, confirmed by the parser itself.** `"0,2,8,2"` produced
+  `Trying stat: [0] = [2]` and `Trying stat: [8] = [2]`, so health x2 and melee x2.
+- **Pass an empty string for the saddle, not `None`.** `None` makes the command try to load a
+  blueprints called `None` (`Failed to find object 'Blueprint None'`). It still spawns, but the
+  log fills with warnings and it is not a clean signal.
+- **`SpawnExactDino` stays broken** on every form tried, including named parameters:
+  `Bad or missing property 'BaseLevel'`. It is the one the community calls borked. Park it. We
+  do not need it, because `SpawnSetupDino` covers the identical-dino case and `GMSummon` covers
+  the quick spawn.
+
+Working command, saddle omitted cleanly:
+
+```
+cheat SpawnSetupDino "/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Character_BP" "" 0 150 "0,2,8,2" 500 0 0
+```
+
+**Reading stats back from Python hit class defaults**, so `base_level_max_status_values` reads all
+zeros and cannot confirm the multipliers. Verify by eye instead: compare two spawned dododos in
+the inventory panel, one with an empty stats string and one with `"0,2,8,2"`.
+
+### The kit answer, now settled
+
+A kit dino is: **class path, level, and a stats string**. `SpawnSetupDino` with those three fixed
+is exactly KP's requirement that every claimant receive an identical creature. No capture, no
+payload, no ARKDinoData. The orb item carries the class, the level and the stats string in item
+custom data, and on use calls the same spawn the command does.
+
 ### Why the first attempts failed, and the corrected forms (2026-11-13)
 
 Read from the editor log rather than guessed.
