@@ -478,6 +478,33 @@ it produce a deliberately extreme build and read its output:
 That converts the remaining unknown from a guessing game into one observation, and it also gives us
 a reference string to copy the field order from for our own admin panel.
 
+### Why `Spawn Custom Dino` refused to spawn, from the log
+
+```
+LogShooter: Error: SpawnCustomDino: Failed spawning dino -
+bIsTamed is enabled but no valid OwnerPlayerController was specified.
+```
+
+and two compile errors on the same node:
+
+```
+The current value (0, 0, 0) of the 'Spawn Location' pin is invalid
+  ('by ref' params expect a valid input to operate on)
+The current value (0, 0, 0) of the 'Spawn Rotation' pin is invalid
+```
+
+So three requirements, all cheap:
+
+1. **`Owner Player Controller` is mandatory when `Is Tamed` is checked.** The spawn is refused
+   outright without it. Wire `Get Player Controller` index 0.
+2. **`Spawn Location` must be wired**, because it is a by-ref parameter and a literal zero is
+   rejected. `Get Player Character` -> `Get Actor Location` -> `Break Vector` -> X, Y, Z.
+3. **`Spawn Rotation` must be wired** the same way, via `Get Actor Rotation` -> `Break Rotator`.
+
+`base_points_per_stat` is a secondary question: get a spawn at level 150 first, then look for the
+pin. If the struct genuinely does not expose it to Blueprint, that settles the stats question by
+itself.
+
 ### `Spawn Custom Dino` takes a DinoSetup. This supersedes the console commands. (2026-11-13)
 
 KP found two blueprint spawn nodes. The important one:
