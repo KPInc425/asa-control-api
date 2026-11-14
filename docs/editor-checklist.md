@@ -147,6 +147,40 @@ cheat SpawnSetupDino "/Game/PrimalEarth/Dinos/Dodo/Dodo_Character_BP.Dodo_Charac
 zeros and cannot confirm the multipliers. Verify by eye instead: compare two spawned dododos in
 the inventory panel, one with an empty stats string and one with `"0,2,8,2"`.
 
+### SpawnExactDino works. The wrapper was the problem. (2026-11-13)
+
+KP found `https://arkutils.netlify.app/tools/spawnexact`, a command generator, and its output runs
+correctly. The working shape:
+
+```
+cheat SpawnExactDino "Blueprint'/Game/PrimalEarth/Dinos/Doedicurus/Doed_Character_BP.Doed_Character_BP'" "" 0 1 0 "0,0,0,0,0,0,0,0" "0,0,0,0,0,0,0,0" "Generated" 0 0 "" "" "" 0 0 "" 0 0 0 20 20
+```
+
+Three things made my attempts fail:
+
+1. **The class path needs the `Blueprint'...'` wrapper** and the whole argument in double quotes.
+   A bare path, or a short name, does not resolve.
+2. **Parameters are positional**, in the order ARK prints. My named-parameter attempt produced
+   `Bad or missing property 'BaseLevel'`, which was really "the third positional argument is
+   missing".
+3. **Both stat strings take eight values**, one per spawnable stat, matching the generator's
+   Health, Stamina, Oxygen, Food, Weight, Melee, Speed plus one more.
+
+**The known defect is real and documented on that page:** creatures spawned this way are broken
+until they are cryo'd, "maybe even twice", before they show the right stats and colours. That is
+not a myth, it is in the generator's own warning.
+
+This matters for kits, because it decides which command to build on:
+
+- `SpawnSetupDino` is proven to spawn at a chosen level with stat multipliers, and we have not
+  yet seen whether it shares the cryo defect.
+- `SpawnExactDino` reproduces a full creature but is documented to need cryo normalisation.
+
+**Next test, and the only one that matters now:** spawn one dino with `SpawnSetupDino`, note its
+stats in the inventory panel, cryo it, release it, and compare. If its stats were already correct
+and stay correct, `SpawnSetupDino` is the kit command and we are done. If it also needs cryo
+cycling, then every route needs a normalisation step and the orb must hide that from the player.
+
 ### The kit answer, now settled
 
 A kit dino is: **class path, level, and a stats string**. `SpawnSetupDino` with those three fixed
