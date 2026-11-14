@@ -214,6 +214,49 @@ Ran the generator's all-in-Health command. Result: **Generated (Dodo), LEVEL 100
 Also visible: Weight shows 0.0 of 195.0, which is the "broken until cryo'd" symptom the generator
 warns about.
 
+### Patching after spawn is the wrong shape. Two better routes. (2026-11-13)
+
+KP's screenshot showed the crux: a freshly spawned Dodo at **level 16** with **base health 56**,
+even though 100 health points had been written to it. Two separate facts:
+
+1. **`Spawn Actor from Class` performs a wild spawn.** The level is rolled by the game and differs
+   every run, which is why every dino came out at a different level. Nothing in the graph sets one.
+2. **The point change does not show until the creature is reloaded.** There is no recalculation
+   function on the status component to call; the max is recomputed when the creature is serialised
+   and loaded, which is the same mechanism behind the community's cryo dance.
+
+So the fix is not another node after the spawn. It is to **birth the creature already correct**.
+
+**Route A, preferred: spawn a serialised creature.**
+`spawn_from_dino_data(dino_data, world, loc, rot, for_team, generate_new_dino_id, tamer_controller)`
+builds the animal from `ARKDinoData`, which is already-serialised state, so level and stats should
+be right at birth with no reload. It also returns the actor, so there is no array hunting. The
+payload is obtained once per template with `get_dino_data` on a reference creature. This makes the
+kit template an admin-authored capture rather than a set of numbers, which is fine: the admin does
+it once when authoring the kit, and players never see it.
+
+**Route B, fallback: compute the max yourself.**
+No recalc call exists, but the pieces do:
+
+```
+bp_get_amount_max_gained_per_level_up_value(value_type, tamed) -> float
+bp_direct_set_max_status_value(value_type, new_value)
+bp_direct_set_current_status_value(value_type, new_value)
+```
+
+So `new_max = current_max + points_added * increment`, set it directly, then set current to match.
+Untested, and a later serialisation might recompute and overwrite, so treat it as a fallback.
+
+**Route C, what the command already does: `SpawnSetupDino`.** It sets level and a stat allocation at
+spawn, and we have watched it produce level 150 creatures. Non-deterministic in the allocation, so
+it suits identical-across-players only if the allocation is specified, but it is proven to birth a
+correctly levelled creature without a reload.
+
+**Next test, and it decides the architecture:** take `get_dino_data` from a reference Dodo, then
+`spawn_from_dino_data` it, and read the stats immediately without reloading anything. If that dino
+arrives with the reference's level and stats, Route A is the kit, and the whole feature is a payload
+plus a spawn call.
+
 ### Points work; max recalculates late and current health is not refilled (2026-11-13)
 
 Measured in the live world after KP's points test:
