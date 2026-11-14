@@ -214,6 +214,47 @@ Ran the generator's all-in-Health command. Result: **Generated (Dodo), LEVEL 100
 Also visible: Weight shows 0.0 of 195.0, which is the "broken until cryo'd" symptom the generator
 warns about.
 
+### Can we build ARKDinoData ourselves? The struct yes, the creature no. (2026-11-13)
+
+Tested with `peek_dino_data` from editor Python:
+
+- `ARKDinoData` built with only `dino_class` set decodes to a transient dino with **no status
+  component**, and `get_dino_data` on that transient returns a payload with **zero bytes** and no
+  class.
+- `peek_dino_data(data, run_blueprint_construction=True)` behaves the same: still no status
+  component, still an empty payload.
+
+So `Make ARKDinoData` gives you a shell. The `Dino Data` field is the serialised creature itself
+(698 bytes for a dodo), and there is no `set_dino_data`, so the bytes can only come from a real
+creature via `get_dino_data`.
+
+A November 2026 Discord thread describes the same failure in a real project: filling in dino data by
+hand, plugging it into the spawn node, and nothing spawning because the data is null.
+
+**Still worth one run: KP's `Make ARKDinoData` -> `Spawn from Dino Data` graph.** My evidence is from
+a decode test, not from that function with an empty array. If a shell with a class and a name does
+spawn a creature, construction works and the whole capture discussion is moot.
+
+### `DinoSetup`: the right shape for a kit definition
+
+Found by scanning every dino or spawn class for a function taking a `DinoSetup`:
+
+```
+dino_type, dino_blueprint_path, dino_soft_reference
+dino_level
+base_points_per_stat          12 slots
+player_added_points_per_stat  12 slots
+is_tamed, dino_name, dino_state
+saddle_blueprint_path, saddle_quality, auto_equip_saddle
+dino_imprinting_quality
+use_fixed_spawn_level, spawn_offset, prioritize_stats
+```
+
+No native function consumes it to spawn; the only native reference is
+`PrimalDinoCharacter.bp_get_custom_dino_setup()`, which reads one off an existing creature. But the
+field list is exactly what a kit needs to store, and it settles the twelve-stat layout that earlier
+guessing did not.
+
 ### Patching after spawn is the wrong shape. Two better routes. (2026-11-13)
 
 KP's screenshot showed the crux: a freshly spawned Dodo at **level 16** with **base health 56**,
