@@ -214,6 +214,39 @@ Ran the generator's all-in-Health command. Result: **Generated (Dodo), LEVEL 100
 Also visible: Weight shows 0.0 of 195.0, which is the "broken until cryo'd" symptom the generator
 warns about.
 
+### Points work; max recalculates late and current health is not refilled (2026-11-13)
+
+Measured in the live world after KP's points test:
+
+```
+Dodo_0  wildHP=100  max=840.07  cur=224.35
+Dodo_1  wildHP=100  max=840.07  cur=133.38
+Dodo_2  wildHP=100  max=56.07   cur=56.07
+```
+
+Three conclusions:
+
+1. **The setter works.** 100 health points took max health from a base of about 40 to 840.
+2. **Max recalculation is deferred.** Dodo_2 has the points recorded but still shows max 56, so a
+   read immediately after setting returns a stale value. This is why the printed numbers differed
+   between runs: they were sampled at different points in the recalculation.
+3. **Current health is not refilled when max rises.** The two older dodos sit at 224 and 133 of
+   840, which is what KP saw as dinos that look almost dead. Raising the ceiling leaves the current
+   value where it was.
+
+**The fix, and it belongs in every place we set points:**
+
+```
+BP Direct Set Current Status Value(ValueType, BP Get Max Status Value(ValueType))
+```
+
+Both exist: `bp_direct_set_current_status_value(value_type, new_value)` and
+`bp_get_max_status_value(value_type)`. Apply it for Health at minimum, and for Stamina, Food and
+Water if the creature should arrive full. Then delay 1.5 before reading or printing, so the
+recalculation has settled.
+
+For kits this replaces the cryo dance entirely: set the points, then set current to max.
+
 ### In Blueprint, spawn directly. Do not drive the console from a graph.
 
 `Get All Actors of Class` returned an empty array in KP's points test, so `Get 0` had nothing to
