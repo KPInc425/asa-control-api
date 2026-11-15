@@ -274,21 +274,18 @@ export class ArkAdapter extends GameAdapter {
   /**
    * Return the SteamCMD script content for installing/updating ARK binaries.
    * @param {string} installDir
-   * @param {string} [branch]
+   * @param {string} [branch="public"]
    * @returns {string}
    */
-  buildInstallScript(installDir, branch) {
+  buildInstallScript(installDir, branch = "public") {
     const lines = [
       "@ShutdownOnFailedCommand 1",
       "@NoPromptForPassword 1",
       `force_install_dir "${installDir}"`,
       "login anonymous",
-      `app_update ${this.steamAppId} validate`,
+      `app_update ${this.steamAppId} -beta ${branch} validate`,
+      "quit",
     ];
-    if (branch) {
-      lines.push(`-beta ${branch}`);
-    }
-    lines.push("quit");
     return lines.join("\n");
   }
 
