@@ -1,10 +1,10 @@
 import fs from "fs/promises";
-import path from "path";
 import { join } from "path";
 import logger from "../../utils/logger.js";
 import configService from "../../services/config.js";
 import { gameFor } from "../../games/index.js";
 import { requirePermission } from "../../middleware/auth.js";
+import { getServerConfig } from "../../services/database.js";
 
 export default async function arkConfigRoutes(fastify) {
   // Get config file for a server — game-type-aware
@@ -117,23 +117,24 @@ export default async function arkConfigRoutes(fastify) {
 
         let serverConfig = null;
         try {
-          const serverInfo = await configService.findServerConfigPath(serverName);
-          if (serverInfo) {
-            const serverPath =
-              serverInfo.type === "standalone"
-                ? join(configService.serverRootPath, serverName)
-                : join(
-                    configService.serverRootPath,
-                    "cluster",
-                    serverInfo.clusterName,
-                    serverName,
-                  );
-            const serverConfigPath = join(serverPath, "server-config.json");
-            const serverConfigContent = await fs.readFile(serverConfigPath, "utf8");
-            serverConfig = JSON.parse(serverConfigContent);
+          const databaseConfig = getServerConfig(serverName);
+          if (databaseConfig?.config_data) {
+            serverConfig = JSON.parse(databaseConfig.config_data);
           }
         } catch (error) {
-          logger.info(`No server-config.json found for ${serverName}`);
+          logger.warn(
+            `Failed to read database config for ${serverName}: ${error.message}`,
+          );
+        }
+
+        if (!serverConfig && serverInfo?.serverPath) {
+          try {
+            const serverConfigPath = join(serverInfo.serverPath, "server-config.json");
+            const serverConfigContent = await fs.readFile(serverConfigPath, "utf8");
+            serverConfig = JSON.parse(serverConfigContent);
+          } catch (error) {
+            logger.info(`No server-config.json found for ${serverName}`);
+          }
         }
 
         return {

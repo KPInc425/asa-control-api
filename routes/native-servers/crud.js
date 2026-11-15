@@ -90,7 +90,10 @@ export default async function crudRoutes(fastify, options) {
         response: {
           200: {
             type: "object",
-            properties: { success: { type: "boolean" }, config: { type: "object" } },
+            properties: {
+              success: { type: "boolean" },
+              config: { type: "object", additionalProperties: true },
+            },
           },
         },
       },

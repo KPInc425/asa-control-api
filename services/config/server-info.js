@@ -24,18 +24,10 @@ export class ServerInfoModule {
         throw new Error(`Server ${serverName} not found in any location`);
       }
 
-      const serverPath =
-        serverInfo.type === "standalone"
-          ? join(this.serverRootPath, serverName)
-          : join(
-              this.serverRootPath,
-              "cluster",
-              serverInfo.clusterName,
-              serverName,
-            );
+      const configDirPath = serverInfo.path;
+      const serverPath = join(configDirPath, "..", "..", "..", "..");
 
       logger.info(`[getServerInfo] serverPath: ${serverPath}`);
-      const configDirPath = serverInfo.path;
       logger.info(`[getServerInfo] configDirPath: ${configDirPath}`);
 
       const { access } = await import("fs/promises");
