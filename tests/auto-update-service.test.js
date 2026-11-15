@@ -29,7 +29,7 @@ describe('AutoUpdateService decision flow', () => {
       players: ['One', 'Two']
     });
     const startWarningCountdown = vi
-      .spyOn(autoUpdateService, 'startWarningCountdown')
+      .spyOn(autoUpdateService.warning, 'startWarningCountdown')
       .mockResolvedValue({ success: true, firstWarning: 5 });
     const performUpdate = vi.spyOn(autoUpdateService, 'performUpdate');
 
@@ -78,7 +78,7 @@ describe('AutoUpdateService decision flow', () => {
       .spyOn(autoUpdateService, 'performUpdate')
       .mockResolvedValue({ success: true, jobId: 'job-2' });
 
-    await autoUpdateService.handleWarningPhaseRecheck('TestServer', { force: false }, new Date());
+    await autoUpdateService.warning.handleWarningPhaseRecheck('TestServer', { force: false }, new Date());
 
     expect(performUpdate).toHaveBeenCalledWith('TestServer', expect.objectContaining({
       startedEarlyBecauseEmpty: true,
@@ -86,17 +86,20 @@ describe('AutoUpdateService decision flow', () => {
     }));
   });
 
-  it('runs update-on-start without duplicating the update initiation', async () => {
+  it('uses the resolved game type for update-on-start provisioning', async () => {
     vi.spyOn(autoUpdateService, 'getConfig').mockReturnValue({
       enabled: true,
       updateOnStart: true,
       forceUpdate: false
     });
-    const checkStatus = vi.spyOn(autoUpdateService.serverProvisioner, 'checkServerUpdateStatus').mockResolvedValue({
+    vi.spyOn(autoUpdateService, '_gameTypeFor').mockResolvedValue('conan');
+    const checkStatus = vi.fn().mockResolvedValue({
       needsUpdate: true,
       reason: 'Steam build is newer',
       lastUpdate: null
     });
+    const provisioner = { checkServerUpdateStatus: checkStatus };
+    const getProvisioner = vi.spyOn(autoUpdateService, '_provisionerFor').mockReturnValue(provisioner);
     const initiateUpdate = vi.spyOn(autoUpdateService, 'initiateUpdate').mockResolvedValue({
       success: true,
       message: 'Update started'
@@ -105,6 +108,7 @@ describe('AutoUpdateService decision flow', () => {
 
     const result = await autoUpdateService.runUpdateOnStart('TestServer');
 
+    expect(getProvisioner).toHaveBeenCalledWith('conan');
     expect(checkStatus).toHaveBeenCalledWith('TestServer');
     expect(checkForUpdates).not.toHaveBeenCalled();
     expect(initiateUpdate).toHaveBeenCalledWith('TestServer', expect.objectContaining({
@@ -117,17 +121,44 @@ describe('AutoUpdateService decision flow', () => {
     }));
   });
 
-  it('persists autoRestart in server configuration', () => {
+  it('uses the resolved game type for RCON fallback discovery', async () => {
+    vi.spyOn(autoUpdateService, '_gameTypeFor').mockResolvedValue('conan');
+    const provisioner = {
+      listServers: vi.fn().mockResolvedValue([{
+        name: 'RconFallbackTestServer',
+        host: '127.0.0.1',
+        rconPort: 30203,
+        rconPassword: 'fixture-password'
+      }])
+    };
+    const getProvisioner = vi.spyOn(autoUpdateService, '_provisionerFor').mockReturnValue(provisioner);
+
+    const result = await autoUpdateService.getServerRconConfig('RconFallbackTestServer');
+
+    expect(getProvisioner).toHaveBeenCalledWith('conan');
+    expect(result).toEqual({ host: '127.0.0.1', port: 30203, password: 'fixture-password' });
+  });
+
+  it('persists auto-update configuration and returns its normalized state', () => {
     const setResult = autoUpdateService.setConfig('ConfigPersistenceServer', {
       enabled: true,
       autoRestart: false,
-      warningMinutes: [10, 5, 1]
+      warningMinutes: [10, 5, 1],
+      updateOnStart: false
     });
 
     const persisted = autoUpdateService.getConfig('ConfigPersistenceServer');
 
     expect(setResult.success).toBe(true);
+    expect(setResult.config).toEqual(expect.objectContaining({
+      enabled: true,
+      autoRestart: false,
+      warningMinutes: [10, 5, 1],
+      updateOnStart: false
+    }));
+    expect(persisted.enabled).toBe(true);
     expect(persisted.autoRestart).toBe(false);
     expect(persisted.warningMinutes).toEqual([10, 5, 1]);
+    expect(persisted.updateOnStart).toBe(false);
   });
 });

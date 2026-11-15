@@ -53,9 +53,8 @@ export class AutoUpdateChecker {
     try {
       updateLastCheckTime(serverName);
 
-      const provisioner = this.service._provisionerFor(
-        this.service._gameTypeFor(serverName),
-      );
+      const gameType = await this.service._gameTypeFor(serverName);
+      const provisioner = this.service._provisionerFor(gameType);
       const updateStatus = await provisioner.checkServerUpdateStatus(serverName);
 
       if (updateStatus.needsUpdate) {
@@ -126,9 +125,8 @@ export class AutoUpdateChecker {
       `[AutoUpdateService] Running update-on-start check for ${serverName}`,
     );
 
-    const provisioner = this.service._provisionerFor(
-      this.service._gameTypeFor(serverName),
-    );
+    const gameType = await this.service._gameTypeFor(serverName);
+    const provisioner = this.service._provisionerFor(gameType);
     const updateStatus = await provisioner.checkServerUpdateStatus(serverName);
     updateLastCheckTime(serverName);
 

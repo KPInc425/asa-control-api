@@ -77,15 +77,44 @@ export class AutoUpdateConfig {
    * @param {string} serverName
    * @param {Object} config
    */
-  setConfig(serverName, config) {
-    dbSetAutoUpdateConfig(serverName, config);
+  setConfig(serverName, config = {}) {
+    const dbConfig = {};
+    const setIfDefined = (dbKey, value) => {
+      if (value !== undefined) dbConfig[dbKey] = value;
+    };
 
-    if (this.service.scheduler.isRunning) {
+    const enabled =
+      config.autoUpdateEnabled !== undefined
+        ? config.autoUpdateEnabled
+        : config.enabled;
+    setIfDefined("auto_update_enabled", enabled);
+    setIfDefined("notify_rcon", config.notifyInGame ?? config.notifyRcon);
+    setIfDefined("notify_discord", config.notifyDiscord);
+    setIfDefined("notify_socket", config.notifySocket);
+    setIfDefined("warning_minutes", config.warningMinutes);
+    setIfDefined("notification_templates", config.notificationTemplates);
+    setIfDefined("auto_restart", config.autoRestart);
+    setIfDefined("auto_update_check_interval", config.checkIntervalMinutes);
+    setIfDefined("auto_update_if_empty", config.updateIfEmpty);
+    setIfDefined("update_on_start", config.updateOnStart);
+
+    const writeResult = dbSetAutoUpdateConfig(serverName, dbConfig);
+
+    if (
+      this.service.scheduler.isRunning &&
+      dbConfig.auto_update_enabled !== undefined
+    ) {
       this.service.scheduler.stopServerScheduler(serverName);
-      if (config.auto_update_enabled) {
+      if (dbConfig.auto_update_enabled) {
         this.service.scheduler.startServerScheduler(serverName);
       }
     }
+
+    return {
+      success: true,
+      config: this.getConfig(serverName),
+      changes: writeResult?.changes ?? 0,
+    };
   }
 
   /**

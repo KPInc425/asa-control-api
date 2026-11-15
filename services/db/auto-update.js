@@ -113,6 +113,11 @@ function setAutoUpdateConfig(serverName, config) {
     values.push(config.auto_update_if_empty ? 1 : 0);
   }
 
+  if (config.update_on_start !== undefined) {
+    updates.push("update_on_start = ?");
+    values.push(config.update_on_start ? 1 : 0);
+  }
+
   if (updates.length === 0) {
     return { changes: 0 };
   }
