@@ -75,9 +75,13 @@ export function buildArkUrl(cfg = {}) {
     parts.push(`CustomDynamicConfigUrl=${dynamicUrl}`);
   }
 
-  // Cluster id in the URL too: ASE clusters are configured this way and it costs
-  // nothing, while the flags below are what ASA actually honours.
-  if (cfg.clusterId) parts.push(`ClusterId=${cfg.clusterId}`);
+  // Cluster id is NOT put in the URL. ASA reads an option's value as everything
+  // from "key=" to the end of the URL string, so "?ClusterId=iLGaming?SessionName=..."
+  // produced a cluster mutex called "ASAClusterMutex_iLGaming?SessionName=...".
+  // That is a different identity from the anchor map's "ASAClusterMutex_iLGaming",
+  // so the map advertised but never joined the cluster and never showed up as a
+  // transfer destination. The "-clusterid=<id>" flag is what ASA honours; leave it
+  // as the only carrier.
 
   // SessionName goes last on purpose: it is the only value that can contain
   // spaces, so it must never sit in front of an option that matters.

@@ -33,7 +33,7 @@ test("nothing follows the admin password, so ASA cannot fold options into it", (
 test("session name, cluster and dynamic config survive the reorder", () => {
   const url = buildArkUrl(base);
   assert.ok(url.includes("SessionName=iLGaming-Ragnarok"));
-  assert.ok(url.includes("ClusterId=iLGaming"));
+  assert.equal(url.includes("ClusterId="), false);
   assert.ok(url.includes("CustomDynamicConfigUrl=http://ilgamingarksettings.servegame.com/"));
   assert.ok(url.includes("RCONPassword=admin123"));
   assert.ok(url.startsWith("Ragnarok_WP?listen?Port=30103"));

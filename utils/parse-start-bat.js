@@ -83,7 +83,15 @@ function parseArkStartBat(content, match) {
   const clusterDirMatch = trailingArgs.match(/-ClusterDirOverride=([^\s]+)/i);
   if (clusterDirMatch) {
     // Use single backslash for Windows paths
-    config.clusterDirOverride = clusterDirMatch[1].replace(/\\/g, '\\');
+    config.clusterDirOverride = clusterDirMatch[1].replace(/\\\\/g, '\\');
+  }
+
+  // Cluster id from the command-line flag. The URL no longer carries ?ClusterId=
+  // (that option made ASA compute a different cluster mutex name), so the flag is
+  // the only source; without this a disk-derived config would look standalone.
+  const clusterIdMatch = trailingArgs.match(/-clusterid[=\s]+([A-Za-z0-9_.-]+)/i);
+  if (clusterIdMatch) {
+    config.clusterId = clusterIdMatch[1];
   }
 
   return config;
