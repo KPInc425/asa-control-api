@@ -218,6 +218,16 @@ export class ServerDiscovery {
       );
 
       const foundNames = new Set(dbConfigs.map((cfg) => { try { return JSON.parse(cfg.config_data).name; } catch { return null; } }).filter(Boolean));
+      // Dedupe by install path as well as by name. A server whose session name was
+      // changed (for example to make it contain a space, which ASA needs) no longer
+      // matches its DB row by name, and would otherwise be listed twice: once from
+      // the DB and once as a disk-discovered fallback.
+      const normPath = (p) => (p ? String(p).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase() : "");
+      const foundPaths = new Set(
+        dbConfigs
+          .map((cfg) => { try { return normPath(JSON.parse(cfg.config_data).serverPath); } catch { return ""; } })
+          .filter(Boolean),
+      );
       const { parseStartBat } = await import("../../utils/parse-start-bat.js");
 
       if (this.manager.clustersPath && existsSync(this.manager.clustersPath)) {
@@ -239,9 +249,10 @@ export class ServerDiscovery {
                   logger.warn(`[NativeServerManager] start.bat at ${startBatPath} did not yield a server name; skipping`);
                   continue;
                 }
-                if (!foundNames.has(parsed.name)) {
+                if (!foundNames.has(parsed.name) && !foundPaths.has(normPath(serverPath))) {
                   servers.push({ name: parsed.name, ...parsed, status: "unknown", type: "native", config: parsed, isClusterServer: true, clusterName, serverPath, created: "", fallback: true });
                   foundNames.add(parsed.name);
+                  foundPaths.add(normPath(serverPath));
                 }
               } catch (e) { logger.warn(`[NativeServerManager] Failed to parse start.bat for fallback server in cluster ${clusterName}: ${e.message}`); }
             }
@@ -262,12 +273,13 @@ export class ServerDiscovery {
                 logger.warn(`[NativeServerManager] start.bat at ${startBatPath} did not yield a server name; skipping`);
                 continue;
               }
-              if (!foundNames.has(parsed.name)) {
+              if (!foundNames.has(parsed.name) && !foundPaths.has(normPath(serverPath))) {
                 let fallbackStatus = "unknown";
                 try { const statusObj = await this.manager.getServerStatus(parsed.name); fallbackStatus = statusObj.status; }
                 catch (e) { logger.warn(`Failed to get status for fallback server ${parsed.name}:`, e.message); }
                 servers.push({ name: parsed.name, ...parsed, status: fallbackStatus, type: "native", config: parsed, isClusterServer: false, clusterName: null, serverPath, created: "", fallback: true });
                 foundNames.add(parsed.name);
+                foundPaths.add(normPath(serverPath));
               }
             } catch (e) { logger.warn(`[NativeServerManager] Failed to parse start.bat for fallback standalone server: ${e.message}`); }
           }
