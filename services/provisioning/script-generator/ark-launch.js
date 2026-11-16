@@ -59,7 +59,6 @@ export function buildArkUrl(cfg = {}) {
   ];
 
   if (quoteIfSet(cfg.serverPassword)) parts.push(`ServerPassword=${cfg.serverPassword}`);
-  if (quoteIfSet(cfg.adminPassword)) parts.push(`ServerAdminPassword=${cfg.adminPassword}`);
   // ASA's RCON authenticates with the RCON password when supplied; keep it in
   // the URL so the API's RCON client can actually log in.
   if (quoteIfSet(cfg.rconPassword)) parts.push(`RCONPassword=${cfg.rconPassword}`);
@@ -83,6 +82,15 @@ export function buildArkUrl(cfg = {}) {
   // SessionName goes last on purpose: it is the only value that can contain
   // spaces, so it must never sit in front of an option that matters.
   parts.push(`SessionName=${cfg.sessionName || cfg.name || "ASA Server"}`);
+
+  // ServerAdminPassword MUST be the final URL option. ASA writes this value
+  // into GameUserSettings.ini by taking everything from the value to the end of
+  // the URL string, so any option placed after it is serialised into the admin
+  // password (the value ends up quoted and hundreds of characters long). The
+  // server then authenticates RCON against that corrupted string and every
+  // login fails with "Authentication failed". Putting it last makes the
+  // captured remainder exactly the password.
+  if (quoteIfSet(cfg.adminPassword)) parts.push(`ServerAdminPassword=${cfg.adminPassword}`);
 
   return parts.join("?");
 }
