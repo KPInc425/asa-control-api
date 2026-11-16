@@ -46,6 +46,18 @@ export class ServerLifecycle {
       const startBatPath = path.join(serverInfo.serverPath, "start.bat");
       if (!existsSync(startBatPath)) throw new Error(`Start.bat file not found: ${startBatPath}`);
 
+      // Dino Depot settings live in a per-install save game that the mod rewrites
+      // on shutdown, so it can only be refreshed while the map is down. This is
+      // that moment: the instance is stopped and nothing has spawned yet.
+      try {
+        const { syncDinoDepotSettingsForStart } = await import("../config/dino-depot-sync.js");
+        const sync = await syncDinoDepotSettingsForStart(name);
+        if (sync.synced) logger.info(`Dino Depot settings refreshed for ${name} before start`);
+        else logger.info(`Dino Depot settings not copied for ${name}: ${sync.reason}`);
+      } catch (syncError) {
+        logger.warn(`Dino Depot settings sync skipped for ${name}: ${syncError.message}`);
+      }
+
       logger.info(`Using start.bat file: ${startBatPath}`);
       logger.info(`Working directory: ${serverInfo.serverPath}`);
 
