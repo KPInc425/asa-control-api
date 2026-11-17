@@ -48,6 +48,88 @@ to be one of:
 - What `ShooterGameMode` offers around kill and death, for the journal half of the idea.
 - Whether a spawned decal or emitter persists across a save, or has to be re-created on demand.
 
+## Round two and three: the game already ships a creature tracking HUD (2026-11-16)
+
+This is the finding that turns the idea from "poll and draw our own UI" into "feed the game's own
+tracker". ASA has a full tracked-creature system with waypoint markers, and it is reachable from a
+blueprint.
+
+**`CustomTrackedActorInfo` is exposed to Python and is the payload.** Fields:
+
+`data_id1`, `data_id2`, `name`, `target_name`, `tribe_name`, `level`, `location`, `is_tamed`,
+`is_player`, `is_vehicle`, `is_female`, `use_gender`, `targeting_team`, `health_current`,
+`health_max`, `health_percent`, `torpidity_percent`, `hunger_current` / `_max` / `_percent`,
+`is_concious` (sic), `is_favorited`, `is_tracked_waypoint`, `is_valid_for_current_filter`,
+`poi_visible`, `hide_from_track_list_and_only_show_on_map`, `imprinter_name`, `dino_entry`,
+`dino_imprinting_quality`, `tamed_at_time`, `baby_age`, `baby_next_cuddle_time`,
+`time_until_next_named_age`, `last_tame_consumed_food_time`, `tame_affinity_percent`,
+`tame_effectiveness_percent`, `tame_effectiveness_lvl_modifier`.
+
+Health percent, torpidity and a conscious flag are all in there, so a hunter's HUD needs no custom
+struct of our own.
+
+**Build one from the creature itself.** On `PrimalDinoCharacter`:
+
+```
+set_f_custom_tracked_dino_info_members_by_dino_ref(isfavorited, is_tracked_waypoint,
+    is_valid_for_current_filter, by_player_targeting_team) -> CustomTrackedActorInfo
+```
+
+Call it on the wounded creature with `is_tracked_waypoint` true and it returns a filled entry for
+that player's team.
+
+**Push it to that player's HUD.** On `ShooterPlayerController`, 179 members match track, waypoint,
+map marker or ping. The ones that matter:
+
+| Member | Signature / role |
+| --- | --- |
+| `client_add_custom_actor_track_list_entries_creatures_force_poi_visible` | `(info_list, is_info_fresh)` pushes creature entries and forces the POI on screen |
+| `client_add_custom_actor_track_list_entries_creatures` | the same without forcing visibility |
+| `client_receive_custom_actor_track_list_creatures` | `(info_list, is_info_fresh)`, the receive side |
+| `client_update_custom_actor_track_list_entries_creatures` | refresh an existing entry |
+| `client_remove_custom_actor_track_list_entries_from_total_list_creatures` | drop one |
+| `clientside_set_active_waypoint_tracked_creature_via_character_index` | make one entry the active waypoint |
+| `clientside_toggle_poi_visibility_for_tracked_creature_waypoint` | toggle the marker |
+| `add_custom_actor_track_list_entries_combined` | `(info_list, is_info_fresh, is_player, force_poi_visible)` |
+| `bp_server_request_custom_tracked_actor_list` | `(custom_tame_selection_type, dino_group, custom_tame_search_text, new_scrollbar_index) -> bool` |
+
+Also present on the controller: `active_waypoints_creatures`, `actor_tracking_poi_alpha_on_screen`
+and the rest of the POI presentation settings.
+
+So the intended flow for the mod is: the server builds one entry from the wounded creature, and the
+controller's client function installs it as a live waypoint with a health bar the game already knows
+how to draw.
+
+**Kill events may already have a delegate.** `ShooterGameMode` exposes `on_killed` ("On Killed
+Delegate Signature"). If a blueprint can bind it, the hunting journal gets kill events for free
+instead of inferring deaths from a poll. Whether it is multicast and blueprint-assignable is the one
+thing to check in the editor; python cannot answer it because `MulticastDelegateProperty` is not
+exposed.
+
+## Revised shape of the mod
+
+1. A server-side manager ticks about once a second and reads health for creatures near players, using
+   the `GetDinoList_GAIR` plus octree overlap pattern KPTweaks already has.
+2. A health drop records a trail point: `data_id1` / `data_id2`, class, health percent, location, time,
+   hunting team.
+3. The hunter uses the tracker. The server fills a `CustomTrackedActorInfo` from the creature through
+   `set_f_custom_tracked_dino_info_members_by_dino_ref` and installs it on that player's controller,
+   which produces a native waypoint with a live health percent and no custom HUD code.
+4. Tracks are drawn with `spawn_decal_at_location` at each recorded point, purely as the visual.
+5. A kill, whether caught by `on_killed` or inferred from the poll, writes a journal entry to a
+   SaveGame slot and updates the trophy record.
+
+## Still unproven, and the two that decide the design
+
+- **Does a `client_*` controller function route from the server to the owning client in a blueprint?**
+  This is the whole HUD. Test in PIE: build an entry for a summoned creature and call the
+  force-poi-visible variant on the player controller from a test actor.
+- **Is `on_killed` bindable from a blueprint?** Check in the editor by dragging `Get Game Mode` and
+  looking for Bind Event to On Killed.
+- Whether `data_id1` / `data_id2` hold the same values after a save and reload.
+- Whether a spawned decal survives a save, or has to be redrawn on demand.
+- Whether `PrimalGameData` offers a global buff, which would give a real damage callback instead of a
+  poll. Least important now that the poll has a native consumer.
 ## Probe hygiene for the next run
 
 One class per MCP call. The run that killed the editor dumped six classes in a single call,
