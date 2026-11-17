@@ -49,6 +49,33 @@ Replication flags are set on the event node itself: select the custom event, Det
 Run on Server / Run on owning Client. A custom event without a flag runs locally on whoever fired it,
 which is the single most common reason this architecture appears broken.
 
+### How the buff reaches the save
+
+The save helpers live on `Actor_BP_KPTweaks`, not on the buff, and the singleton has **`bReplicates` =
+False** while the buff has **`bReplicates` = True**. That is why the network events belong on the buff:
+the singleton cannot answer a client, only the buff can.
+
+So the buff carries a reference to the singleton. Add **`Ref_Singleton`** (object reference, class
+`Actor_BP_KPTweaks`) and set it once, behind authority, in `Event BeginPlay`:
+
+```
+BeginPlay → Switch Has Authority (Authority)
+  → Get All Actors of Class (Actor_BP_KPTweaks) → Get (0) → Set Ref_Singleton
+```
+
+Once per buff, never per call: `Get All Actors of Class` walks the level. Then `SERV_RequestKitList` is:
+
+```
+SERV_RequestKitList (Run on Server)
+  → Is Valid (Ref_Singleton)
+  → Ref_Singleton → GetKPTSave → get Kits
+  → CLIENT_ReceivedKits(Kits)
+```
+
+`GetKPTSave` is called on `Ref_Singleton`, not on self. When the write path grows, the tidier shape is
+wrapper functions on the singleton (`Kits_Get`, `Kits_Add`, `Kits_Update`, `Kits_Save`) that the buff
+calls; the reference and the network events stay exactly as above.
+
 ### On `W_KitPanel`
 
 | Member | Kind | Job |
