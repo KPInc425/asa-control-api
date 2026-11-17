@@ -169,6 +169,29 @@ the panel wrote the save rather than a local copy.
 **Step 5: item picker**, its own session. Iterate `PrimalGameData.master_item_list`, filter by display
 name, and add the chosen class as an `S_KitItem`.
 
+## Audit of the buff as built, 2026-11-17
+
+Pulled from the live graph: 21 nodes, 18 connections. Structure correct, five gaps.
+
+1. **No `EnableInput`.** `BeginPlay` goes straight into `Switch Has Authority`, so the `F8` and
+   `Gamepad Special Left` nodes can never fire. Chain must be
+   `BeginPlay -> EnableInput (Player Controller = Get OwnerController) -> Switch Has Authority`.
+2. **`GetAllActorsOfClass` has an empty `Actor Class` pin.** It returns an empty array, `RefSingleton`
+   stays null, and the request stops at `Is Valid` with no error.
+3. **The chain stops at the third `Is Valid`.** Its `Is Valid` output goes nowhere, so the widget is
+   never told anything. It must call `Populate(Kits)` on `RefKitPanelWidget`, fed by the `Kits` pin on
+   the `RecievedKits` event.
+4. **Replication flags unverified.** `Server_RequestKitList` must be Run on Server and `RecievedKits`
+   Run on owning Client, set on the event nodes in Details. Unflagged events run locally.
+5. **`TogglePanel` removes the widget but does not null the reference**, so the panel opens once.
+
+`W_KitPanel` is still a blank `UserWidget`: no variables, no functions, no components. It needs
+`Ref_Buff` (Expose on Spawn), a Scroll Box containing `VB_Kits`, a close button, and `Populate`.
+
+Test in two passes: an empty panel that opens and closes on both inputs first, then a row reading
+`test`. A key press that does nothing is `EnableInput`; a panel that opens empty is the class pin, a
+replication flag, or the missing `Populate` call, in that order.
+
 ## Traps, all of them already paid for
 
 - `Is Valid` is not "is open". Null the reference when removing.
