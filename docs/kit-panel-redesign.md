@@ -68,6 +68,34 @@ From the ARK Modding Discord via Overseer, 2026-11-17:
 
 Panel size around 720x560, centred. Buttons bottom right, one row, equal height.
 
+### Container hierarchy, and why each layer exists
+
+```
+Canvas Panel                        root; child anchored 0.5/0.5, alignment 0.5/0.5
+└─ SizeBox  SB_PanelSize           Width 720, Height 560
+   └─ Overlay  OV_Frame
+      ├─ Image  IMG_Frame          main_card_frame, Draw As = Box, Margin 0.15, fill
+      ├─ Image  IMG_Glow           main_card_glow_outline, optional tint
+      └─ VerticalBox  VB_Content   Padding 24
+         ├─ Text  TXT_Title        "KITS", font GoBoldRegular30
+         ├─ ScrollBox  SB_KitList  Fill, Height ~380
+         │  └─ VerticalBox VB_Rows
+         └─ HorizontalBox HB_Footer  Justification = End
+            ├─ User Widget  UW_Add    class ASAUIWidget_Button_Style5
+            └─ User Widget  UW_Close  class ASAUIWidget_Button_Style5
+```
+
+- **Canvas Panel** positions by anchor rather than pixels, so the panel stays centred across resolutions
+  and UI scales. Use it as the root, not as a layout container.
+- **SizeBox** pins the panel to one size so the 9-slice frame keeps its proportions.
+- **Overlay** stacks the frame, the accent and the content in the same rect without nesting boxes.
+- **ScrollBox needs a bounded height.** Inside an Auto-sized VerticalBox it grows to fit its content and
+  then never scrolls, because it always believes everything is visible. Give it Fill under a constrained
+  parent, or wrap it in its own SizeBox.
+- One SizeBox per panel; nesting two makes them fight and shows up as a panel that will not resize.
+- Optional full-screen dim: a Border or Image at roughly 40% black as the Canvas's first child, with the
+  SizeBox above it.
+
 ## Row widget: `W_KitRow`
 
 Parent `PrimalUI`. Height about 48.
