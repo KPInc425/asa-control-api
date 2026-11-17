@@ -19,12 +19,32 @@ what frees the mouse.
 
 These are the ones `W_RaftOptions` already references, which is why it looks like it belongs in the game:
 
-| Asset | Use |
-| --- | --- |
-| `/Game/ASA/UI/Widgets/ASAUIWidget_Button_Style5` | every button in the panel |
-| `/Game/PrimalEarth/UI/UI_Final_Assets/main_card_frame` | the panel background, 9-slice |
-| `/Game/PrimalEarth/UI/UI_Final_Assets/main_card_glow_outline` | header accent, sparingly |
-| `/Game/PrimalEarth/UI/Fonts/GoBoldRegular30` | title text |
+All four were verified to exist with `does_asset_exist`, and their classes matter more than their names:
+
+| Asset | Class | How to place it |
+| --- | --- | --- |
+| `/Game/PrimalEarth/UI/UI_Final_Assets/main_card_frame` | **Texture2D** | add an **Image** widget, Brush → Texture, Draw As = **Box**, Margin ~0.15 for 9-slice. It is not in the widget palette because it is not a widget. |
+| `/Game/PrimalEarth/UI/UI_Final_Assets/main_card_glow_outline` | **Texture2D** | second Image on top, subtle tint |
+| `/Game/PrimalEarth/UI/UI_Final_Assets/general_popup_frame` | **Texture2D** | same trick, better fit for a popup panel |
+| `/Game/ASA/UI/Widgets/ASAUIWidget_Button_Style5` | **WidgetBlueprint** | add a **User Widget** to the hierarchy and set its Widget Class to this |
+| `/Game/PrimalEarth/UI/Fonts/GoBoldRegular30` | **Font** | assign on the Text block's Font property |
+
+`ASAUIWidget_Button_Style5` also exposes a **`Set Button Label`** function, so one placed button can carry
+a driven label instead of needing a widget per label.
+
+## What the community archive says about ARK UI
+
+From the ARK Modding Discord via Overseer, 2026-11-17:
+
+- **"All base widgets need `PrimalUI`"**, and a widget without it can crash the devkit. This matches the
+  measured finding that clicks never arrive on a plain `UserWidget`; treat `PrimalUI` as mandatory rather
+  than stylistic.
+- **The root element carries a `Capture Mouse Input` property in Details**, next to
+  `Set Ignore Move And Look`. That is the property-level route to taking the mouse, and it is the second
+  lever if the Construct/Destruct input-mode chain misbehaves.
+- Common structures for a custom UI in ASA: a fully custom panel, a panel merged into the vanilla UI, or
+  multi-use entries used as buttons the way the industrial grinder does. A separate buff-held panel is the
+  right one here because it is admin-only and should not be reachable by a survival player.
 
 ## Layout
 
