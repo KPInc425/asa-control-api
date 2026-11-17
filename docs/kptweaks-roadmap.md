@@ -98,6 +98,30 @@ not, but the marker buff is new).
 - [ ] Same timer and caps as the sweeper.
 - **Acceptance:** a trough stays fed from a nearby storage without manual input.
 
+## Kit data model: BP structs have no default value
+
+Verified in the editor 2026-11-16 while building `S_KitItem`. The struct member panel offers
+ToolTip, Editable, Save Game, and for numerics Value Range and Slider Range. **There is no Default
+Value row, and Value Range does not set one** — it clamps what the inspector lets you type and bounds
+the slider on a `Make Struct` node.
+
+Consequence: an element added to the `Kits` array arrives as `0` for integers, `0.0` for floats and a
+null soft reference, whatever you would like the default to be. So defaults are enforced in two
+places, and nowhere else:
+
+1. **The panel's add-a-row logic** writes the initial values explicitly (item quantity 1, quality
+   0.0, creature level 150, creature quantity 1). That is the default the admin can see and change.
+2. **The grant path clamps defensively**: `max(1, quantity)`, level 0 means "use the fallback level",
+   and rows with a null soft class are skipped rather than half-granted.
+
+For a default you can *edit*, put a variable of type `S_KitDefinition` on `Actor_BP_KPTweaks`
+(`KitTemplate`), fill it in Class Defaults, and have the panel copy it when creating a kit. Class
+Defaults do have a value editor even though the struct does not.
+
+Also caught in the same pass: `saddle_class` had been typed `Data List Entry`. It must be a **Soft
+Class Reference** with base class `PrimalItem`, or the saddle can never be stored and the grant path
+skips it silently.
+
 ## Phase 3: KPTweaks, the admin panels
 
 ### 3.1 Kit editor panel
