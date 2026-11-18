@@ -18,6 +18,16 @@ import {
 } from "./database.js";
 
 /**
+ * Servers with an update in flight, keyed by name and shared by every importer of this
+ * module. this.service.pendingUpdates is per service INSTANCE, and two instances exist in
+ * this process (the scheduler's and the one the route modules import). On 2026-11-17 two
+ * update jobs started for The Island 45 ms apart because neither saw the other's map: the
+ * first stopped the server, the second then found nothing running, decided it had not been
+ * running, and left the map down after the update.
+ */
+const inFlightUpdates = new Set();
+
+/**
  * Update execution pipeline for the Auto-Update Service.
  */
 export class AutoUpdateExecutor {
@@ -36,12 +46,13 @@ export class AutoUpdateExecutor {
   async performUpdate(serverName, options = {}) {
     logger.info(`[AutoUpdateService] Starting update for ${serverName}`);
 
-    if (this.service.pendingUpdates.has(serverName)) {
+    if (inFlightUpdates.has(serverName) || this.service.pendingUpdates.has(serverName)) {
       logger.warn(
         `[AutoUpdateService] Update already in progress for ${serverName}`,
       );
       return { success: false, message: "Update already in progress" };
     }
+    inFlightUpdates.add(serverName);
 
     this.service.cancelWarnings(serverName);
 
@@ -68,7 +79,8 @@ export class AutoUpdateExecutor {
             error,
           );
           this.service.pendingUpdates.delete(serverName);
-        });
+        })
+        .finally(() => inFlightUpdates.delete(serverName));
       return {
         success: true,
         background: true,
@@ -81,6 +93,7 @@ export class AutoUpdateExecutor {
       return await updatePromise;
     } finally {
       this.service.pendingUpdates.delete(serverName);
+      inFlightUpdates.delete(serverName);
     }
   }
 
@@ -272,7 +285,12 @@ export class AutoUpdateExecutor {
             {
               rconConfig,
               channels: {
-                rcon: config.notifyInGame,
+                // A modded map needs about two minutes to reach "advertising for join", so
+                // an in-game broadcast fired the moment the process appears lands on a
+                // server that cannot answer and is simply lost (it logged as a failure on
+                // every update). After a restart nobody is on the map yet anyway, so let
+                // Discord and the socket carry this one.
+                rcon: config.notifyInGame && !restartAfterUpdate,
                 discord: config.notifyDiscord,
                 socket: true,
               },

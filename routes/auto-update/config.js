@@ -77,33 +77,34 @@ export default async function configRoutes(fastify, options) {
         }
 
         const enabled = updates.autoUpdateEnabled !== undefined ? updates.autoUpdateEnabled : updates.enabled;
-        const configUpdate = {
-          enabled: enabled !== undefined ? enabled : undefined,
-          updateOnStart: updates.updateOnStart, checkIntervalMinutes: updates.checkIntervalMinutes,
-          cronExpression: updates.cronExpression, warningMinutes: updates.warningMinutes,
-          forceUpdate: updates.forceUpdate, updateIfEmpty: updates.updateIfEmpty,
-          notifyDiscord: updates.notifyDiscord,
-          notifyInGame: updates.notifyInGame !== undefined ? updates.notifyInGame : updates.notifyRcon,
-          autoRestart: updates.autoRestart,
-        };
-        Object.keys(configUpdate).forEach((key) => { if (configUpdate[key] === undefined) delete configUpdate[key]; });
 
-        const result = autoUpdateService.setConfig(serverName, configUpdate);
+        // The setter in services/db/auto-update.js speaks snake_case column names. This
+        // block used to hand it the camelCase API shape, so every key was ignored, nothing
+        // was written, and the handler then read .config off an undefined return: every
+        // save from the dashboard answered 500 while quietly changing nothing.
+        const configUpdate = {};
+        if (enabled !== undefined) configUpdate.auto_update_enabled = enabled;
+        if (updates.updateOnStart !== undefined) configUpdate.update_on_start = updates.updateOnStart;
+        if (updates.checkIntervalMinutes !== undefined) configUpdate.auto_update_check_interval = updates.checkIntervalMinutes;
+        if (updates.warningMinutes !== undefined) configUpdate.warning_minutes = updates.warningMinutes;
+        if (updates.updateIfEmpty !== undefined) configUpdate.auto_update_if_empty = updates.updateIfEmpty;
+        if (updates.notifyDiscord !== undefined) configUpdate.notify_discord = updates.notifyDiscord;
+        if (updates.notifySocket !== undefined) configUpdate.notify_socket = updates.notifySocket;
+        if (updates.notificationTemplates !== undefined) configUpdate.notification_templates = updates.notificationTemplates;
+        const notifyInGame = updates.notifyInGame !== undefined ? updates.notifyInGame : updates.notifyRcon;
+        if (notifyInGame !== undefined) configUpdate.notify_rcon = notifyInGame;
+        if (updates.autoRestart !== undefined) configUpdate.auto_restart = updates.autoRestart;
 
-        if (updates.notifyRcon !== undefined || updates.notifySocket !== undefined || updates.notificationTemplates) {
-          try {
-            const { upsertServerUpdateConfig } = await import("../../services/database.js");
-            const dbUpdate = { serverName };
-            if (updates.notifyRcon !== undefined) dbUpdate.notifyRcon = updates.notifyRcon;
-            if (updates.notifySocket !== undefined) dbUpdate.notifySocket = updates.notifySocket;
-            if (updates.notificationTemplates) dbUpdate.notificationTemplates = JSON.stringify(updates.notificationTemplates);
-          } catch (dbError) {
-            logger.warn(`[AutoUpdateRoutes] Failed to update notification settings in DB:`, dbError.message);
-          }
+        if (Object.keys(configUpdate).length) {
+          autoUpdateService.setConfig(serverName, configUpdate);
         }
 
         logger.info(`[AutoUpdateRoutes] Config updated for ${serverName}`);
-        return { success: true, message: "Auto-update configuration updated successfully", config: result.config };
+        return {
+          success: true,
+          message: "Auto-update configuration updated successfully",
+          config: autoUpdateService.getConfig(serverName),
+        };
       } catch (error) {
         logger.error(`Error updating auto-update config for ${request.params.serverName}:`, error);
         return reply.status(500).send({ success: false, message: "Failed to update auto-update configuration", error: error.message });

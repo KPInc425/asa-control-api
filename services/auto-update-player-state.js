@@ -30,19 +30,30 @@ export class AutoUpdatePlayerState {
    * @param {string} serverName
    */
   async getPlayerConnectionState(serverName) {
+    // A stopped server has no players by definition, and RCON will always refuse on it.
+    // Deciding that first keeps the fail-closed rule below from blocking updates for every
+    // map that is asleep, which is most of them on this cluster.
+    const running = await this.service
+      .isServerRunning(serverName)
+      .catch(() => true);
+
+    if (!running) {
+      logger.info(
+        `[AutoUpdateService] ${serverName}: not running, treating as empty`,
+      );
+      return {
+        hasPlayers: false,
+        count: 0,
+        players: [],
+        checkedAt: new Date().toISOString(),
+        source: "not-running",
+      };
+    }
+
     try {
       const serverConfig = await this.service.getServerRconConfig(serverName);
       if (!serverConfig) {
-        logger.warn(
-          `[AutoUpdateService] No RCON config found for ${serverName}`,
-        );
-        return {
-          hasPlayers: false,
-          count: 0,
-          players: [],
-          checkedAt: new Date().toISOString(),
-          source: "missing-rcon",
-        };
+        throw new Error("no RCON config for a running server");
       }
 
       const rconService = (await import("./rcon.js")).default;
@@ -63,18 +74,17 @@ export class AutoUpdatePlayerState {
         source: "rcon",
       };
     } catch (error) {
+      // Fail CLOSED. This used to return hasPlayers:false, so a broken or unconfigured
+      // RCON read as "empty", and an update would stop a populated server without ever
+      // delivering a warning (warnings go over the same dead RCON). Throwing aborts this
+      // check cycle instead; the next hourly run tries again.
       logger.warn(
-        `[AutoUpdateService] Failed to check players for ${serverName}:`,
+        `[AutoUpdateService] Cannot verify players on ${serverName}, skipping this update:`,
         error.message,
       );
-      return {
-        hasPlayers: false,
-        count: 0,
-        players: [],
-        checkedAt: new Date().toISOString(),
-        source: "error",
-        error: error.message,
-      };
+      throw new Error(
+        `Cannot verify players on ${serverName}, skipping update: ${error.message}`,
+      );
     }
   }
 
