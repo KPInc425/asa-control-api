@@ -11,6 +11,28 @@ import logger from "./utils/logger.js";
 import { metricsHandler } from "./metrics/index.js";
 import { metricsMiddleware } from "./middleware/metrics.js";
 
+// This process supervises live game servers, so its death is not a private matter: nssm
+// restarts the service, and until servers were detached a restart took every map in the
+// process tree with it. On 2026-11-18 an unhandled rejection from a failed steamcmd step
+// killed node and dropped The Island. A rejection nobody awaited is a bug to fix, not a
+// reason to take the cluster offline, so log it and keep serving.
+process.on("unhandledRejection", (reason) => {
+  logger.error(
+    `Unhandled promise rejection (kept alive): ${reason instanceof Error ? reason.message : String(reason)}`,
+    { stack: reason instanceof Error ? reason.stack : undefined },
+  );
+});
+
+// An uncaught exception can leave in-memory state inconsistent, so this one still exits.
+// That is safe now only because game servers are launched via Win32_Process.Create and are
+// no longer children of this process: nssm restarts the API and the maps keep running.
+process.on("uncaughtException", (error) => {
+  logger.error(`Uncaught exception, exiting for a clean restart: ${error.message}`, {
+    stack: error.stack,
+  });
+  process.exit(1);
+});
+
 // Import routes
 import containerRoutes from "./routes/containers.js";
 import rconRoutes from "./routes/rcon.js";

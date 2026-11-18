@@ -62,11 +62,7 @@ export class ServerLifecycle {
       logger.info(`Using start.bat file: ${startBatPath}`);
       logger.info(`Working directory: ${serverInfo.serverPath}`);
 
-      const childProcess = spawn("cmd", ["/c", "start.bat"], {
-        cwd: serverInfo.serverPath, detached: false, stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      logger.info(`Process spawned with PID: ${childProcess.pid}`);
+      const launched = await this.launchDetached(serverInfo.serverPath, name);
 
       try {
         const { allowArkServerPorts } = await import("../../utils/firewall.js");
@@ -79,65 +75,79 @@ export class ServerLifecycle {
       if (!this.manager.processes) this.manager.processes = new Map();
 
       const processInfo = {
-        process: childProcess, startTime: new Date(), command: "cmd /c start.bat",
+        process: null, pid: launched.pid, startTime: new Date(),
+        command: "cmd /c start.bat (detached via Win32_Process.Create)",
         name, serverInfo, startupOutput: "", startupErrors: "", status: "starting",
+        detached: true,
       };
       this.manager.processes.set(name, processInfo);
 
-      childProcess.stdout.on("data", (data) => {
-        const output = data.toString();
-        processInfo.startupOutput += output;
-        logger.info(`[${name}] STDOUT: ${output.trim()}`);
-      });
-
-      childProcess.stderr.on("data", (data) => {
-        const error = data.toString();
-        processInfo.startupErrors += error;
-        logger.error(`[${name}] STDERR: ${error.trim()}`);
-      });
-
-      childProcess.on("error", (error) => {
-        logger.error(`[${name}] Process error event:`, error.message);
-        processInfo.status = "error";
-        processInfo.error = error.message;
-        processInfo.errorTime = new Date();
-      });
-
-      childProcess.on("exit", (code, signal) => {
-        logger.info(`[${name}] Process exit event - Code: ${code}, Signal: ${signal}`);
-        processInfo.status = "exited";
-        processInfo.exitCode = code;
-        processInfo.exitSignal = signal;
-        processInfo.exitTime = new Date();
-      });
-
-      childProcess.on("close", (code, signal) => {
-        logger.info(`[${name}] Process close event - Code: ${code}, Signal: ${signal}`);
-        processInfo.status = "closed";
-        processInfo.closeCode = code;
-        processInfo.closeSignal = signal;
-        processInfo.closeTime = new Date();
-      });
-
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      const startupResult = await this.monitorStartup(name, childProcess, serverInfo, processInfo);
+      const startupResult = await this.monitorStartup(name, null, serverInfo, processInfo);
       if (!startupResult.success) {
         this.manager.processes.delete(name);
         throw new Error(startupResult.message);
       }
 
-      this.setupCrashDetection(name, childProcess);
-
-      logger.info(`Server ${name} started successfully with PID: ${childProcess.pid}`);
+      // No process handle to watch: the server is not our child any more, so crash
+      // detection runs off the shared process scan instead (see status/isRunning).
+      logger.info(`Server ${name} started detached with launcher PID: ${launched.pid}`);
       return {
         success: true, message: `Server ${name} started successfully`,
-        pid: childProcess.pid, startupTime: Date.now() - processInfo.startTime.getTime(),
+        pid: launched.pid, startupTime: Date.now() - processInfo.startTime.getTime(),
       };
     } catch (error) {
       logger.error(`Failed to start server ${name}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Start the server OUTSIDE this process tree.
+   *
+   * It used to be `spawn("cmd", ["/c", "start.bat"])`, which made the game server a
+   * descendant of the API process. nssm terminates the service's process tree, so every
+   * API restart, crash or code deploy took the live server down with it. That is how the
+   * cluster kept dropping on 2026-11-18: an unhandled rejection killed node, nssm started a
+   * new node, and the old tree's game server died with it.
+   *
+   * Win32_Process.Create hands the process to WMI's host instead, so it survives the API.
+   * The API then ADOPTS it: status and stop already fall back to the shared process scan
+   * when they hold no handle, which is the same path used after any API restart. That is
+   * the disconnect/reconnect behaviour: the server keeps running, and the API re-attaches
+   * the next time it looks.
+   *
+   * Cost of detaching: the API no longer captures the launcher's stdout/stderr. The game
+   * writes its own ShooterGame.log, and the dashboard's log stream reads that.
+   *
+   * @returns {Promise<{pid: number}>} PID of the detached launcher
+   */
+  async launchDetached(serverPath, name) {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    const quotedDir = String(serverPath).replace(/'/g, "''");
+    const script = [
+      "$ErrorActionPreference='Stop'",
+      `$r = ([wmiclass]'Win32_Process').Create('cmd.exe /c start.bat', '${quotedDir}', $null)`,
+      "if ($r.ReturnValue -ne 0) { Write-Error ('Win32_Process.Create failed, ReturnValue ' + $r.ReturnValue); exit 1 }",
+      "$r.ProcessId",
+    ].join("; ");
+
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 30000, windowsHide: true },
+    );
+
+    const pid = Number.parseInt(String(stdout).trim(), 10);
+    if (!Number.isFinite(pid) || pid <= 0) {
+      throw new Error(`Detached launch of ${name} returned no PID (output: ${String(stdout).trim()})`);
+    }
+    logger.info(`[${name}] Launched detached from the API, launcher PID ${pid}`);
+    return { pid };
   }
 
   async monitorStartup(name, childProcess, serverInfo, processInfo) {
@@ -146,7 +156,7 @@ export class ServerLifecycle {
     const startTime = Date.now();
 
     while (Date.now() - startTime < maxStartupTime) {
-      if (childProcess.killed) {
+      if (childProcess && childProcess.killed) {
         let isServerRunning = false;
         for (let retry = 0; retry < 5; retry++) {
           isServerRunning = await this.manager.isRunning(name);
