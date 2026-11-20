@@ -1,0 +1,31 @@
+# Dependabot version updates.
+#
+# Free on private repos: Dependabot jobs run on GitHub Actions but do NOT count
+# against included Actions minutes, and they run even though this repo's CI
+# triggers are workflow_dispatch-only. CI staying manual is unaffected.
+#
+# IMPORTANT: these PRs get NO checks from our CI, because CI never runs on push.
+# Run the repo's local gate (npm run verify / npm run check + build + tests)
+# before merging any Dependabot PR.
+#
+# Minor and patch bumps are grouped into one PR per week to keep the noise down;
+# majors arrive individually because each one needs a breaking-change read.
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
