@@ -661,6 +661,51 @@ it needs a devkit probe: whether the drop data is reachable on the character cla
 a separate cache object. Note also that Megalodons may already drop prime fish; worth
 confirming in game before building anything.
 
+## The structure template system is callable, and it changes the hammer plan (2026-11-19)
+
+Reflection against the live `PrimalStructureTemplate` class (986 members) shows the template subsystem is
+almost entirely blueprint-callable. The earlier conclusion that the hammer is "99.99% mystery C++" was
+wrong about what a blueprint can reach: the hammer is a thin front end over these calls.
+
+Capture: `static_create_interim_template(template_class, starting_structure, single_only,
+include_furniture)`, `add_to_interim_template(target_structure, include_furniture, is_extent)`,
+`can_template_structure`, `get_linked_structures_for_template`, `save_interim_template(name, author,
+description)`.
+
+Storage: `save_template`, `load_template(file_path)`, `get_template_files`, `does_template_exist`,
+`delete_template_file`, `export_template_to_string` / `import_template_from_string`,
+`compress_template` / `decompress_template`.
+
+Cost: `get_template_contents(template_info) -> Array[SortedTemplateContentsEntry]` where each entry carries
+`structure_name`, `item_class`, `structure_count`, `built_count`. Plus
+`bp_check_item_requiements_to_build` and `get_template_progress`.
+
+Building: `try_build_batch(pc, batch_entries)`, `try_build_entry(pc, build_batch, do_multicast_update)`,
+`get_auto_build_batch(pc, apply_paint, apply_variant)`, `can_build_template_entry(...)`,
+`can_start_auto_building(pc)`, and `multicast_template_build_update(indices_built)`, which is the
+pieces-fly-in animation.
+
+Item: `create_saved_template_item(pc) -> PrimalItem`, so a saved template can be carried.
+
+**Two consequences for the wishlist.** Build speed is adjustable after all: `auto_build_batch_size` (5) and
+`auto_build_batch_delay` (2.0) are instance properties, beside `setting_auto_build_all`,
+`setting_auto_build_apply_variant` and `setting_auto_build_use_paint`. And the materials requirement is
+native enforcement through `try_build_batch`, which is exactly the behaviour worth keeping, since it is
+what makes the feature legal for survival players.
+
+**What this opens.** A trib-owned "structure saver" feature: pick a saved template, show the material bill
+from `get_template_contents`, auto-build it in batches with the native animation, and let the vanilla path
+charge the cost. That is the ASE StructureSaver experience rebuilt on native accounting instead of
+reimplementing the economics.
+
+**Unproven, three PIE tests:** can a mod create and own a template actor outside the hammer flow; does the
+sequence survive on a dedicated server; does `try_build_batch` consume from the player's inventory.
+
+**For our own custom pieces**, `PrimalStructure` exposes `template_misc_data_requested() -> str`,
+`template_misc_data_applied(misc_data)`, `get_template_mesh_overrides(misc_data, override_type)`, and
+`placed_by_template`. So a custom wall can carry a tier tag or variant id through a template in its misc
+data and return mesh overrides for it, instead of collapsing to a generic piece.
+
 ## Next devkit session: take stock before building
 
 State as of 2026-11-10, so the next session starts oriented rather than re-deriving it:
