@@ -1,0 +1,7 @@
+chore(gitignore): ignore the sqlite snapshot files the deploy leaves behind
+
+The box keeps backups named asa-data.sqlite.bak-<date> and asa-data.sqlite.pre-<change>-<stamp>.
+Neither matches /data/*.sqlite nor /data/*.bak, so a live server sits permanently "dirty" with
+untracked database copies - which is one careless `git add -A` away from committing client data.
+
+Seen on OLDRIG today: six such files, all untracked.

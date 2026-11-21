@@ -1,6 +1,7 @@
 # Ignore SQLite database and data directory
 /data/asa-data.sqlite
 /data/*.sqlite
+/data/*.sqlite.*
 /data/*.db
 /data/*.bak
 
