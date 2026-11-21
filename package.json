@@ -28,7 +28,7 @@
     "@fastify/multipart": "^8.3.1",
     "@fastify/rate-limit": "^8.0.0",
     "@fastify/websocket": "^8.3.1",
-    "archiver": "^7.0.1",
+    "archiver": "^8.0.0",
     "asa-query": "^0.1.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.2.0",
