@@ -2,3 +2,8 @@
 /.yarn/releases/*    binary
 /.yarn/plugins/**/*  binary
 /.pnp.*              binary linguist-generated
+
+# Shell scripts must stay LF: a CRLF checkout makes the container's entrypoint fail with
+# "exec /usr/local/bin/docker-entrypoint.sh: not found" and the app never starts.
+*.sh                 text eol=lf
+docker-entrypoint.sh text eol=lf
